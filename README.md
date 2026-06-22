@@ -207,6 +207,56 @@ in-service daily at `DIGEST_HOUR`, or on demand:
 node src/index.ts --digest 24    # or: npm run digest
 ```
 
+## 💬 Conversational analyst (dashboard "Ask", `POST /api/ask`)
+
+Ask plain-English questions and Claude answers by **querying your real telemetry**
+— it has read-only tools over collected flows, IDS/IPS alerts (Mongo), the DNS
+log, IP reputation/feeds, host risk, and the blocklist. Examples: *"Who attacked
+me most this week and are they dangerous?"*, *"Has any internal host talked to a
+VPS abroad?"*, *"Show DNS lookups containing telemetry."* Needs no extra config —
+uses your existing Claude auth. (A Discord bot can call the same endpoint.)
+
+## 🍯 Deception / honeypots (`HONEYPOT_ENABLED`)
+
+Opens decoy services on ports nothing legitimate should touch. **Any** connection
+is a near-zero-false-positive alert — an external attacker, or (highest value) a
+**compromised internal host scanning your LAN**. Internal hits are flagged as
+likely compromise; external hits can optionally auto-block (`HONEYPOT_AUTOBLOCK`).
+Ports already in use are skipped automatically.
+
+## 📈 Behavioral baselining (`ANOMALY_ENABLED`)
+
+Learns each internal host's normal outbound behavior, then flags **deviations**
+signatures/feeds can't see: a **new outbound port**, an **outbound volume spike**,
+or a **fan-out spike** (sudden scanning). Catches novel malware, exfil, and worm
+behavior. Needs `ANOMALY_MIN_LEARN_HOURS` to learn first; anomalies appear on the
+🖥️ Hosts page and (optionally) Discord.
+
+## Threat-intel feeds (`INTEL_FEEDS_ENABLED`, `--feeds`)
+
+Fetches public IP blocklists (abuse.ch Feodo/SSLBL, blocklist.de, FireHOL level1,
+Spamhaus DROP), loads them into a `SECTOOL_FEED` ipset so known-bad IPs are
+**dropped before they ever probe you**, and cross-references every enrichment
+("on threat feeds: FireHOL level1"). A **highlighted changelog embed** is posted
+to Discord every 24h with per-feed counts and deltas. Run on demand: `--feeds`.
+
+## Autonomous response (`AUTORESPOND_*`)
+
+Optionally auto-blocks IPs when an alert **escalates** (damning VT/AbuseIPDB/feed
+verdict) or a source becomes a **repeat offender** (`AUTORESPOND_REPEAT_THRESHOLD`
+hits in a window). Guarded by `AUTORESPOND_DAILY_CAP` and the block allowlist.
+**Start with `AUTORESPOND_DRY_RUN=true`** — it logs "would block …" without acting,
+so you can watch its decisions before letting it pull the trigger. The Blocked
+page shows per-IP **dropped packet/byte counters** (block effectiveness).
+
+## Internal host risk (Hosts page)
+
+Flips the lens inward: ranks your internal devices by signs of compromise from
+collected flows — **outbound to known-bad** (feed-listed) IPs, **beaconing**
+(regular fixed-interval C2-style connections), and **fan-out** (talking to an
+unusual number of externals). Open it from the **🖥️ Hosts** button. Forward-only
+and 1:512-sampled, so bad-outbound is the highest-confidence signal.
+
 ## IP enrichment & per-IP activity (investigation panel)
 
 - **🌍 Enrich IP** — looks up the alert's external IP against **ip-api.com**

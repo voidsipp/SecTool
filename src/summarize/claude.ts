@@ -22,10 +22,25 @@ const MAX_RETRIES = 3;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+interface ContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
 interface MessagesResponse {
-  content?: Array<{ type: string; text?: string }>;
+  content?: ContentBlock[];
+  stop_reason?: string;
   error?: { message?: string };
 }
+
+export interface AnalystTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+export type ToolExecutor = (name: string, input: Record<string, unknown>) => Promise<string>;
 
 export class Summarizer {
   readonly #cfg: Config;
@@ -108,6 +123,18 @@ export class Summarizer {
   }
 
   async #post(body: string): Promise<string> {
+    const data = await this.#request(body);
+    const text = (data.content ?? [])
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    if (!text) throw new Error("Claude returned an empty response.");
+    return text;
+  }
+
+  /** POST a Messages request with auth + retry, returning the parsed response. */
+  async #request(body: string): Promise<MessagesResponse> {
     let lastErr: Error | undefined;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       const forceRefresh = attempt > 0 && this.#useOauth;
@@ -119,25 +146,13 @@ export class Summarizer {
         lastErr = err;
         return undefined;
       });
-
       if (!res) {
         await sleep(500 * 2 ** attempt);
         continue;
       }
-
-      if (res.ok) {
-        const data = (await res.json()) as MessagesResponse;
-        const text = (data.content ?? [])
-          .filter((b) => b.type === "text" && b.text)
-          .map((b) => b.text)
-          .join("")
-          .trim();
-        if (!text) throw new Error("Claude returned an empty response.");
-        return text;
-      }
+      if (res.ok) return (await res.json()) as MessagesResponse;
 
       const bodyText = await res.text().catch(() => "");
-      // 401 once -> force token refresh and retry. Otherwise back off on 429/5xx.
       if (res.status === 401 && this.#useOauth && attempt === 0) {
         lastErr = new Error(`401 unauthorized: ${bodyText.slice(0, 200)}`);
         continue;
@@ -151,6 +166,50 @@ export class Summarizer {
       throw new Error(`Claude API error ${res.status}: ${bodyText.slice(0, 300)}`);
     }
     throw lastErr ?? new Error("Claude request failed after retries.");
+  }
+
+  /**
+   * Agentic tool-use loop: Claude answers `userText` by calling the provided
+   * tools (executed by `exec`) until it produces a final text answer.
+   */
+  async toolLoop(
+    systemText: string,
+    userText: string,
+    tools: AnalystTool[],
+    exec: ToolExecutor,
+    opts: { maxTokens?: number; maxRounds?: number } = {},
+  ): Promise<{ answer: string; toolsUsed: string[] }> {
+    const system = this.#useOauth
+      ? [{ type: "text", text: CLAUDE_CODE_IDENTITY }, { type: "text", text: systemText }]
+      : [{ type: "text", text: systemText }];
+    const messages: Array<{ role: string; content: unknown }> = [{ role: "user", content: userText }];
+    const toolsUsed: string[] = [];
+
+    for (let round = 0; round < (opts.maxRounds ?? 6); round++) {
+      const data = await this.#request(
+        JSON.stringify({ model: this.#cfg.claude.model, max_tokens: opts.maxTokens ?? 1500, system, tools, messages }),
+      );
+      const content = data.content ?? [];
+      messages.push({ role: "assistant", content });
+      const toolUses = content.filter((b) => b.type === "tool_use");
+      if (data.stop_reason !== "tool_use" || toolUses.length === 0) {
+        const answer = content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+        return { answer: answer || "(no answer produced)", toolsUsed };
+      }
+      const results = [];
+      for (const tu of toolUses) {
+        toolsUsed.push(tu.name ?? "?");
+        let out: string;
+        try {
+          out = await exec(tu.name ?? "", tu.input ?? {});
+        } catch (err) {
+          out = `Error: ${(err as Error).message}`;
+        }
+        results.push({ type: "tool_result", tool_use_id: tu.id, content: out.slice(0, 12000) });
+      }
+      messages.push({ role: "user", content: results });
+    }
+    return { answer: "(reached the tool-use limit without a final answer)", toolsUsed };
   }
 
   /** Run the model and return a structured summary, or a fallback on failure. */

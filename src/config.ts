@@ -97,6 +97,33 @@ export interface Config {
     hour: number;
     periodHours: number;
   };
+  intel: {
+    enabled: boolean;
+    block: boolean;
+    refreshHours: number;
+  };
+  autoRespond: {
+    blockOnEscalation: boolean;
+    repeatThreshold: number;
+    repeatWindowHours: number;
+    dailyCap: number;
+    dryRun: boolean;
+    reactiveInbound: boolean;
+    reactiveIntervalSec: number;
+  };
+  honeypot: {
+    enabled: boolean;
+    host: string;
+    ports: number[];
+    autoBlock: boolean;
+  };
+  anomaly: {
+    enabled: boolean;
+    minLearnHours: number;
+    intervalSec: number;
+    volumeSpikeFactor: number;
+    alertDiscord: boolean;
+  };
 }
 
 class ConfigError extends Error {}
@@ -246,6 +273,36 @@ export function loadConfig(): Config {
       enabled: bool("DIGEST_ENABLED", false),
       hour: int("DIGEST_HOUR", 8),
       periodHours: int("DIGEST_PERIOD_HOURS", 24),
+    },
+    intel: {
+      enabled: bool("INTEL_FEEDS_ENABLED", false),
+      block: bool("INTEL_BLOCK", true),
+      refreshHours: int("INTEL_REFRESH_HOURS", 24),
+    },
+    autoRespond: {
+      blockOnEscalation: bool("AUTORESPOND_BLOCK_ON_ESCALATION", false),
+      repeatThreshold: int("AUTORESPOND_REPEAT_THRESHOLD", 0),
+      repeatWindowHours: int("AUTORESPOND_REPEAT_WINDOW_HOURS", 24),
+      dailyCap: int("AUTORESPOND_DAILY_CAP", 50),
+      dryRun: bool("AUTORESPOND_DRY_RUN", false),
+      reactiveInbound: bool("REACTIVE_INBOUND_BLOCK", false),
+      reactiveIntervalSec: int("REACTIVE_INBOUND_INTERVAL_SEC", 120),
+    },
+    honeypot: {
+      enabled: bool("HONEYPOT_ENABLED", false),
+      host: str("HONEYPOT_HOST", "0.0.0.0"),
+      ports: (optStr("HONEYPOT_PORTS") ?? "23,2323,21,2222,3389,5900,1433,8081")
+        .split(",")
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0 && n < 65536),
+      autoBlock: bool("HONEYPOT_AUTOBLOCK", false),
+    },
+    anomaly: {
+      enabled: bool("ANOMALY_ENABLED", false),
+      minLearnHours: int("ANOMALY_MIN_LEARN_HOURS", 24),
+      intervalSec: int("ANOMALY_INTERVAL_SEC", 300),
+      volumeSpikeFactor: int("ANOMALY_VOLUME_SPIKE_FACTOR", 8),
+      alertDiscord: bool("ANOMALY_ALERT_DISCORD", true),
     },
   };
 }

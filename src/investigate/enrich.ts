@@ -11,6 +11,7 @@
 import { isIP } from "node:net";
 import type { Config } from "../config.ts";
 import type { Severity } from "../types.ts";
+import { feedMatch } from "../intel/feedAccess.ts";
 
 const cache = new Map<string, { data: Enrichment; expires: number }>();
 const TTL_MS = 6 * 3_600_000;
@@ -50,6 +51,7 @@ export interface Enrichment {
     domain?: string;
     isp?: string;
   };
+  feeds: string[];
   errors: string[];
   cachedAt: number;
 }
@@ -87,7 +89,7 @@ export async function enrichIp(cfg: Config, ip: string): Promise<Enrichment> {
   const hit = cache.get(ip);
   if (hit && hit.expires > Date.now()) return hit.data;
 
-  const result: Enrichment = { ip, isPrivate: isPrivateIp(ip), errors: [], cachedAt: Date.now() };
+  const result: Enrichment = { ip, isPrivate: isPrivateIp(ip), feeds: feedMatch(ip), errors: [], cachedAt: Date.now() };
   if (result.isPrivate) {
     result.errors.push("Private/internal IP — external reputation lookups skipped.");
     cache.set(ip, { data: result, expires: Date.now() + TTL_MS });
@@ -210,6 +212,7 @@ export function escalate(
   const reasons: string[] = [];
   if (e.virustotal && vtBad >= cfg.enrich.escalateVtMalicious) reasons.push(`VT ${e.virustotal.malicious} malicious`);
   if (abuse >= cfg.enrich.escalateAbuseScore) reasons.push(`AbuseIPDB ${abuse}%`);
+  if (e.feeds.length) reasons.push(`on ${e.feeds.length} threat feed(s)`);
   if (reasons.length && severity !== "critical") {
     return { severity: "critical", escalated: true, reason: reasons.join(", ") };
   }

@@ -21,8 +21,12 @@ import { startWebServer } from "./web/server.ts";
 import { startFlowCollector } from "./netflow/collector.ts";
 import { setActiveFlowStore } from "./netflow/flowAccess.ts";
 import { startBlocker } from "./respond/blocker.ts";
+import { startReactiveBlocker } from "./respond/reactiveBlock.ts";
+import { startHoneypot } from "./deception/honeypot.ts";
+import { startBaselineMonitor } from "./anomaly/baseline.ts";
 import { runDigest } from "./digest/digest.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
+import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATS_INTERVAL_MS = 5 * 60_000;
@@ -104,6 +108,25 @@ async function runService(): Promise<void> {
   // Scheduled threat digest.
   if (cfg.digest.enabled) startDigestScheduler(cfg);
 
+  // Threat-intel feeds (cross-reference + optional proactive blocking + changelog).
+  if (cfg.intel.enabled) startFeedScheduler(cfg);
+
+  // Reactive inbound blocking: block feed-listed IPs only when they initiate
+  // inbound traffic (safe — never blocks destinations you reach out to).
+  if (cfg.autoRespond.reactiveInbound) startReactiveBlocker(cfg);
+
+  // Deception: decoy services that yield zero-false-positive compromise signals.
+  if (cfg.honeypot.enabled) {
+    try {
+      await startHoneypot(cfg);
+    } catch (err) {
+      log.error(`Honeypot failed to start: ${(err as Error).message}`);
+    }
+  }
+
+  // Behavioral baselining: learn per-host normal, flag deviations.
+  if (cfg.anomaly.enabled) startBaselineMonitor(cfg);
+
   // Local web dashboard (alerts + investigation tools).
   if (cfg.web.enabled) {
     try {
@@ -169,6 +192,13 @@ async function main(): Promise<void> {
       const cfg = loadConfig();
       setLogLevel(cfg.runtime.logLevel);
       await runWatch(cfg, Date.now());
+      return;
+    }
+    if (args.has("--feeds")) {
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      const r = await refreshAndPostChangelog(cfg);
+      log.info(`Feeds: ${r.total} entries, loaded=${r.loaded}.`);
       return;
     }
     const digestIdx = argv.findIndex((a) => a === "--digest" || a.startsWith("--digest="));

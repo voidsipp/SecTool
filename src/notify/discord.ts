@@ -53,6 +53,7 @@ function intelField(e: Enrichment): EmbedField | null {
     parts.push(`**VirusTotal:** ${e.virustotal.malicious} malicious / ${e.virustotal.suspicious} suspicious${bad === 0 ? " (clean)" : ""}`);
   }
   if (e.abuseipdb) parts.push(`**AbuseIPDB:** ${e.abuseipdb.score}% (${e.abuseipdb.totalReports} reports)`);
+  if (e.feeds?.length) parts.push(`**On threat feeds:** ${e.feeds.join(", ")}`);
   if (e.geo) {
     const loc = [e.geo.city, e.geo.country].filter(Boolean).join(", ");
     const flags = [e.geo.hosting ? "hosting" : "", e.geo.proxy ? "proxy/VPN" : ""].filter(Boolean).join(", ");

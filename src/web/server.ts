@@ -30,7 +30,11 @@ import { alertStore } from "../store/alertStore.ts";
 import { dismissStore } from "../store/dismissed.ts";
 import { capture, connections, surrounding, relatedActivity } from "../investigate/udm.ts";
 import { enrichIp } from "../investigate/enrich.ts";
-import { blockIp, unblockIp, listBlocks } from "../respond/blocker.ts";
+import { computeHostRisks } from "../investigate/hosts.ts";
+import { recentAnomalies } from "../anomaly/baseline.ts";
+import { safeStore } from "../store/safelist.ts";
+import { askAnalyst } from "../analyst/analyst.ts";
+import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -107,9 +111,35 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         return send(res, 200, { cleared: n });
       }
 
+      // --- conversational analyst ---
+      if (method === "POST" && path === "/api/ask") {
+        const body = await readJson(req);
+        const question = String(body["question"] ?? "").slice(0, 1000);
+        if (!question.trim()) return send(res, 400, { error: "Empty question." });
+        const result = await askAnalyst(cfg, question);
+        return send(res, 200, result);
+      }
+
+      // --- internal host risk + behavioral anomalies ---
+      if (method === "GET" && path === "/api/hosts") {
+        const hosts = computeHostRisks();
+        return send(res, 200, { count: hosts.length, hosts, anomalies: recentAnomalies().slice(0, 50), safeCount: safeStore.count() });
+      }
+
+      // --- mark a peer IP safe / un-safe ---
+      if (method === "POST" && (path === "/api/safe" || path === "/api/unsafe")) {
+        const body = await readJson(req);
+        const ip = String(body["ip"] ?? "");
+        if (isIP(ip) === 0) return send(res, 400, { error: "Invalid IP." });
+        if (path === "/api/safe") safeStore.add(ip, typeof body["note"] === "string" ? body["note"] : undefined);
+        else safeStore.remove(ip);
+        return send(res, 200, { ok: true, safe: path === "/api/safe" });
+      }
+
       // --- firewall blocklist ---
       if (method === "GET" && path === "/api/blocklist") {
-        return send(res, 200, { count: listBlocks().length, blocks: listBlocks() });
+        const blocks = await listBlocksWithStats();
+        return send(res, 200, { count: blocks.length, blocks });
       }
       if (method === "POST" && path === "/api/block") {
         const body = await readJson(req);

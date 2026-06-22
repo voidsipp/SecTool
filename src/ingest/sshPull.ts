@@ -134,6 +134,40 @@ export function mongoQuery(js: string, opts: { timeoutMs?: number } = {}): Promi
   return sshExec(mongoScriptCommand(requireTarget(), js), opts);
 }
 
+/**
+ * Run a remote command while streaming `input` to its stdin — for bulk data like
+ * `ipset restore` that's too large to pass as a command argument.
+ */
+export function sshExecInput(remote: string, input: string, opts: { timeoutMs?: number } = {}): Promise<string> {
+  const t = requireTarget();
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn("ssh", [...sshBaseArgs(t, { batch: true }), target(t), remote], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d: string) => (out += d));
+    child.stderr.on("data", (d: string) => (err += d));
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("SSH input command timed out"));
+        }, opts.timeoutMs)
+      : null;
+    child.on("error", (e) => {
+      if (timer) clearTimeout(timer);
+      reject(e);
+    });
+    child.on("close", () => {
+      if (timer) clearTimeout(timer);
+      resolve(err ? `${out}\n${err}`.trim() : out);
+    });
+    child.stdin.end(input);
+  });
+}
+
 /** Pull + map alerts for a window without any processing/posting (for the GUI). */
 export async function pullMapped(cfg: Config, hours: number, nowMs: number): Promise<MappedEvent[]> {
   const t = requireTarget();

@@ -9,6 +9,7 @@
 import { isIP } from "node:net";
 import type { Config } from "../config.ts";
 import { blockStore, type BlockEntry } from "../store/blocklist.ts";
+import { safeStore } from "../store/safelist.ts";
 import { sshExec, loadSshTarget } from "../ingest/sshPull.ts";
 import { log } from "../logger.ts";
 
@@ -23,7 +24,8 @@ function sh(parts: string[]): string {
 /** Idempotent commands that (re)create the ipset and the DROP rules. */
 function infraCmds(): string[] {
   return [
-    `ipset create ${SET} hash:ip family inet maxelem 131072 -exist`,
+    // `counters` tracks per-IP dropped packets/bytes for block-effectiveness.
+    `ipset create ${SET} hash:ip family inet maxelem 131072 counters -exist`,
     `iptables -C FORWARD -m set --match-set ${SET} src -j DROP 2>/dev/null || iptables -I FORWARD 1 -m set --match-set ${SET} src -j DROP`,
     `iptables -C FORWARD -m set --match-set ${SET} dst -j DROP 2>/dev/null || iptables -I FORWARD 1 -m set --match-set ${SET} dst -j DROP`,
     `iptables -C INPUT -m set --match-set ${SET} src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set ${SET} src -j DROP`,
@@ -42,6 +44,7 @@ export function blockGuard(cfg: Config, ip: string): string | null {
   if (isIP(ip) === 0) return "Not a valid IP address.";
   if (isIP(ip) === 6) return "IPv6 blocking isn't supported yet (the ipset is IPv4).";
   if (isPrivate(ip)) return "Refusing to block a private/internal/reserved IP.";
+  if (safeStore.has(ip)) return "IP is marked safe.";
   const udmHost = loadSshTarget()?.host;
   if (udmHost && ip === udmHost) return "Refusing to block the gateway.";
   if (cfg.block.allowlist.includes(ip)) return "IP is on the protect/allowlist.";
@@ -84,6 +87,27 @@ export async function applyAll(): Promise<void> {
 export function listBlocks(): Array<BlockEntry & { durationMs: number }> {
   const now = Date.now();
   return blockStore.all().map((e) => ({ ...e, durationMs: now - e.at }));
+}
+
+/** Per-IP dropped packet/byte counters from the ipset (block effectiveness). */
+export async function blockStats(): Promise<Map<string, { packets: number; bytes: number }>> {
+  const stats = new Map<string, { packets: number; bytes: number }>();
+  if (!loadSshTarget()) return stats;
+  try {
+    const out = await sshExec(`ipset list ${SET} 2>/dev/null`, { timeoutMs: 12000 });
+    for (const line of out.split(/\r?\n/)) {
+      const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+packets\s+(\d+)\s+bytes\s+(\d+)/.exec(line.trim());
+      if (m) stats.set(m[1]!, { packets: Number(m[2]), bytes: Number(m[3]) });
+    }
+  } catch {
+    /* best effort */
+  }
+  return stats;
+}
+
+export async function listBlocksWithStats(): Promise<Array<BlockEntry & { durationMs: number; packets: number; bytes: number }>> {
+  const stats = await blockStats();
+  return listBlocks().map((b) => ({ ...b, packets: stats.get(b.ip)?.packets ?? 0, bytes: stats.get(b.ip)?.bytes ?? 0 }));
 }
 
 export async function startBlocker(cfg: Config): Promise<void> {

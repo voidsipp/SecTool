@@ -19,6 +19,7 @@ import { Deduper } from "./dedupe.ts";
 import { UnifiClient, type MappedEvent } from "./unifi/client.ts";
 import { alertStore } from "./store/alertStore.ts";
 import { enrichIp, pickExternalIp, escalate } from "./investigate/enrich.ts";
+import { maybeAutoBlock, autoRespondEnabled } from "./respond/autoRespond.ts";
 import { log } from "./logger.ts";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -93,6 +94,7 @@ export async function processRawEvents(
             log.info(`Escalated ${ip} → ${esc.severity} (${esc.reason}).`);
             summary.severity = esc.severity;
           }
+          if (autoRespondEnabled(cfg)) await maybeAutoBlock(cfg, ip, { escalated: esc.escalated });
         }
       }
       const ok = await discord.send(ctx, summary, enrichment);
