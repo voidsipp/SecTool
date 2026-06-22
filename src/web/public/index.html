@@ -107,6 +107,19 @@
   ::-webkit-scrollbar-track { background:#0a0726; }
   ::-webkit-scrollbar-thumb { background:var(--border); border:2px solid #0a0726; }
   ::-webkit-scrollbar-thumb:hover { background:var(--accent); }
+  /* war map */
+  #warSvg { width:100%; height:auto; display:block; background:rgba(6,4,22,.55); border:2px solid var(--border); box-shadow:0 0 24px rgba(75,58,158,.25) inset; }
+  #warSvg .arc { stroke-dasharray:5 7; animation:flow 1.4s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:-24; } }
+  #warSvg .node { cursor:pointer; filter:drop-shadow(0 0 4px currentColor); animation:nodepulse 2.6s ease-in-out infinite; }
+  #warSvg .clabel { font-family:var(--pix); font-size:8px; filter:drop-shadow(0 0 3px currentColor); pointer-events:none; }
+  #warSvg .homepulse { animation:homepulse 2.2s ease-out infinite; transform-origin:center; transform-box:fill-box; }
+  @keyframes nodepulse { 50% { opacity:.55; } }
+  @keyframes homepulse { 0%{stroke-opacity:.9;r:7} 100%{stroke-opacity:0;r:22} }
+  #maptip { position:fixed; pointer-events:none; z-index:100; background:rgba(10,7,38,.96); border:2px solid var(--cyan); padding:7px 10px; font-family:var(--mono); font-size:15px; color:var(--text); display:none; box-shadow:0 0 12px var(--cyan); }
+  .warlb { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid rgba(75,58,158,.4); font-size:15px; }
+  .warlb .bar { height:8px; background:var(--cyan); box-shadow:0 0 6px var(--cyan); }
+  .warlb .bar.threat { background:var(--critical); box-shadow:0 0 6px var(--critical); }
 </style>
 </head>
 <body>
@@ -122,6 +135,7 @@
   </label>
   <label class="status"><input type="checkbox" id="showDismissed"> Show dismissed</label>
   <button id="navAsk" class="primary">💬 Ask</button>
+  <button id="navWar">🗺️ War Map</button>
   <button id="navHosts">🖥️ Hosts</button>
   <button id="navBlocked">🚫 Blocked</button>
   <button id="refresh">↻ Refresh</button>
@@ -159,6 +173,19 @@
     <button id="askSend" class="primary">Send</button>
   </div>
 </div>
+<div id="warView" style="display:none; height:calc(100vh - 55px); overflow-y:auto; padding:18px 26px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+    <button id="backAlerts4">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">🗺️ War Map</h2>
+    <select id="warWin"><option value="24">24h</option><option value="168" selected>7d</option><option value="720">30d</option></select>
+    <span id="warMeta" class="muted"></span>
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 320px; gap:18px; align-items:start;">
+    <div id="warMap"><div class="empty">Loading map…</div></div>
+    <div><div class="muted" style="margin-bottom:6px;">Top countries</div><div id="warBoard"></div></div>
+  </div>
+</div>
+<div id="maptip"></div>
 
 <script>
 const $ = (s, el=document) => el.querySelector(s);
@@ -373,7 +400,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -391,7 +418,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -459,12 +486,58 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#alertsView").style.display="grid"; }
+let warMapData=null;
+function bytesH(n){ return n>1e9?(n/1e9).toFixed(1)+'GB':n>1e6?(n/1e6).toFixed(1)+'MB':n>1e3?(n/1e3).toFixed(1)+'KB':(n||0)+'B'; }
+async function showWar(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none";
+  $("#warView").style.display="block";
+  $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
+  try {
+    const j = await api("/api/geomap?hours="+$("#warWin").value);
+    warMapData=j; renderWar(j);
+  } catch(e){ $("#warMap").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+function renderWar(j){
+  const W=1000,H=500, proj=(lat,lon)=>[(lon+180)/360*W,(90-lat)/180*H];
+  let grid="";
+  for(let lon=-180;lon<=180;lon+=30){const x=(lon+180)/360*W;grid+=`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#46d6ff" stroke-opacity="0.10"/>`;}
+  for(let lat=-60;lat<=60;lat+=30){const y=(90-lat)/180*H;grid+=`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#46d6ff" stroke-opacity="0.10"/>`;}
+  const [hx,hy]= j.home? proj(j.home.lat,j.home.lon):[W/2,H/2];
+  const maxMag=Math.max(1,...j.countries.map(c=>c.bytes+c.threats*5e6));
+  let arcs="",nodes="",labels="";
+  for(const c of j.countries){
+    const [x,y]=proj(c.lat,c.lon); const mag=c.bytes+c.threats*5e6; const frac=mag/maxMag;
+    const r=3+15*Math.sqrt(frac); const threat=c.threats>0; const col=threat?"#ff4d6d":"#46d6ff";
+    const my=(hy+y)/2 - Math.abs(x-hx)*0.16 - 18;
+    arcs+=`<path d="M${hx},${hy} Q${(hx+x)/2},${my} ${x},${y}" fill="none" stroke="${col}" stroke-opacity="${(0.12+0.5*frac).toFixed(2)}" stroke-width="${threat?1.6:1}" class="arc"/>`;
+    nodes+=`<circle cx="${x}" cy="${y}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="0.6" stroke="${col}" stroke-width="1.2" class="node" style="color:${col}" data-c="${esc(c.code)}"/>`;
+    if(r>6.5) labels+=`<text x="${x}" y="${(y-r-3).toFixed(1)}" fill="${col}" text-anchor="middle" class="clabel" style="color:${col}">${esc(c.code)}</text>`;
+  }
+  const home = j.home? `<g style="color:var(--medium)"><circle cx="${hx}" cy="${hy}" r="11" fill="none" stroke="var(--medium)" stroke-width="1.5" class="homepulse"/><rect x="${hx-4}" y="${hy-4}" width="8" height="8" fill="var(--medium)" style="filter:drop-shadow(0 0 6px var(--medium))"/></g>`:"";
+  $("#warMap").innerHTML=`<svg id="warSvg" viewBox="0 0 ${W} ${H}">${grid}${arcs}${labels}${nodes}${home}</svg>`;
+  $("#warMeta").textContent=`${j.countries.length} countries · ${bytesH(j.totalBytes)} traffic · home: ${j.home?j.home.country:'?'}`;
+  // leaderboard
+  const top=j.countries.slice(0,18);
+  const lbMax=Math.max(1,...top.map(c=>c.bytes+c.threats*5e6));
+  $("#warBoard").innerHTML=top.map(c=>{const mag=c.bytes+c.threats*5e6;const w=Math.max(4,100*mag/lbMax);const t=c.threats>0;
+    return `<div class="warlb"><span class="mono" style="min-width:34px;color:${t?'var(--critical)':'var(--cyan)'}">${esc(c.code)}</span><div style="flex:1"><div class="bar${t?' threat':''}" style="width:${w}%"></div></div><span class="muted" style="font-size:13px;min-width:120px;text-align:right">${bytesH(c.bytes)}${c.threats?` · ${c.threats}⚔`:''}</span></div>`;}).join("");
+  // tooltips
+  const tip=$("#maptip"), byCode=Object.fromEntries(j.countries.map(c=>[c.code,c]));
+  document.querySelectorAll("#warSvg .node").forEach(n=>{
+    n.onmousemove=(e)=>{const c=byCode[n.dataset.c];if(!c)return;tip.style.display="block";tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY+14)+"px";
+      tip.innerHTML=`<b>${esc(c.country)}</b> (${esc(c.code)})<br>traffic: ${bytesH(c.bytes)} (↓${bytesH(c.inboundBytes)} / ↑${bytesH(c.outboundBytes)})<br>${c.flows} flows · ${c.ips} IPs${c.threats?`<br><span style="color:var(--critical)">⚔ ${c.threats} threats</span>`:''}`;};
+    n.onmouseleave=()=>tip.style.display="none";
+  });
+}
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#alertsView").style.display="grid"; }
+$("#navWar").onclick = showWar;
+$("#warWin").onchange = showWar;
+$("#backAlerts4").onclick = showAlerts;
 $("#navAsk").onclick = showAsk;
 $("#askSend").onclick = sendAsk;
 $("#askInput").addEventListener("keydown", e=>{ if(e.key==="Enter") sendAsk(); });
