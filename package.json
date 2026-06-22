@@ -1,0 +1,36 @@
+{
+  "name": "sectool",
+  "version": "1.0.0",
+  "description": "Ingests UDM Pro security alerts via syslog, correlates relevant logs, summarizes them with Claude (OAuth), and posts to a Discord webhook.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "self-test": "node src/index.ts --self-test",
+    "backfill": "node src/index.ts --backfill 24",
+    "setup-ssh": "node src/index.ts --setup-ssh",
+    "pull": "node src/index.ts --pull 24",
+    "print-config": "node src/index.ts --print-config",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "unifi",
+    "udm-pro",
+    "syslog",
+    "ids",
+    "ips",
+    "suricata",
+    "security",
+    "claude",
+    "discord"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

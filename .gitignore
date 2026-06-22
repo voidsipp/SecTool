@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+# Exported event dumps may contain internal IPs / host data
+ips_events.json
+*.events.json
+# Saved SSH connection details + generated keys
+ssh-target.json
+.ssh/
+.watch-state.json
+# Stored alerts/summaries may contain internal IPs / host data
+data/
+# pcap captures from netflow testing
+*.pcap

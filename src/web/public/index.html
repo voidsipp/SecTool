@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SecTool — UDM Sentinel</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --accent:#3b82f6;
+    --critical:#f85149; --high:#e3873c; --medium:#e3c93c; --low:#3b82f6; --info:#8b949e;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header h1 .dot { color:var(--accent); }
+  header .spacer { flex:1; }
+  header .status { font-size:12px; color:var(--muted); }
+  select, button { background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .layout { display:grid; grid-template-columns:380px 1fr; height:calc(100vh - 53px); }
+  .list { overflow-y:auto; border-right:1px solid var(--border); }
+  .card { padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; border-left:3px solid transparent; }
+  .card:hover { background:var(--panel); }
+  .card.active { background:var(--panel2); border-left-color:var(--accent); }
+  .card .row1 { display:flex; align-items:center; gap:8px; }
+  .badge { font-size:10px; font-weight:700; text-transform:uppercase; padding:2px 6px; border-radius:4px; color:#0d1117; }
+  .sev-critical{background:var(--critical)} .sev-high{background:var(--high)} .sev-medium{background:var(--medium)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
+  .card .sig { font-weight:600; margin:4px 0 2px; font-size:13px; }
+  .card .meta { color:var(--muted); font-size:12px; }
+  .card .flow { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:#adbac7; }
+  .pill { font-size:10px; color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:0 6px; }
+  .detail { overflow-y:auto; padding:22px 26px; }
+  .detail h2 { margin:0 0 4px; font-size:18px; }
+  .detail .sub { color:var(--muted); font-size:13px; margin-bottom:18px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-bottom:20px; }
+  .kv { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:9px 12px; }
+  .kv .k { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .kv .v { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; word-break:break-all; }
+  .section { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .section h3 { margin:0 0 10px; font-size:14px; display:flex; align-items:center; gap:8px; }
+  .summary p { margin:6px 0; } .summary .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  .actions .primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  pre { background:#0b0f15; border:1px solid var(--border); border-radius:6px; padding:12px; overflow:auto; font-size:12px; max-height:340px; white-space:pre-wrap; word-break:break-word; }
+  .empty { color:var(--muted); padding:40px; text-align:center; }
+  .spin { display:inline-block; width:13px; height:13px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:s .7s linear infinite; }
+  @keyframes s { to { transform:rotate(360deg); } }
+  ul.acts { margin:6px 0; padding-left:18px; } ul.acts li { margin:3px 0; }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">●</span> SecTool — UDM Sentinel</h1>
+  <span class="status" id="status">…</span>
+  <span class="spacer"></span>
+  <label class="status">Window
+    <select id="hours">
+      <option value="6">6h</option><option value="24">24h</option>
+      <option value="48" selected>48h</option><option value="168">7d</option><option value="720">30d</option>
+    </select>
+  </label>
+  <button id="refresh">↻ Refresh</button>
+</header>
+<div class="layout">
+  <div class="list" id="list"><div class="empty">Loading…</div></div>
+  <div class="detail" id="detail"><div class="empty">Select an alert to investigate.</div></div>
+</div>
+
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (t) => t ? new Date(t).toLocaleString() : "—";
+const ago = (t) => { if(!t) return ""; const m=Math.round((Date.now()-t)/60000); if(m<60) return m+"m ago"; const h=Math.round(m/60); if(h<48) return h+"h ago"; return Math.round(h/24)+"d ago"; };
+let alerts = [], selected = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(()=>({error:"bad response"}));
+  if (!r.ok) throw new Error(j.error || ("HTTP "+r.status));
+  return j;
+}
+
+async function loadStatus() {
+  try { const s = await api("/api/status");
+    $("#status").textContent = `${s.stored} stored · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
+  } catch(e) { $("#status").textContent = ""; }
+}
+
+async function loadAlerts() {
+  const hours = $("#hours").value;
+  $("#list").innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const j = await api("/api/alerts?hours="+hours);
+    alerts = j.alerts;
+    renderList();
+  } catch(e) {
+    $("#list").innerHTML = '<div class="empty">'+esc(e.message)+'</div>';
+  }
+}
+
+function renderList() {
+  if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
+  $("#list").innerHTML = alerts.map(a => `
+    <div class="card ${selected===a.id?'active':''}" data-id="${a.id}">
+      <div class="row1">
+        <span class="badge sev-${a.severity}">${a.severity}</span>
+        <span class="meta">${esc(ago(a.time))}</span>
+        ${a.notifiedAt?'<span class="pill">sent</span>':''}
+        ${a.hasSummary?'<span class="pill">AI</span>':''}
+      </div>
+      <div class="sig">${esc(a.signature || a.category)}</div>
+      <div class="flow">${esc(a.srcIp||'?')} → ${esc(a.dstIp||'?')}</div>
+    </div>`).join("");
+  document.querySelectorAll('.card').forEach(c => c.onclick = () => selectAlert(c.dataset.id));
+}
+
+async function selectAlert(id) {
+  selected = id; renderList();
+  const a = alerts.find(x=>x.id===id);
+  $("#detail").innerHTML = renderDetail(a, null, "loading");
+  try {
+    const j = await api("/api/alerts/"+id);
+    $("#detail").innerHTML = renderDetail(a, j.summary, "ready");
+    wireActions(id, a);
+  } catch(e) {
+    $("#detail").innerHTML = renderDetail(a, null, "ready");
+    wireActions(id, a);
+  }
+}
+
+function renderDetail(a, summary, state) {
+  const sumHtml = summary ? `
+    <div class="summary">
+      <p><span class="label">What happened</span><br>${esc(summary.whatHappened)}</p>
+      <p><span class="label">Risk</span><br>${esc(summary.riskAssessment)}</p>
+      ${summary.recommendedActions&&summary.recommendedActions.length?`<p><span class="label">Recommended</span></p><ul class="acts">${summary.recommendedActions.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+      ${summary.fallback?'<p class="muted">(offline summary — Claude was unavailable)</p>':''}
+    </div>` : (state==="loading" ? '<span class="spin"></span>' : `<button id="gen" class="primary">✨ Generate AI summary</button>`);
+  return `
+    <h2><span class="badge sev-${a.severity}">${a.severity}</span> ${esc(a.signature || a.category)}</h2>
+    <div class="sub">${esc(a.category)} · ${esc(fmt(a.time))} · ${esc(a.action||'detected')}</div>
+    <div class="grid">
+      <div class="kv"><div class="k">Source</div><div class="v">${esc(a.srcIp||'—')}</div></div>
+      <div class="kv"><div class="k">Destination</div><div class="v">${esc(a.dstIp||'—')}</div></div>
+      <div class="kv"><div class="k">Classification</div><div class="v">${esc(a.classification||'—')}</div></div>
+      <div class="kv"><div class="k">Alert ID</div><div class="v">${esc(a.id)}</div></div>
+    </div>
+    <div class="section"><h3>🧠 AI analysis</h3>${sumHtml}</div>
+    <div class="section">
+      <h3>🔬 Investigation tools</h3>
+      <div class="actions">
+        <button id="enrich" class="primary">🌍 Enrich IP (geo + VirusTotal)</button>
+        <button id="related">📊 All activity for this IP</button>
+        <select id="relwin" title="Time window">
+          <option value="24">±24h</option><option value="72">±72h</option>
+          <option value="168">±7d</option><option value="720">±30d</option><option value="0">All data</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button id="cap">📡 Capture live traffic (8s)</button>
+        <button id="conn">🔗 Active connections</button>
+        <button id="surr">🕑 Surrounding activity (±15m)</button>
+      </div>
+      <div id="invout"></div>
+    </div>
+    <div class="section"><h3>📄 Raw event</h3><pre>${esc(a.raw)}</pre></div>`;
+}
+
+function wireActions(id, a) {
+  const out = $("#invout");
+  const busy = (label) => { out.innerHTML = `<div class="muted"><span class="spin"></span> ${label}…</div>`; };
+  const gen = $("#gen");
+  if (gen) gen.onclick = async () => {
+    gen.disabled = true; gen.innerHTML = '<span class="spin"></span> Analyzing…';
+    try { const j = await api("/api/alerts/"+id+"/summarize",{method:"POST"});
+      a.hasSummary=true; const d=$("#detail"); d.innerHTML = renderDetail(a, j.summary, "ready"); wireActions(id, a);
+    } catch(e){ gen.disabled=false; gen.textContent="✨ Generate AI summary"; out.innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+  };
+  $("#enrich").onclick = async () => { busy("Querying ip-api, VirusTotal & AbuseIPDB"); try {
+    const j = await api("/api/alerts/"+id+"/enrich",{method:"POST"});
+    let h = `<div class="grid">`;
+    if (j.geo) { const g=j.geo;
+      h += `<div class="kv"><div class="k">Location</div><div class="v">${esc([g.city,g.region,g.country].filter(Boolean).join(", ")||"?")}</div></div>`;
+      h += `<div class="kv"><div class="k">ASN / Org</div><div class="v">${esc(g.asn||"?")}${g.org?(" · "+esc(g.org)):""}</div></div>`;
+      h += `<div class="kv"><div class="k">ISP</div><div class="v">${esc(g.isp||"?")}</div></div>`;
+      h += `<div class="kv"><div class="k">rDNS</div><div class="v">${esc(g.reverse||"—")}</div></div>`;
+      const flags=[g.hosting?"hosting":"",g.proxy?"proxy/VPN":"",g.mobile?"mobile":""].filter(Boolean).join(", ");
+      if (flags) h += `<div class="kv"><div class="k">Flags</div><div class="v">${esc(flags)}</div></div>`;
+    }
+    if (j.virustotal) { const v=j.virustotal; const bad=v.malicious+v.suspicious;
+      h += `<div class="kv" style="border-color:${bad>0?'var(--critical)':'var(--low)'}"><div class="k">VirusTotal</div><div class="v"><b style="color:${bad>0?'var(--critical)':'var(--low)'}">${v.malicious} malicious</b> · ${v.suspicious} susp · ${v.harmless} clean<br>reputation ${v.reputation??'?'} · ${esc(v.asOwner||'')}<br><a href="${esc(v.link)}" target="_blank" style="color:var(--accent)">view on VT ↗</a></div></div>`;
+    }
+    if (j.abuseipdb) { const a=j.abuseipdb;
+      h += `<div class="kv" style="border-color:${a.score>=50?'var(--critical)':a.score>0?'var(--high)':'var(--low)'}"><div class="k">AbuseIPDB</div><div class="v"><b>${a.score}% confidence</b> · ${a.totalReports} reports<br>${esc(a.usageType||'')} ${esc(a.domain||'')}</div></div>`;
+    }
+    h += `</div>`;
+    if (j.isPrivate) h = `<div class="muted">${esc(j.ip)} is a private/internal IP — external lookups skipped.</div>`;
+    if (j.errors && j.errors.length) h += `<div class="muted">${j.errors.map(esc).join(" · ")}</div>`;
+    out.innerHTML = `<div class="muted">Enrichment for <b>${esc(j.ip)}</b></div>`+h;
+  } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+
+  $("#related").onclick = async () => { const win=$("#relwin").value; busy("Pulling all flows for this IP"); try {
+    const j = await api("/api/alerts/"+id+"/related",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({hours:Number(win)})});
+    const mb = b => b==null?'0':(b>1e6?(b/1e6).toFixed(1)+'MB':b>1e3?(b/1e3).toFixed(1)+'KB':b+'B');
+    const proto = p => ({1:'ICMP',6:'TCP',17:'UDP',47:'GRE',50:'ESP',58:'ICMPv6'}[p]||p||'?');
+    const range = j.dataRange.earliest ? `data available ${fmt(j.dataRange.earliest)} → ${fmt(j.dataRange.latest)}` : "no flow data collected yet";
+    let h = `<div class="muted"><b>${esc(j.ip)}</b> · ${win==='0'?'all retained data':'±'+win+'h'} · ${j.totalFlows} flows · ↓${mb(j.bytesIn)} in / ↑${mb(j.bytesOut)} out · ${range}</div>`;
+    if (j.peers.length) {
+      h += `<div class="muted" style="margin-top:8px">Peers (${j.peers.length}):</div><pre>`+j.peers.map(p=>`${mb(p.bytes).padStart(8)}  ${String(p.flows).padStart(4)}fl  ${p.peer}  :${p.ports.join(',')}`).join("\n")+`</pre>`;
+    }
+    if (j.flows.length) {
+      h += `<div class="muted">Flows (${j.flows.length} shown):</div><pre>`+j.flows.slice(0,200).map(f=>`${new Date(f.start).toLocaleString()}  ${proto(f.proto)}  ${f.srcIp}:${f.srcPort||''} → ${f.dstIp}:${f.dstPort||''}  ${mb(f.bytes)}${f.blocked?'  [BLOCKED]':''}`).join("\n")+`</pre>`;
+    }
+    if (j.events.length) {
+      h += `<div class="muted">Logged events involving this IP (${j.events.length}):</div><pre>`+j.events.map(e=>`${fmt(e.time)}  [${e.severity||'-'}]  ${e.key||''}`).join("\n")+`</pre>`;
+    }
+    if (j.note) h += `<div class="muted">${esc(j.note)}</div>`;
+    out.innerHTML = h;
+  } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+
+  $("#cap").onclick = async () => { busy("Capturing live packets on the gateway"); try {
+    const j = await api("/api/alerts/"+id+"/capture",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({seconds:8})});
+    out.innerHTML = `<div class="muted">${esc(j.note||(j.packets+" packets in "+j.seconds+"s involving "+j.ips.join(", ")))}</div>`+(j.lines.length?`<pre>${esc(j.lines.join("\n"))}</pre>`:"");
+  } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+  $("#conn").onclick = async () => { busy("Querying conntrack"); try {
+    const j = await api("/api/alerts/"+id+"/connections",{method:"POST"});
+    out.innerHTML = `<div class="muted">${esc(j.note||(j.count+" active connection(s) involving "+j.ip))}</div>`+(j.lines.length?`<pre>${esc(j.lines.join("\n"))}</pre>`:"");
+  } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+  $("#surr").onclick = async () => { busy("Gathering surrounding events, DNS & connections"); try {
+    const j = await api("/api/alerts/"+id+"/surrounding",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({windowMin:15})});
+    const ev = j.events.map(e=>`${fmt(e.time)}  [${e.severity||'-'}]  ${e.key||''}  ${e.src||'?'} → ${e.dst||'?'}`).join("\n");
+    let html = `<div class="muted">Logged events: ${j.events.length} within ±${j.windowMinutes}m</div><pre>${esc(ev||"(none)")}</pre>`;
+    if (j.dns) {
+      const dns = j.dns.domains.map(d=>`${String(d.count).padStart(4)}  ${d.domain}`).join("\n");
+      html += `<div class="muted" style="margin-top:10px">DNS resolutions in window: ${j.dns.total} queries, ${j.dns.domains.length} unique domains</div><pre>${esc(dns||"(none)")}</pre><div class="muted">${esc(j.dns.note||"")}</div>`;
+    }
+    if (j.flows) {
+      const proto = p => ({1:'ICMP',6:'TCP',17:'UDP',47:'GRE',50:'ESP',58:'ICMPv6'}[p]||p||'?');
+      const bytes = b => b==null?'':(b>1e6?(b/1e6).toFixed(1)+'MB':b>1e3?(b/1e3).toFixed(1)+'KB':b+'B');
+      const fl = j.flows.flows.map(f=>`${new Date(f.start).toLocaleTimeString()}  ${proto(f.proto)}  ${f.srcIp||'?'}:${f.srcPort||''} → ${f.dstIp||'?'}:${f.dstPort||''}  ${bytes(f.bytes)} ${f.packets?('/'+f.packets+'pkt'):''}${f.blocked?'  [BLOCKED]':''}`).join("\n");
+      html += `<div class="muted" style="margin-top:10px">🌐 Collected flows involving this host (±${j.flows.windowMinutes}m): ${j.flows.count}</div><pre>${esc(fl||"(none)")}</pre>${j.flows.note?`<div class="muted">${esc(j.flows.note)}</div>`:""}`;
+    }
+    if (j.firewallBlocks) {
+      const fb = j.firewallBlocks.events.map(e=>`${fmt(e.time)}  [${e.severity||'-'}]  ${e.key||''}  ${e.src||'?'} → ${e.dst||'?'}`).join("\n");
+      html += `<div class="muted" style="margin-top:10px">🛡️ Firewall blocks involving this host (±${j.firewallBlocks.windowHours}h): ${j.firewallBlocks.count}</div><pre>${esc(fb||"(none — this host was not blocked by a firewall/IPS rule in the window)")}</pre>`;
+    }
+    if (j.connections && j.connections.lines.length) {
+      html += `<div class="muted" style="margin-top:10px">Active connections (${esc(j.connections.ip)}): ${j.connections.count}</div><pre>${esc(j.connections.lines.join("\n"))}</pre>`;
+    }
+    out.innerHTML = html;
+  } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+}
+
+$("#refresh").onclick = loadAlerts;
+$("#hours").onchange = loadAlerts;
+loadStatus(); loadAlerts();
+setInterval(() => { loadStatus(); if(!selected) loadAlerts(); }, 30000);
+</script>
+</body>
+</html>

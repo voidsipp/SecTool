@@ -1,0 +1,251 @@
+/**
+ * Configuration loading & validation. All env access is funneled through here so
+ * the rest of the app receives a single, validated, strongly-typed object.
+ */
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { LOG_LEVELS, type LogLevel } from "./logger.ts";
+import { SEVERITY_ORDER, type Severity } from "./types.ts";
+
+export type AuthMode = "auto" | "oauth" | "apikey";
+export type SyslogProtocol = "udp" | "tcp" | "both";
+
+export interface Config {
+  discord: {
+    webhookUrl: string;
+    username: string;
+    avatarUrl?: string;
+    mention?: string;
+  };
+  syslog: {
+    host: string;
+    udpPort: number;
+    tcpPort: number;
+    protocol: SyslogProtocol;
+  };
+  claude: {
+    authMode: AuthMode;
+    apiKey?: string;
+    credentialsPath: string;
+    model: string;
+    maxTokens: number;
+    summarizeEnabled: boolean;
+  };
+  correlation: {
+    bufferSize: number;
+    bufferTtlMs: number;
+    windowMs: number;
+    maxEvents: number;
+  };
+  alerts: {
+    minSeverity: Severity;
+    dedupeWindowMs: number;
+    customPattern?: RegExp;
+  };
+  runtime: {
+    logLevel: LogLevel;
+    dryRun: boolean;
+  };
+  unifi: {
+    host: string;
+    site: string;
+    username?: string;
+    password?: string;
+    apiKey?: string;
+    verifyTls: boolean;
+  };
+  backfill: {
+    maxEvents: number;
+    postDelayMs: number;
+  };
+  watch: {
+    enabled: boolean;
+    pollMs: number;
+    lookbackMs: number;
+  };
+  web: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    defaultHours: number;
+  };
+  netflow: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    maxFlows: number;
+    retentionMinutes: number;
+    autoConfigureUdm: boolean;
+    advertiseIp?: string;
+    persist: boolean;
+  };
+  enrich: {
+    vtApiKey?: string;
+    abuseKey?: string;
+    ipinfoToken?: string;
+  };
+}
+
+class ConfigError extends Error {}
+
+function str(key: string, fallback?: string): string {
+  const v = process.env[key];
+  if (v === undefined || v === "") {
+    if (fallback !== undefined) return fallback;
+    throw new ConfigError(`Missing required env var: ${key}`);
+  }
+  return v;
+}
+
+function optStr(key: string): string | undefined {
+  const v = process.env[key];
+  return v === undefined || v === "" ? undefined : v;
+}
+
+function int(key: string, fallback: number): number {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallback;
+  const n = Number.parseInt(v, 10);
+  if (!Number.isFinite(n)) throw new ConfigError(`Env var ${key} must be an integer, got "${v}"`);
+  return n;
+}
+
+function bool(key: string, fallback: boolean): boolean {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(v.trim());
+}
+
+function oneOf<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallback;
+  const lower = v.trim().toLowerCase() as T;
+  if (!allowed.includes(lower)) {
+    throw new ConfigError(`Env var ${key} must be one of ${allowed.join(", ")}, got "${v}"`);
+  }
+  return lower;
+}
+
+export function loadConfig(): Config {
+  const authMode = oneOf<AuthMode>("CLAUDE_AUTH_MODE", ["auto", "oauth", "apikey"], "auto");
+  const apiKey = optStr("ANTHROPIC_API_KEY");
+
+  if (authMode === "apikey" && !apiKey) {
+    throw new ConfigError("CLAUDE_AUTH_MODE=apikey but ANTHROPIC_API_KEY is not set.");
+  }
+
+  let customPattern: RegExp | undefined;
+  const rawPattern = optStr("ALERT_PATTERN");
+  if (rawPattern) {
+    try {
+      customPattern = new RegExp(rawPattern, "i");
+    } catch (err) {
+      throw new ConfigError(`ALERT_PATTERN is not a valid regex: ${(err as Error).message}`);
+    }
+  }
+
+  return {
+    discord: {
+      webhookUrl: str("DISCORD_WEBHOOK_URL"),
+      username: str("DISCORD_USERNAME", "UDM Sentinel"),
+      avatarUrl: optStr("DISCORD_AVATAR_URL"),
+      mention: optStr("DISCORD_MENTION"),
+    },
+    syslog: {
+      host: str("SYSLOG_HOST", "0.0.0.0"),
+      udpPort: int("SYSLOG_UDP_PORT", 5514),
+      tcpPort: int("SYSLOG_TCP_PORT", 5514),
+      protocol: oneOf<SyslogProtocol>("SYSLOG_PROTOCOL", ["udp", "tcp", "both"], "udp"),
+    },
+    claude: {
+      authMode,
+      apiKey,
+      credentialsPath: str("CLAUDE_CREDENTIALS_PATH", join(homedir(), ".claude", ".credentials.json")),
+      model: str("CLAUDE_MODEL", "claude-sonnet-4-6"),
+      maxTokens: int("CLAUDE_MAX_TOKENS", 1024),
+      summarizeEnabled: bool("SUMMARIZE_ENABLED", true),
+    },
+    correlation: {
+      bufferSize: int("LOG_BUFFER_SIZE", 5000),
+      bufferTtlMs: int("LOG_BUFFER_TTL_SEC", 900) * 1000,
+      windowMs: int("CORRELATION_WINDOW_SEC", 180) * 1000,
+      maxEvents: int("CORRELATION_MAX_EVENTS", 40),
+    },
+    alerts: {
+      minSeverity: oneOf<Severity>("MIN_SEVERITY", SEVERITY_ORDER, "low"),
+      dedupeWindowMs: int("DEDUPE_WINDOW_SEC", 300) * 1000,
+      customPattern,
+    },
+    runtime: {
+      logLevel: oneOf<LogLevel>("LOG_LEVEL", LOG_LEVELS, "info"),
+      dryRun: bool("DRY_RUN", false),
+    },
+    unifi: {
+      host: str("UNIFI_HOST", "https://192.168.0.1").replace(/\/+$/, ""),
+      site: str("UNIFI_SITE", "default"),
+      username: optStr("UNIFI_USERNAME"),
+      password: optStr("UNIFI_PASSWORD"),
+      apiKey: optStr("UNIFI_API_KEY"),
+      verifyTls: bool("UNIFI_VERIFY_TLS", false),
+    },
+    backfill: {
+      maxEvents: int("BACKFILL_MAX", 200),
+      postDelayMs: int("BACKFILL_POST_DELAY_MS", 1200),
+    },
+    watch: {
+      enabled: bool("WATCH_ENABLED", true),
+      pollMs: int("WATCH_POLL_SEC", 45) * 1000,
+      lookbackMs: int("WATCH_LOOKBACK_SEC", 600) * 1000,
+    },
+    web: {
+      enabled: bool("WEB_ENABLED", true),
+      host: str("WEB_HOST", "127.0.0.1"),
+      port: int("WEB_PORT", 8787),
+      defaultHours: int("WEB_DEFAULT_HOURS", 48),
+    },
+    netflow: {
+      enabled: bool("NETFLOW_ENABLED", false),
+      host: str("NETFLOW_HOST", "0.0.0.0"),
+      port: int("NETFLOW_PORT", 2055),
+      maxFlows: int("NETFLOW_MAX_FLOWS", 500000),
+      retentionMinutes: int("NETFLOW_RETENTION_MIN", 10080), // 7 days
+      autoConfigureUdm: bool("NETFLOW_AUTOCONFIGURE_UDM", true),
+      advertiseIp: optStr("NETFLOW_ADVERTISE_IP"),
+      persist: bool("NETFLOW_PERSIST", true),
+    },
+    enrich: {
+      vtApiKey: optStr("VT_API_KEY"),
+      abuseKey: optStr("ABUSEIPDB_API_KEY"),
+      ipinfoToken: optStr("IPINFO_TOKEN"),
+    },
+  };
+}
+
+/** Returns a copy of the config safe to print (secrets masked). */
+export function redactConfig(cfg: Config): unknown {
+  const maskUrl = (u: string) => u.replace(/(https?:\/\/[^/]+\/[^/]+\/).+/i, "$1***");
+  return {
+    ...cfg,
+    discord: { ...cfg.discord, webhookUrl: maskUrl(cfg.discord.webhookUrl) },
+    claude: {
+      ...cfg.claude,
+      apiKey: cfg.claude.apiKey ? "***" : undefined,
+    },
+    alerts: {
+      ...cfg.alerts,
+      customPattern: cfg.alerts.customPattern?.source,
+    },
+    unifi: {
+      ...cfg.unifi,
+      password: cfg.unifi.password ? "***" : undefined,
+      apiKey: cfg.unifi.apiKey ? "***" : undefined,
+    },
+    enrich: {
+      vtApiKey: cfg.enrich.vtApiKey ? "***" : undefined,
+      abuseKey: cfg.enrich.abuseKey ? "***" : undefined,
+      ipinfoToken: cfg.enrich.ipinfoToken ? "***" : undefined,
+    },
+  };
+}
+
+export { ConfigError };
