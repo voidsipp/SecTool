@@ -13,6 +13,7 @@ import { Summarizer } from "./summarize/claude.ts";
 import { DiscordNotifier } from "./notify/discord.ts";
 import { Deduper } from "./dedupe.ts";
 import { alertStore } from "./store/alertStore.ts";
+import { enrichIp, pickExternalIp, escalate } from "./investigate/enrich.ts";
 import { log } from "./logger.ts";
 
 export interface PipelineStats {
@@ -88,7 +89,16 @@ export class Pipeline {
   async #process(event: LogEvent, alert: NonNullable<ReturnType<typeof detectAlert>>): Promise<void> {
     const ctx = correlate(alert, this.#buffer, this.#cfg);
     const summary = await this.#summarizer.summarize(ctx);
-    const ok = await this.#discord.send(ctx, summary);
+    let enrichment;
+    if (this.#cfg.enrich.auto) {
+      const ip = pickExternalIp(alert.srcIp, alert.dstIp);
+      if (ip) {
+        enrichment = await enrichIp(this.#cfg, ip).catch(() => undefined);
+        const esc = escalate(summary.severity, enrichment, this.#cfg);
+        if (esc.escalated) summary.severity = esc.severity;
+      }
+    }
+    const ok = await this.#discord.send(ctx, summary, enrichment);
     alertStore.record(alert, summary, ok);
     if (ok) this.stats.notified++;
     else this.stats.failed++;

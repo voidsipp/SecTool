@@ -4,6 +4,7 @@
  */
 import type { Config } from "../config.ts";
 import type { AlertSummary, CorrelatedContext, Severity } from "../types.ts";
+import type { Enrichment } from "../investigate/enrich.ts";
 import { log } from "../logger.ts";
 
 const COLORS: Record<Severity, number> = {
@@ -45,7 +46,23 @@ interface EmbedField {
   inline?: boolean;
 }
 
-export function buildEmbed(ctx: CorrelatedContext, summary: AlertSummary) {
+function intelField(e: Enrichment): EmbedField | null {
+  const parts: string[] = [];
+  if (e.virustotal) {
+    const bad = e.virustotal.malicious + e.virustotal.suspicious;
+    parts.push(`**VirusTotal:** ${e.virustotal.malicious} malicious / ${e.virustotal.suspicious} suspicious${bad === 0 ? " (clean)" : ""}`);
+  }
+  if (e.abuseipdb) parts.push(`**AbuseIPDB:** ${e.abuseipdb.score}% (${e.abuseipdb.totalReports} reports)`);
+  if (e.geo) {
+    const loc = [e.geo.city, e.geo.country].filter(Boolean).join(", ");
+    const flags = [e.geo.hosting ? "hosting" : "", e.geo.proxy ? "proxy/VPN" : ""].filter(Boolean).join(", ");
+    parts.push(`**Origin:** ${loc || "?"}${e.geo.asn ? ` · ${e.geo.asn}` : ""}${flags ? ` · ${flags}` : ""}`);
+  }
+  if (!parts.length) return null;
+  return { name: `🌍 IP intel — ${e.ip}`, value: parts.join("\n").slice(0, FIELD_VALUE_MAX), inline: false };
+}
+
+export function buildEmbed(ctx: CorrelatedContext, summary: AlertSummary, enrichment?: Enrichment) {
   const a = ctx.alert;
   const sev = summary.severity;
   const fields: EmbedField[] = [];
@@ -60,6 +77,11 @@ export function buildEmbed(ctx: CorrelatedContext, summary: AlertSummary) {
   if (a.action) fields.push({ name: "Action", value: a.action, inline: true });
   if (a.classification) fields.push({ name: "Classification", value: clip(a.classification, 256), inline: true });
   if (a.signatureId) fields.push({ name: "Signature ID", value: `\`${a.signatureId}\``, inline: true });
+
+  if (enrichment) {
+    const f = intelField(enrichment);
+    if (f) fields.push(f);
+  }
 
   fields.push({ name: "Risk assessment", value: clip(summary.riskAssessment, FIELD_VALUE_MAX), inline: false });
 
@@ -105,8 +127,8 @@ export class DiscordNotifier {
     this.#cfg = cfg;
   }
 
-  async send(ctx: CorrelatedContext, summary: AlertSummary): Promise<boolean> {
-    const embed = buildEmbed(ctx, summary);
+  async send(ctx: CorrelatedContext, summary: AlertSummary, enrichment?: Enrichment): Promise<boolean> {
+    const embed = buildEmbed(ctx, summary, enrichment);
     const mentionable = summary.severity === "critical" || summary.severity === "high";
     const payload: Record<string, unknown> = {
       username: this.#cfg.discord.username,
@@ -150,6 +172,25 @@ export class DiscordNotifier {
       return false;
     }
     log.error("Discord webhook failed after retries.");
+    return false;
+  }
+
+  /** Post an arbitrary embed (used by the digest). */
+  async postEmbed(embed: Record<string, unknown>, content?: string): Promise<boolean> {
+    const payload: Record<string, unknown> = { username: this.#cfg.discord.username, embeds: [embed] };
+    if (this.#cfg.discord.avatarUrl) payload["avatar_url"] = this.#cfg.discord.avatarUrl;
+    if (content) payload["content"] = content;
+    if (this.#cfg.runtime.dryRun) {
+      log.info(`[dry-run] would post digest embed: ${String((embed as { title?: string }).title ?? "")}`);
+      return true;
+    }
+    const res = await fetch(this.#cfg.discord.webhookUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => undefined);
+    if (res && (res.ok || res.status === 204)) return true;
+    log.error(`Digest post failed: ${res ? res.status : "network error"}`);
     return false;
   }
 }

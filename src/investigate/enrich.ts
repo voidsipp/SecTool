@@ -10,6 +10,7 @@
  */
 import { isIP } from "node:net";
 import type { Config } from "../config.ts";
+import type { Severity } from "../types.ts";
 
 const cache = new Map<string, { data: Enrichment; expires: number }>();
 const TTL_MS = 6 * 3_600_000;
@@ -189,4 +190,28 @@ export async function enrichIp(cfg: Config, ip: string): Promise<Enrichment> {
   await Promise.all(tasks);
   cache.set(ip, { data: result, expires: Date.now() + TTL_MS });
   return result;
+}
+
+/** Choose the externally-routable IP from an alert's endpoints (prefer src). */
+export function pickExternalIp(srcIp?: string, dstIp?: string): string | undefined {
+  for (const ip of [srcIp, dstIp]) if (ip && isIP(ip) > 0 && !isPrivateIp(ip)) return ip;
+  return [srcIp, dstIp].find((ip) => ip && isIP(ip) > 0);
+}
+
+/** Escalate severity based on threat-intel verdicts. */
+export function escalate(
+  severity: Severity,
+  e: Enrichment | undefined,
+  cfg: Config,
+): { severity: Severity; escalated: boolean; reason?: string } {
+  if (!e) return { severity, escalated: false };
+  const vtBad = (e.virustotal?.malicious ?? 0) + (e.virustotal?.suspicious ?? 0);
+  const abuse = e.abuseipdb?.score ?? 0;
+  const reasons: string[] = [];
+  if (e.virustotal && vtBad >= cfg.enrich.escalateVtMalicious) reasons.push(`VT ${e.virustotal.malicious} malicious`);
+  if (abuse >= cfg.enrich.escalateAbuseScore) reasons.push(`AbuseIPDB ${abuse}%`);
+  if (reasons.length && severity !== "critical") {
+    return { severity: "critical", escalated: true, reason: reasons.join(", ") };
+  }
+  return { severity, escalated: false, reason: reasons.join(", ") || undefined };
 }

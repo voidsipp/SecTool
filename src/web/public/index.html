@@ -48,6 +48,14 @@
   .summary p { margin:6px 0; } .summary .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
   .actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
   .actions .primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .actions .danger { border-color:var(--critical); color:var(--critical); }
+  .actions .danger:hover { background:var(--critical); color:#fff; }
+  table.bl { width:100%; border-collapse:collapse; }
+  table.bl th, table.bl td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); font-size:13px; }
+  table.bl th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; }
+  table.bl td.mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .unblock { border-color:var(--low); color:var(--low); padding:3px 10px; }
+  .unblock:hover { background:var(--low); color:#fff; }
   pre { background:#0b0f15; border:1px solid var(--border); border-radius:6px; padding:12px; overflow:auto; font-size:12px; max-height:340px; white-space:pre-wrap; word-break:break-word; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
   .spin { display:inline-block; width:13px; height:13px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:s .7s linear infinite; }
@@ -68,11 +76,19 @@
     </select>
   </label>
   <label class="status"><input type="checkbox" id="showDismissed"> Show dismissed</label>
+  <button id="navBlocked">🚫 Blocked</button>
   <button id="refresh">↻ Refresh</button>
 </header>
-<div class="layout">
+<div class="layout" id="alertsView">
   <div class="list" id="list"><div class="empty">Loading…</div></div>
   <div class="detail" id="detail"><div class="empty">Select an alert to investigate.</div></div>
+</div>
+<div id="blockedView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+    <button id="backAlerts">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">Blocked IPs <span id="blCount" class="muted"></span></h2>
+  </div>
+  <div id="blockedBody"><div class="empty">Loading…</div></div>
 </div>
 
 <script>
@@ -173,6 +189,7 @@ function renderDetail(a, summary, state) {
           <option value="24">±24h</option><option value="72">±72h</option>
           <option value="168">±7d</option><option value="720">±30d</option><option value="0">All data</option>
         </select>
+        <button id="block" class="danger">🚫 Block this IP at the firewall</button>
       </div>
       <div class="actions">
         <button id="cap">📡 Capture live traffic (8s)</button>
@@ -236,6 +253,16 @@ function wireActions(id, a) {
     out.innerHTML = h;
   } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
 
+  $("#block").onclick = async () => {
+    const ip = a.srcIp && !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(a.srcIp) ? a.srcIp : (a.dstIp||a.srcIp);
+    if (!confirm("Block "+ip+" at the UDM firewall?\n\nAll traffic to/from this IP will be dropped until you unblock it.")) return;
+    busy("Adding firewall block on the gateway");
+    try { const j = await api("/api/alerts/"+id+"/block",{method:"POST"});
+      out.innerHTML = `<div class="muted">🚫 <b>${esc(j.ip)}</b> is now blocked at the UDM firewall. Manage it on the <a href="#" id="goBlocked" style="color:var(--accent)">Blocked IPs</a> page.</div>`;
+      const g=$("#goBlocked"); if(g) g.onclick=(e)=>{e.preventDefault(); showBlocked();};
+      loadStatus();
+    } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+
   $("#cap").onclick = async () => { busy("Capturing live packets on the gateway"); try {
     const j = await api("/api/alerts/"+id+"/capture",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({seconds:8})});
     out.innerHTML = `<div class="muted">${esc(j.note||(j.packets+" packets in "+j.seconds+"s involving "+j.ips.join(", ")))}</div>`+(j.lines.length?`<pre>${esc(j.lines.join("\n"))}</pre>`:"");
@@ -269,6 +296,30 @@ function wireActions(id, a) {
   } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
 }
 
+function fmtDur(ms) {
+  const s=Math.floor(ms/1000); if(s<60) return s+"s"; const m=Math.floor(s/60); if(m<60) return m+"m";
+  const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
+}
+async function showBlocked() {
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="block";
+  $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const j = await api("/api/blocklist");
+    $("#blCount").textContent = "("+j.count+")";
+    if (!j.blocks.length) { $("#blockedBody").innerHTML='<div class="empty">No IPs are blocked.</div>'; return; }
+    $("#blockedBody").innerHTML = `<table class="bl"><thead><tr><th>IP</th><th>Blocked for</th><th>Since</th><th>Reason</th><th></th></tr></thead><tbody>`+
+      j.blocks.map(b=>`<tr><td class="mono">${esc(b.ip)}</td><td>${fmtDur(b.durationMs)}</td><td class="muted">${esc(fmt(b.at))}</td><td>${esc(b.reason||'')}</td><td><button class="unblock" data-ip="${esc(b.ip)}">Unblock</button></td></tr>`).join("")+
+      `</tbody></table>`;
+    document.querySelectorAll('.unblock').forEach(btn=>btn.onclick=async()=>{
+      if(!confirm("Unblock "+btn.dataset.ip+"?")) return;
+      await api("/api/unblock",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({ip:btn.dataset.ip})});
+      showBlocked(); loadStatus();
+    });
+  } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+function showAlerts() { $("#blockedView").style.display="none"; $("#alertsView").style.display="grid"; }
+$("#navBlocked").onclick = showBlocked;
+$("#backAlerts").onclick = showAlerts;
 $("#refresh").onclick = loadAlerts;
 $("#hours").onchange = loadAlerts;
 $("#showDismissed").onchange = loadAlerts;

@@ -20,6 +20,9 @@ import { runSshPull, setupSsh, runWatch, loadSshTarget } from "./ingest/sshPull.
 import { startWebServer } from "./web/server.ts";
 import { startFlowCollector } from "./netflow/collector.ts";
 import { setActiveFlowStore } from "./netflow/flowAccess.ts";
+import { startBlocker } from "./respond/blocker.ts";
+import { runDigest } from "./digest/digest.ts";
+import { startDigestScheduler } from "./digest/scheduler.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATS_INTERVAL_MS = 5 * 60_000;
@@ -89,6 +92,18 @@ async function runService(): Promise<void> {
     }
   }
 
+  // Firewall blocker (active response).
+  if (cfg.block.enabled) {
+    try {
+      await startBlocker(cfg);
+    } catch (err) {
+      log.error(`Blocker failed to start: ${(err as Error).message}`);
+    }
+  }
+
+  // Scheduled threat digest.
+  if (cfg.digest.enabled) startDigestScheduler(cfg);
+
   // Local web dashboard (alerts + investigation tools).
   if (cfg.web.enabled) {
     try {
@@ -156,6 +171,16 @@ async function main(): Promise<void> {
       await runWatch(cfg, Date.now());
       return;
     }
+    const digestIdx = argv.findIndex((a) => a === "--digest" || a.startsWith("--digest="));
+    if (digestIdx !== -1) {
+      const inline = argv[digestIdx]!.split("=")[1];
+      const next = argv[digestIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      await runDigest(cfg, raw ? Number(raw) || cfg.digest.periodHours : cfg.digest.periodHours, Date.now());
+      return;
+    }
     if (args.has("--web")) {
       const cfg = loadConfig();
       setLogLevel(cfg.runtime.logLevel);
@@ -166,6 +191,9 @@ async function main(): Promise<void> {
         } catch (err) {
           log.error(`NetFlow collector failed to start: ${(err as Error).message}`);
         }
+      }
+      if (cfg.block.enabled) {
+        try { await startBlocker(cfg); } catch (err) { log.error(`Blocker failed: ${(err as Error).message}`); }
       }
       await startWebServer(cfg);
       log.info("Web dashboard running. Press Ctrl+C to stop.");

@@ -85,13 +85,36 @@ export class Summarizer {
   }
 
   async #call(ctx: CorrelatedContext): Promise<string> {
+    return this.#post(this.#body(ctx));
+  }
+
+  /** Generic completion (used for digests etc.). Returns the model's text. */
+  async complete(systemText: string, userText: string, maxTokens = 1500): Promise<string> {
+    const system = this.#useOauth
+      ? [
+          { type: "text", text: CLAUDE_CODE_IDENTITY },
+          { type: "text", text: systemText },
+        ]
+      : [{ type: "text", text: systemText }];
+    return this.#post(
+      JSON.stringify({
+        model: this.#cfg.claude.model,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        system,
+        messages: [{ role: "user", content: userText }],
+      }),
+    );
+  }
+
+  async #post(body: string): Promise<string> {
     let lastErr: Error | undefined;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       const forceRefresh = attempt > 0 && this.#useOauth;
       const res = await fetch(API_URL, {
         method: "POST",
         headers: await this.#headers(forceRefresh),
-        body: this.#body(ctx),
+        body,
       }).catch((err: Error) => {
         lastErr = err;
         return undefined;

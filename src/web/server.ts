@@ -30,6 +30,7 @@ import { alertStore } from "../store/alertStore.ts";
 import { dismissStore } from "../store/dismissed.ts";
 import { capture, connections, surrounding, relatedActivity } from "../investigate/udm.ts";
 import { enrichIp } from "../investigate/enrich.ts";
+import { blockIp, unblockIp, listBlocks } from "../respond/blocker.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -104,6 +105,27 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       if (method === "POST" && path === "/api/dismissed/clear") {
         const n = dismissStore.clear();
         return send(res, 200, { cleared: n });
+      }
+
+      // --- firewall blocklist ---
+      if (method === "GET" && path === "/api/blocklist") {
+        return send(res, 200, { count: listBlocks().length, blocks: listBlocks() });
+      }
+      if (method === "POST" && path === "/api/block") {
+        const body = await readJson(req);
+        const ip = String(body["ip"] ?? "");
+        try {
+          const entry = await blockIp(cfg, ip, typeof body["reason"] === "string" ? body["reason"] : undefined);
+          return send(res, 200, { ok: true, entry });
+        } catch (err) {
+          return send(res, 400, { error: (err as Error).message });
+        }
+      }
+      if (method === "POST" && path === "/api/unblock") {
+        const body = await readJson(req);
+        const ip = String(body["ip"] ?? "");
+        await unblockIp(ip);
+        return send(res, 200, { ok: true });
       }
 
       // --- alert list ---
@@ -198,6 +220,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           const ip = externalIp(alert);
           if (!ip) return send(res, 400, { error: "No external IP on this alert to enrich." });
           return send(res, 200, await enrichIp(cfg, ip));
+        }
+
+        if (method === "POST" && action === "block") {
+          const ip = externalIp(alert);
+          if (!ip) return send(res, 400, { error: "No external IP on this alert to block." });
+          try {
+            const entry = await blockIp(cfg, ip, `alert ${alert.signature ?? alert.category}`);
+            return send(res, 200, { ok: true, ip, entry });
+          } catch (err) {
+            return send(res, 400, { error: (err as Error).message });
+          }
         }
 
         if (method === "POST" && action === "related") {

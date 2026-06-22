@@ -353,7 +353,7 @@ export async function runWatch(cfg: Config, nowMs: number): Promise<void> {
           return Number.isFinite(n) && n > m ? n : m;
         }, lastSeen);
         log.info(`Watch: ${raw.length} new detection(s).`);
-        await processRawEvents(cfg, raw, Date.now(), summarizer);
+        await processRawEvents(cfg, raw, Date.now(), summarizer, { autoEnrich: true });
         lastSeen = maxTime;
         saveWatchState({ lastSeen });
       }

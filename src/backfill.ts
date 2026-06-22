@@ -18,6 +18,7 @@ import { DiscordNotifier } from "./notify/discord.ts";
 import { Deduper } from "./dedupe.ts";
 import { UnifiClient, type MappedEvent } from "./unifi/client.ts";
 import { alertStore } from "./store/alertStore.ts";
+import { enrichIp, pickExternalIp, escalate } from "./investigate/enrich.ts";
 import { log } from "./logger.ts";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -28,6 +29,7 @@ export async function processRawEvents(
   raw: Record<string, unknown>[],
   nowMs: number,
   existingSummarizer?: Summarizer,
+  opts: { autoEnrich?: boolean } = {},
 ): Promise<void> {
   if (raw.length === 0) {
     log.info("No events to process. Nothing to do.");
@@ -81,7 +83,19 @@ export async function processRawEvents(
     log.info(`(${i + 1}/${toSend.length}) [${m.alert.severity}] ${m.alert.signature}`);
     try {
       const summary = await summarizer.summarize(ctx);
-      const ok = await discord.send(ctx, summary);
+      let enrichment;
+      if (opts.autoEnrich && cfg.enrich.auto) {
+        const ip = pickExternalIp(m.alert.srcIp, m.alert.dstIp);
+        if (ip) {
+          enrichment = await enrichIp(cfg, ip).catch(() => undefined);
+          const esc = escalate(summary.severity, enrichment, cfg);
+          if (esc.escalated) {
+            log.info(`Escalated ${ip} → ${esc.severity} (${esc.reason}).`);
+            summary.severity = esc.severity;
+          }
+        }
+      }
+      const ok = await discord.send(ctx, summary, enrichment);
       alertStore.record(m.alert, summary, ok);
       if (ok) notified++;
       else failed++;

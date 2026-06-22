@@ -180,6 +180,33 @@ automatically (or standalone via `node src/index.ts --web`) and is served at
 > so don't expose it on the LAN without putting authentication in front of it.
 > Requires the SSH connection from `--setup-ssh`.
 
+## Active response: firewall blocking (`BLOCK_ENABLED`)
+
+Block a malicious IP at the gateway from the dashboard (**🚫 Block this IP**) or
+the API. SecTool maintains a `SECTOOL_BLOCK` ipset with DROP rules at the top of
+the UDM's FORWARD/INPUT chains over SSH, **re-asserted every `BLOCK_REASSERT_SEC`**
+(UniFi rebuilds its chains on provision). The **Blocked** page lists every block
+with how long it's been active and a one-click unblock. Private/gateway IPs and
+anything in `BLOCK_ALLOWLIST` are always refused. No auto-expiry — blocks persist
+until you remove them.
+
+## Auto-enrichment + smart escalation (`ENRICH_AUTO`)
+
+Every live alert is enriched before it's posted: the external IP's geo/ASN/VT/
+AbuseIPDB verdicts are folded into the Discord embed, and if VT
+malicious+suspicious ≥ `ESCALATE_VT_MALICIOUS` or AbuseIPDB ≥ `ESCALATE_ABUSE_SCORE`,
+the alert is escalated to **critical** (firing `DISCORD_MENTION`).
+
+## Scheduled threat digest (`DIGEST_ENABLED`, `--digest`)
+
+A Claude-written daily rollup posted to Discord: totals, severity breakdown, top
+attackers (with country/ASN/VT), most-targeted hosts, and threat types. Runs
+in-service daily at `DIGEST_HOUR`, or on demand:
+
+```bash
+node src/index.ts --digest 24    # or: npm run digest
+```
+
 ## IP enrichment & per-IP activity (investigation panel)
 
 - **🌍 Enrich IP** — looks up the alert's external IP against **ip-api.com**

@@ -83,6 +83,19 @@ export interface Config {
     vtApiKey?: string;
     abuseKey?: string;
     ipinfoToken?: string;
+    auto: boolean;
+    escalateVtMalicious: number;
+    escalateAbuseScore: number;
+  };
+  block: {
+    enabled: boolean;
+    reassertSec: number;
+    allowlist: string[];
+  };
+  digest: {
+    enabled: boolean;
+    hour: number;
+    periodHours: number;
   };
 }
 
@@ -217,6 +230,22 @@ export function loadConfig(): Config {
       vtApiKey: optStr("VT_API_KEY"),
       abuseKey: optStr("ABUSEIPDB_API_KEY"),
       ipinfoToken: optStr("IPINFO_TOKEN"),
+      auto: bool("ENRICH_AUTO", true),
+      escalateVtMalicious: int("ESCALATE_VT_MALICIOUS", 3),
+      escalateAbuseScore: int("ESCALATE_ABUSE_SCORE", 50),
+    },
+    block: {
+      enabled: bool("BLOCK_ENABLED", true),
+      reassertSec: int("BLOCK_REASSERT_SEC", 90),
+      allowlist: (optStr("BLOCK_ALLOWLIST") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    },
+    digest: {
+      enabled: bool("DIGEST_ENABLED", false),
+      hour: int("DIGEST_HOUR", 8),
+      periodHours: int("DIGEST_PERIOD_HOURS", 24),
     },
   };
 }

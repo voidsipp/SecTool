@@ -13,6 +13,7 @@
     "backfill": "node src/index.ts --backfill 24",
     "setup-ssh": "node src/index.ts --setup-ssh",
     "pull": "node src/index.ts --pull 24",
+    "digest": "node src/index.ts --digest 24",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
   },
