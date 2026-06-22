@@ -27,6 +27,7 @@ import { correlate } from "../enrich/correlate.ts";
 import { LogBuffer } from "../ingest/logBuffer.ts";
 import { isIP } from "node:net";
 import { alertStore } from "../store/alertStore.ts";
+import { dismissStore } from "../store/dismissed.ts";
 import { capture, connections, surrounding, relatedActivity } from "../investigate/udm.ts";
 import { enrichIp } from "../investigate/enrich.ts";
 
@@ -95,13 +96,21 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           model: cfg.claude.model,
           dryRun: cfg.runtime.dryRun,
           stored: alertStore.all().length,
+          dismissed: dismissStore.count(),
         });
+      }
+
+      // --- restore all dismissed ---
+      if (method === "POST" && path === "/api/dismissed/clear") {
+        const n = dismissStore.clear();
+        return send(res, 200, { cleared: n });
       }
 
       // --- alert list ---
       if (method === "GET" && path === "/api/alerts") {
         if (!loadSshTarget()) return send(res, 409, { error: "No SSH connection configured. Run --setup-ssh." });
         const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const includeDismissed = url.searchParams.get("includeDismissed") === "1";
         const mapped = await refreshAlerts(hours);
         const list = mapped
           .map((m) => {
@@ -120,10 +129,12 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
               raw: a.event.raw,
               hasSummary: !!stored?.summary,
               notifiedAt: stored?.notifiedAt,
+              dismissed: dismissStore.has(a.id),
             };
           })
+          .filter((a) => includeDismissed || !a.dismissed)
           .sort((x, y) => y.time - x.time);
-        return send(res, 200, { hours, count: list.length, alerts: list });
+        return send(res, 200, { hours, count: list.length, dismissedCount: dismissStore.count(), alerts: list });
       }
 
       // --- per-alert routes: /api/alerts/:id[/action] ---
@@ -132,6 +143,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const id = m[1]!;
         const action = m[2];
         const alert = cache.get(id);
+
+        // Dismiss/restore work by id alone (no cache entry required).
+        if (method === "POST" && action === "dismiss") {
+          const body = await readJson(req);
+          dismissStore.dismiss(id, typeof body["reason"] === "string" ? body["reason"] : undefined);
+          return send(res, 200, { dismissed: true });
+        }
+        if (method === "POST" && action === "restore") {
+          dismissStore.restore(id);
+          return send(res, 200, { dismissed: false });
+        }
 
         if (method === "GET" && !action) {
           const stored = alertStore.get(id);

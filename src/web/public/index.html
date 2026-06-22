@@ -22,9 +22,13 @@
   button:disabled { opacity:.5; cursor:default; }
   .layout { display:grid; grid-template-columns:380px 1fr; height:calc(100vh - 53px); }
   .list { overflow-y:auto; border-right:1px solid var(--border); }
-  .card { padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; border-left:3px solid transparent; }
+  .card { padding:11px 30px 11px 14px; border-bottom:1px solid var(--border); cursor:pointer; border-left:3px solid transparent; position:relative; }
   .card:hover { background:var(--panel); }
   .card.active { background:var(--panel2); border-left-color:var(--accent); }
+  .card.dismissed { opacity:.4; }
+  .cardx { position:absolute; top:8px; right:6px; background:transparent; border:none; color:var(--muted); font-size:13px; padding:2px 6px; line-height:1; opacity:0; }
+  .card:hover .cardx, .card.dismissed .cardx { opacity:1; }
+  .cardx:hover { color:var(--critical); border:none; background:transparent; }
   .card .row1 { display:flex; align-items:center; gap:8px; }
   .badge { font-size:10px; font-weight:700; text-transform:uppercase; padding:2px 6px; border-radius:4px; color:#0d1117; }
   .sev-critical{background:var(--critical)} .sev-high{background:var(--high)} .sev-medium{background:var(--medium)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
@@ -63,6 +67,7 @@
       <option value="48" selected>48h</option><option value="168">7d</option><option value="720">30d</option>
     </select>
   </label>
+  <label class="status"><input type="checkbox" id="showDismissed"> Show dismissed</label>
   <button id="refresh">↻ Refresh</button>
 </header>
 <div class="layout">
@@ -86,15 +91,16 @@ async function api(path, opts) {
 
 async function loadStatus() {
   try { const s = await api("/api/status");
-    $("#status").textContent = `${s.stored} stored · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
+    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
   } catch(e) { $("#status").textContent = ""; }
 }
 
 async function loadAlerts() {
   const hours = $("#hours").value;
+  const inc = $("#showDismissed").checked ? "&includeDismissed=1" : "";
   $("#list").innerHTML = '<div class="empty">Loading…</div>';
   try {
-    const j = await api("/api/alerts?hours="+hours);
+    const j = await api("/api/alerts?hours="+hours+inc);
     alerts = j.alerts;
     renderList();
   } catch(e) {
@@ -105,17 +111,25 @@ async function loadAlerts() {
 function renderList() {
   if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
   $("#list").innerHTML = alerts.map(a => `
-    <div class="card ${selected===a.id?'active':''}" data-id="${a.id}">
+    <div class="card ${a.dismissed?'dismissed':''} ${selected===a.id?'active':''}" data-id="${a.id}">
+      <button class="cardx" data-act="${a.dismissed?'restore':'dismiss'}" data-id="${a.id}" title="${a.dismissed?'Restore':'Dismiss'}">${a.dismissed?'↩':'✕'}</button>
       <div class="row1">
         <span class="badge sev-${a.severity}">${a.severity}</span>
         <span class="meta">${esc(ago(a.time))}</span>
         ${a.notifiedAt?'<span class="pill">sent</span>':''}
         ${a.hasSummary?'<span class="pill">AI</span>':''}
+        ${a.dismissed?'<span class="pill">dismissed</span>':''}
       </div>
       <div class="sig">${esc(a.signature || a.category)}</div>
       <div class="flow">${esc(a.srcIp||'?')} → ${esc(a.dstIp||'?')}</div>
     </div>`).join("");
   document.querySelectorAll('.card').forEach(c => c.onclick = () => selectAlert(c.dataset.id));
+  document.querySelectorAll('.cardx').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    try { await api("/api/alerts/"+b.dataset.id+"/"+b.dataset.act,{method:"POST"}); } catch(err){}
+    if (selected===b.dataset.id && b.dataset.act==='dismiss') { selected=null; $("#detail").innerHTML='<div class="empty">Select an alert to investigate.</div>'; }
+    loadAlerts(); loadStatus();
+  });
 }
 
 async function selectAlert(id) {
@@ -257,6 +271,7 @@ function wireActions(id, a) {
 
 $("#refresh").onclick = loadAlerts;
 $("#hours").onchange = loadAlerts;
+$("#showDismissed").onchange = loadAlerts;
 loadStatus(); loadAlerts();
 setInterval(() => { loadStatus(); if(!selected) loadAlerts(); }, 30000);
 </script>
