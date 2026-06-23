@@ -10,6 +10,7 @@
  *   POST /api/alerts/:id/capture    -> live tcpdump for the alert's hosts
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
+ *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
  *
  * Bound to 127.0.0.1 by default — it can run privileged investigation commands
  * on the gateway, so do not expose it on the LAN without adding authentication.
@@ -41,6 +42,7 @@ import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
+import { buildTrends } from "../analytics/trends.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -276,6 +278,14 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const id = String(body["id"] ?? "");
         const removed = suppressionStore.remove(id);
         return send(res, 200, { ok: true, removed });
+      }
+
+      // --- alert trends (historical stats from the local alert store) ---
+      if (method === "GET" && path === "/api/trends") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(50, Math.floor(limitRaw)) : 10;
+        return send(res, 200, buildTrends(hours, limit, Date.now()));
       }
 
       // --- firewall blocklist ---
