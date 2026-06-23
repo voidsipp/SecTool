@@ -120,6 +120,22 @@
   .warlb { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid rgba(75,58,158,.4); font-size:15px; }
   .warlb .bar { height:8px; background:var(--cyan); box-shadow:0 0 6px var(--cyan); }
   .warlb .bar.threat { background:var(--critical); box-shadow:0 0 6px var(--critical); }
+  /* watchlist */
+  .card.watched { border-left-color:var(--medium); box-shadow:inset 3px 0 0 var(--medium); }
+  .card.watched.active { border-left-color:var(--medium); }
+  .watch-pill { color:var(--medium); border-color:var(--medium); }
+  .wlrow { display:grid; grid-template-columns:200px 1fr 110px 110px 130px; gap:10px; align-items:center; padding:9px 12px;
+    border-bottom:1px solid rgba(75,58,158,.4); font-size:15px; }
+  .wlrow .target { font-family:var(--mono); color:var(--medium); font-weight:bold; word-break:break-all; }
+  .wlrow .note { color:var(--muted); font-size:14px; }
+  .wlrow .stat { font-family:var(--mono); }
+  .wlrow .stat.hot { color:var(--high); }
+  .wlrow .stat.crit { color:var(--critical); }
+  .wlrow .actions-cell { text-align:right; }
+  .add-watch { display:flex; gap:8px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
+  .add-watch input { background:var(--panel2); color:var(--text); border:2px solid var(--border); padding:8px 10px; font-size:15px; }
+  .add-watch input.target { min-width:200px; }
+  .add-watch input.note { flex:1; min-width:200px; }
 </style>
 </head>
 <body>
@@ -137,6 +153,7 @@
   <button id="navAsk" class="primary">💬 Ask</button>
   <button id="navWar">🗺️ War Map</button>
   <button id="navHosts">🖥️ Hosts</button>
+  <button id="navWatch">👁 Watchlist</button>
   <button id="navBlocked">🚫 Blocked</button>
   <button id="refresh">↻ Refresh</button>
 </header>
@@ -186,6 +203,26 @@
   </div>
   <div id="warDetail" style="margin-top:18px;"></div>
 </div>
+<div id="watchView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+    <button id="backAlerts5">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">👁 Watchlist <span id="watchCount" class="muted"></span></h2>
+    <span class="spacer" style="flex:1"></span>
+    <label class="status">Window
+      <select id="watchHours">
+        <option value="6">6h</option><option value="24">24h</option>
+        <option value="48" selected>48h</option><option value="168">7d</option><option value="720">30d</option>
+      </select>
+    </label>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">Operator-curated IPs / CIDR blocks to monitor closely. Watched targets get a 👁 badge on the alert list, and recent flow/alert hits are shown here. Purely observational — does not block or alter scoring.</div>
+  <div class="add-watch">
+    <input id="watchTarget" class="target" placeholder="IP or CIDR (e.g. 185.220.101.7 or 185.220.101.0/24)" />
+    <input id="watchNote" class="note" placeholder="Reason / note (optional)" />
+    <button id="watchAdd" class="primary">＋ Add to watchlist</button>
+  </div>
+  <div id="watchBody"><div class="empty">Loading…</div></div>
+</div>
 <div id="maptip"></div>
 
 <script>
@@ -204,7 +241,7 @@ async function api(path, opts) {
 
 async function loadStatus() {
   try { const s = await api("/api/status");
-    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
+    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''}${s.watched?` · 👁 ${s.watched}`:''} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
   } catch(e) { $("#status").textContent = ""; }
 }
 
@@ -224,7 +261,7 @@ async function loadAlerts() {
 function renderList() {
   if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
   $("#list").innerHTML = alerts.map(a => `
-    <div class="card ${a.dismissed?'dismissed':''} ${selected===a.id?'active':''}" data-id="${a.id}">
+    <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${selected===a.id?'active':''}" data-id="${a.id}">
       <button class="cardx" data-act="${a.dismissed?'restore':'dismiss'}" data-id="${a.id}" title="${a.dismissed?'Restore':'Dismiss'}">${a.dismissed?'↩':'✕'}</button>
       <div class="row1">
         <span class="badge sev-${a.severity}">${a.severity}</span>
@@ -232,6 +269,7 @@ function renderList() {
         ${a.notifiedAt?'<span class="pill">sent</span>':''}
         ${a.hasSummary?'<span class="pill">AI</span>':''}
         ${a.dismissed?'<span class="pill">dismissed</span>':''}
+        ${a.watched?'<span class="pill watch-pill">👁 watched</span>':''}
       </div>
       <div class="sig">${esc(a.signature || a.category)}</div>
       <div class="flow">${esc(a.srcIp||'?')} → ${esc(a.dstIp||'?')}</div>
@@ -287,6 +325,7 @@ function renderDetail(a, summary, state) {
           <option value="168">±7d</option><option value="720">±30d</option><option value="0">All data</option>
         </select>
         <button id="block" class="danger">🚫 Block this IP at the firewall</button>
+        <button id="watch">👁 Add to watchlist</button>
       </div>
       <div class="actions">
         <button id="cap">📡 Capture live traffic (8s)</button>
@@ -363,6 +402,16 @@ function wireActions(id, a) {
       loadStatus();
     } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
 
+  $("#watch").onclick = async () => {
+    const note = prompt("Add a note for this watchlist entry (optional):", "alert "+(a.signature||a.category||a.id)) || "";
+    busy("Adding to watchlist");
+    try {
+      const j = await api("/api/alerts/"+id+"/watch",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({note})});
+      out.innerHTML = `<div class="muted">👁 <b>${esc(j.ip)}</b> added to the watchlist. View activity on the <a href="#" id="goWatch" style="color:var(--accent)">Watchlist</a> page.</div>`;
+      const g=$("#goWatch"); if(g) g.onclick=(e)=>{e.preventDefault(); showWatch();};
+      a.watched = true; loadStatus();
+    } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
+
   $("#cap").onclick = async () => { busy("Capturing live packets on the gateway"); try {
     const j = await api("/api/alerts/"+id+"/capture",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({seconds:8})});
     out.innerHTML = `<div class="muted">${esc(j.note||(j.packets+" packets in "+j.seconds+"s involving "+j.ips.join(", ")))}</div>`+(j.lines.length?`<pre>${esc(j.lines.join("\n"))}</pre>`:"");
@@ -401,7 +450,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -419,7 +468,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -487,7 +536,7 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -495,7 +544,7 @@ function showAsk(){
 let warMapData=null;
 function bytesH(n){ return n>1e9?(n/1e9).toFixed(1)+'GB':n>1e6?(n/1e6).toFixed(1)+'MB':n>1e3?(n/1e3).toFixed(1)+'KB':(n||0)+'B'; }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -563,7 +612,59 @@ async function clickCountry(code, country){
         else { await api("/api/safe",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip})}); alert(ip+" marked safe"); } } catch(e){ alert(e.message); } });
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#alertsView").style.display="grid"; }
+async function showWatch(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none";
+  $("#watchView").style.display="block";
+  $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const j = await api("/api/watchlist?hours="+$("#watchHours").value);
+    $("#watchCount").textContent="("+j.count+")";
+    if (!j.items.length){ $("#watchBody").innerHTML='<div class="empty">No IPs on the watchlist yet.<br>Add one above, or click "👁 Add to watchlist" on any alert.</div>'; return; }
+    const bH = n=> n>1e9?(n/1e9).toFixed(1)+'GB':n>1e6?(n/1e6).toFixed(1)+'MB':n>1e3?(n/1e3).toFixed(1)+'KB':(n||0)+'B';
+    $("#watchBody").innerHTML =
+      `<div class="wlrow muted" style="font-family:var(--pix);font-size:8px;text-transform:uppercase;border-bottom:2px solid var(--border)">
+         <span>Target</span><span>Note · Added</span><span>Flow hits</span><span>Alert hits</span><span></span>
+       </div>` +
+      j.items.map(it=>{
+        const hot = it.flowHits>0 || it.alertHits>0;
+        const crit = it.alertHits>0;
+        const lastSeen = it.lastSeen ? ago(it.lastSeen) : '—';
+        const lastAlert = it.lastAlertTime ? ago(it.lastAlertTime) : '';
+        const range = (it.bytesIn||it.bytesOut) ? `<div class="muted" style="font-size:13px">↓${bH(it.bytesIn)} / ↑${bH(it.bytesOut)} · ${it.peers} peers</div>` : '';
+        return `<div class="wlrow">
+          <div>
+            <div class="target">${esc(it.target)}</div>
+            <div class="muted" style="font-size:13px">${it.family===0?'CIDR':'IPv'+it.family}</div>
+          </div>
+          <div>
+            <div>${esc(it.note||'')}</div>
+            <div class="note">added ${esc(ago(it.at))}${lastSeen!=='—'?` · last flow ${esc(lastSeen)}`:''}</div>
+          </div>
+          <div class="stat ${hot?'hot':''}">${it.flowHits||0}${range}</div>
+          <div class="stat ${crit?'crit':''}">${it.alertHits||0}${lastAlert?`<div class="muted" style="font-size:13px">${esc(lastAlert)}</div>`:''}</div>
+          <div class="actions-cell">
+            <button class="peerbtn" data-act="remove" data-target="${esc(it.target)}">Remove</button>
+          </div>
+        </div>`;
+      }).join("");
+    document.querySelectorAll("#watchBody [data-act=remove]").forEach(b=>b.onclick=async()=>{
+      if (!confirm("Remove "+b.dataset.target+" from the watchlist?")) return;
+      try { await api("/api/unwatch",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({target:b.dataset.target})}); showWatch(); loadStatus(); }
+      catch(e){ alert(e.message); }
+    });
+  } catch(e){ $("#watchBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+async function addWatchFromForm(){
+  const target = $("#watchTarget").value.trim();
+  const note = $("#watchNote").value.trim();
+  if (!target) return;
+  try {
+    await api("/api/watch",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({target, note})});
+    $("#watchTarget").value=""; $("#watchNote").value="";
+    showWatch(); loadStatus();
+  } catch(e){ alert(e.message); }
+}
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#alertsView").style.display="grid"; }
 $("#navWar").onclick = showWar;
 $("#warWin").onchange = showWar;
 $("#backAlerts4").onclick = showAlerts;
@@ -572,6 +673,12 @@ $("#askSend").onclick = sendAsk;
 $("#askInput").addEventListener("keydown", e=>{ if(e.key==="Enter") sendAsk(); });
 $("#navBlocked").onclick = showBlocked;
 $("#navHosts").onclick = showHosts;
+$("#navWatch").onclick = showWatch;
+$("#watchHours").onchange = showWatch;
+$("#watchAdd").onclick = addWatchFromForm;
+$("#watchTarget").addEventListener("keydown", e=>{ if(e.key==="Enter") addWatchFromForm(); });
+$("#watchNote").addEventListener("keydown", e=>{ if(e.key==="Enter") addWatchFromForm(); });
+$("#backAlerts5").onclick = showAlerts;
 $("#backAlerts").onclick = showAlerts;
 $("#backAlerts2").onclick = showAlerts;
 $("#backAlerts3").onclick = showAlerts;
