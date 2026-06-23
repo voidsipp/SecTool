@@ -120,3 +120,73 @@ export async function buildGeoMap(cfg: Config, hours: number, nowMs: number): Pr
   const home = await geolocateSelf();
   return { home, hours, totalBytes, countries };
 }
+
+export interface CountryConn {
+  internal: string;
+  external: string;
+  inBytes: number;
+  outBytes: number;
+  flows: number;
+  ports: number[];
+}
+export interface CountryFlows {
+  code: string;
+  country: string;
+  totalBytes: number;
+  flows: number;
+  ips: number;
+  connections: CountryConn[];
+}
+
+/** Per-connection breakdown of traffic to/from a single country. */
+export async function buildCountryFlows(code: string, hours: number, nowMs: number): Promise<CountryFlows> {
+  const store = getActiveFlowStore();
+  const conns = new Map<string, CountryConn>();
+  let country = code;
+  let totalBytes = 0;
+  let flows = 0;
+  const ips = new Set<string>();
+
+  if (store) {
+    const fl = store.query([], nowMs - hours * 3_600_000, nowMs, 200000) as Flow[];
+    const exts = new Set<string>();
+    for (const f of fl) {
+      const s = f.srcIp;
+      const d = f.dstIp;
+      if (!s || !d || isIP(s) === 0 || isIP(d) === 0) continue;
+      if (isPrivate(s) === isPrivate(d)) continue;
+      exts.add(isPrivate(s) ? d : s);
+    }
+    const geo = await geolocate([...exts]);
+    for (const f of fl) {
+      const s = f.srcIp;
+      const d = f.dstIp;
+      if (!s || !d || isIP(s) === 0 || isIP(d) === 0) continue;
+      const sp = isPrivate(s);
+      if (sp === isPrivate(d)) continue;
+      const ext = sp ? d : s;
+      const intern = sp ? s : d;
+      const g = geo.get(ext);
+      if (!g || g.code !== code) continue;
+      country = g.country;
+      ips.add(ext);
+      const key = `${intern}|${ext}`;
+      let c = conns.get(key);
+      if (!c) {
+        c = { internal: intern, external: ext, inBytes: 0, outBytes: 0, flows: 0, ports: [] };
+        conns.set(key, c);
+      }
+      const bytes = f.bytes ?? 0;
+      c.flows++;
+      flows++;
+      totalBytes += bytes;
+      if (sp) c.outBytes += bytes;
+      else c.inBytes += bytes;
+      if (f.dstPort && !c.ports.includes(f.dstPort) && c.ports.length < 10) c.ports.push(f.dstPort);
+    }
+  }
+  const connections = [...conns.values()]
+    .sort((a, b) => b.inBytes + b.outBytes - (a.inBytes + a.outBytes))
+    .slice(0, 300);
+  return { code, country, totalBytes, flows, ips: ips.size, connections };
+}

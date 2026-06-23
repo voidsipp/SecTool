@@ -34,7 +34,7 @@ import { computeHostRisks } from "../investigate/hosts.ts";
 import { recentAnomalies } from "../anomaly/baseline.ts";
 import { safeStore } from "../store/safelist.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
-import { buildGeoMap } from "../investigate/geomap.ts";
+import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -116,6 +116,12 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       if (method === "GET" && path === "/api/geomap") {
         const hours = Number(url.searchParams.get("hours")) || 24;
         return send(res, 200, await buildGeoMap(cfg, hours, Date.now()));
+      }
+      if (method === "GET" && path === "/api/geomap/country") {
+        const code = (url.searchParams.get("code") ?? "").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase();
+        const hours = Number(url.searchParams.get("hours")) || 24;
+        if (!code) return send(res, 400, { error: "Missing country code." });
+        return send(res, 200, await buildCountryFlows(code, hours, Date.now()));
       }
 
       // --- conversational analyst ---
