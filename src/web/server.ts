@@ -28,6 +28,7 @@ import { LogBuffer } from "../ingest/logBuffer.ts";
 import { isIP } from "node:net";
 import { alertStore } from "../store/alertStore.ts";
 import { dismissStore } from "../store/dismissed.ts";
+import { triageStore, isTriageStatus, TRIAGE_STATUSES, type TriageStatus } from "../store/triage.ts";
 import { capture, connections, surrounding, relatedActivity } from "../investigate/udm.ts";
 import { enrichIp } from "../investigate/enrich.ts";
 import { computeHostRisks } from "../investigate/hosts.ts";
@@ -106,6 +107,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           stored: alertStore.all().length,
           dismissed: dismissStore.count(),
           watched: watchStore.count(),
+          triage: triageStore.counts(),
         });
       }
 
@@ -257,11 +259,14 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         if (!loadSshTarget()) return send(res, 409, { error: "No SSH connection configured. Run --setup-ssh." });
         const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
         const includeDismissed = url.searchParams.get("includeDismissed") === "1";
+        const statusFilterRaw = url.searchParams.get("status") ?? "";
+        const statusFilter = isTriageStatus(statusFilterRaw) ? statusFilterRaw : null;
         const mapped = await refreshAlerts(hours);
         const list = mapped
           .map((m) => {
             const a = m.alert;
             const stored = alertStore.get(a.id);
+            const triage = triageStore.get(a.id);
             return {
               id: a.id,
               time: a.event.timestamp ?? a.event.receivedAt,
@@ -277,11 +282,20 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
               notifiedAt: stored?.notifiedAt,
               dismissed: dismissStore.has(a.id),
               watched: !!(watchStore.match(a.srcIp) || watchStore.match(a.dstIp)),
+              triageStatus: triage?.status ?? "open",
+              noteCount: triage?.notes.length ?? 0,
             };
           })
           .filter((a) => includeDismissed || !a.dismissed)
+          .filter((a) => !statusFilter || a.triageStatus === statusFilter)
           .sort((x, y) => y.time - x.time);
-        return send(res, 200, { hours, count: list.length, dismissedCount: dismissStore.count(), alerts: list });
+        return send(res, 200, {
+          hours,
+          count: list.length,
+          dismissedCount: dismissStore.count(),
+          triageCounts: triageStore.counts(),
+          alerts: list,
+        });
       }
 
       // --- per-alert routes: /api/alerts/:id[/action] ---
@@ -305,7 +319,29 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         if (method === "GET" && !action) {
           const stored = alertStore.get(id);
           if (!alert && !stored) return send(res, 404, { error: "Unknown alert id (refresh the list)." });
-          return send(res, 200, { alert: alert ? publicAlert(alert) : stored, summary: alertStore.getSummary(id) });
+          return send(res, 200, {
+            alert: alert ? publicAlert(alert) : stored,
+            summary: alertStore.getSummary(id),
+            triage: triageStore.view(id),
+          });
+        }
+
+        // Triage works on any known alert id, with or without a cache entry.
+        if (method === "POST" && action === "status") {
+          const body = await readJson(req);
+          const next = body["status"];
+          if (!isTriageStatus(next)) {
+            return send(res, 400, { error: `status must be one of: ${TRIAGE_STATUSES.join(", ")}` });
+          }
+          const entry = triageStore.setStatus(id, next as TriageStatus);
+          return send(res, 200, { ok: true, triage: entry });
+        }
+
+        if (method === "POST" && action === "note") {
+          const body = await readJson(req);
+          const note = triageStore.addNote(id, String(body["text"] ?? ""));
+          if (!note) return send(res, 400, { error: "Note text is empty." });
+          return send(res, 200, { ok: true, note, triage: triageStore.view(id) });
         }
 
         if (!alert) return send(res, 404, { error: "Alert not in cache — refresh the alert list first." });

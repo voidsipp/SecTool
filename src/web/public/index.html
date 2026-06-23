@@ -136,6 +136,27 @@
   .add-watch input { background:var(--panel2); color:var(--text); border:2px solid var(--border); padding:8px 10px; font-size:15px; }
   .add-watch input.target { min-width:200px; }
   .add-watch input.note { flex:1; min-width:200px; }
+  /* triage */
+  .triage-badge { font-family:var(--pix); font-size:7px; line-height:1; text-transform:uppercase; letter-spacing:.05em;
+    padding:4px 5px; border-radius:0; box-shadow:2px 2px 0 rgba(0,0,0,.5); color:#0a0620; }
+  .ts-open         { background:var(--info); }
+  .ts-investigating{ background:var(--high); }
+  .ts-resolved     { background:var(--low); }
+  .ts-false-positive { background:#6e6390; color:#dcd6ff; }
+  .card.ts-resolved { opacity:.62; }
+  .card.ts-false-positive { opacity:.5; }
+  .triage-select { font-family:var(--pix); font-size:9px; text-transform:uppercase; padding:6px 8px;
+    background:var(--panel2); color:var(--text); border:2px solid var(--border); box-shadow:2px 2px 0 rgba(0,0,0,.5); }
+  .triage-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .note-add { display:flex; gap:8px; margin-top:10px; align-items:stretch; }
+  .note-add textarea { flex:1; min-height:54px; background:var(--panel2); color:var(--text); border:2px solid var(--border);
+    padding:8px 10px; font-family:var(--mono); font-size:15px; line-height:1.35; resize:vertical; border-radius:0; }
+  .note-add textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 8px var(--accent); }
+  .note-list { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .note { background:rgba(6,4,22,.55); border-left:3px solid var(--accent); padding:8px 12px; font-size:16px; line-height:1.4; }
+  .note .when { font-family:var(--pix); font-size:7px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px; }
+  .note .text { white-space:pre-wrap; word-break:break-word; color:#efeaff; }
+  .note-empty { color:var(--muted); font-style:italic; font-size:15px; }
 </style>
 </head>
 <body>
@@ -150,6 +171,15 @@
     </select>
   </label>
   <label class="status"><input type="checkbox" id="showDismissed"> Show dismissed</label>
+  <label class="status">Status
+    <select id="triageFilter">
+      <option value="">all</option>
+      <option value="open">open</option>
+      <option value="investigating">investigating</option>
+      <option value="resolved">resolved</option>
+      <option value="false-positive">false-positive</option>
+    </select>
+  </label>
   <button id="navAsk" class="primary">💬 Ask</button>
   <button id="navWar">🗺️ War Map</button>
   <button id="navHosts">🖥️ Hosts</button>
@@ -241,16 +271,23 @@ async function api(path, opts) {
 
 async function loadStatus() {
   try { const s = await api("/api/status");
-    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''}${s.watched?` · 👁 ${s.watched}`:''} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
+    const t = s.triage || {};
+    const triageBits = [];
+    if (t.investigating) triageBits.push(t.investigating + " 🔎");
+    if (t.resolved) triageBits.push(t.resolved + " ✓");
+    const triageStr = triageBits.length ? ` · ${triageBits.join(" / ")}` : "";
+    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''}${s.watched?` · 👁 ${s.watched}`:''}${triageStr} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
   } catch(e) { $("#status").textContent = ""; }
 }
 
 async function loadAlerts() {
   const hours = $("#hours").value;
   const inc = $("#showDismissed").checked ? "&includeDismissed=1" : "";
+  const tf = $("#triageFilter").value;
+  const sf = tf ? "&status="+encodeURIComponent(tf) : "";
   $("#list").innerHTML = '<div class="empty">Loading…</div>';
   try {
-    const j = await api("/api/alerts?hours="+hours+inc);
+    const j = await api("/api/alerts?hours="+hours+inc+sf);
     alerts = j.alerts;
     renderList();
   } catch(e) {
@@ -260,20 +297,28 @@ async function loadAlerts() {
 
 function renderList() {
   if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
-  $("#list").innerHTML = alerts.map(a => `
-    <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${selected===a.id?'active':''}" data-id="${a.id}">
+  $("#list").innerHTML = alerts.map(a => {
+    const ts = a.triageStatus || 'open';
+    const tsClass = ts==='open' ? '' : `ts-${ts}`;
+    const tsBadge = ts==='open' ? '' : `<span class="triage-badge ts-${ts}" title="Triage status">${ts}</span>`;
+    const noteBadge = a.noteCount ? `<span class="pill" title="${a.noteCount} note${a.noteCount===1?'':'s'}">📝 ${a.noteCount}</span>` : '';
+    return `
+    <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${tsClass} ${selected===a.id?'active':''}" data-id="${a.id}">
       <button class="cardx" data-act="${a.dismissed?'restore':'dismiss'}" data-id="${a.id}" title="${a.dismissed?'Restore':'Dismiss'}">${a.dismissed?'↩':'✕'}</button>
       <div class="row1">
         <span class="badge sev-${a.severity}">${a.severity}</span>
         <span class="meta">${esc(ago(a.time))}</span>
+        ${tsBadge}
         ${a.notifiedAt?'<span class="pill">sent</span>':''}
         ${a.hasSummary?'<span class="pill">AI</span>':''}
+        ${noteBadge}
         ${a.dismissed?'<span class="pill">dismissed</span>':''}
         ${a.watched?'<span class="pill watch-pill">👁 watched</span>':''}
       </div>
       <div class="sig">${esc(a.signature || a.category)}</div>
       <div class="flow">${esc(a.srcIp||'?')} → ${esc(a.dstIp||'?')}</div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   document.querySelectorAll('.card').forEach(c => c.onclick = () => selectAlert(c.dataset.id));
   document.querySelectorAll('.cardx').forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
@@ -286,18 +331,43 @@ function renderList() {
 async function selectAlert(id) {
   selected = id; renderList();
   const a = alerts.find(x=>x.id===id);
-  $("#detail").innerHTML = renderDetail(a, null, "loading");
+  $("#detail").innerHTML = renderDetail(a, null, "loading", null);
   try {
     const j = await api("/api/alerts/"+id);
-    $("#detail").innerHTML = renderDetail(a, j.summary, "ready");
-    wireActions(id, a);
+    $("#detail").innerHTML = renderDetail(a, j.summary, "ready", j.triage);
+    wireActions(id, a, j.triage);
   } catch(e) {
-    $("#detail").innerHTML = renderDetail(a, null, "ready");
-    wireActions(id, a);
+    $("#detail").innerHTML = renderDetail(a, null, "ready", null);
+    wireActions(id, a, null);
   }
 }
 
-function renderDetail(a, summary, state) {
+function renderTriageSection(triage) {
+  const t = triage || { status:"open", notes:[] };
+  const opts = ["open","investigating","resolved","false-positive"]
+    .map(s=>`<option value="${s}"${s===t.status?' selected':''}>${s}</option>`).join("");
+  const notesHtml = (t.notes && t.notes.length)
+    ? t.notes.slice().sort((a,b)=>a.at-b.at).map(n=>`<div class="note"><span class="when">${esc(fmt(n.at))} · ${esc(ago(n.at))}</span><div class="text">${esc(n.text)}</div></div>`).join("")
+    : '<div class="note-empty">No notes yet — first finding goes here.</div>';
+  return `
+    <div class="section">
+      <h3>📝 Triage</h3>
+      <div class="triage-row">
+        <span class="triage-badge ts-${t.status}">${t.status}</span>
+        <label class="muted" style="font-size:14px">Set status
+          <select id="triageStatus" class="triage-select">${opts}</select>
+        </label>
+        <span id="triageSaved" class="muted" style="font-size:14px"></span>
+      </div>
+      <div class="note-list" id="noteList">${notesHtml}</div>
+      <div class="note-add">
+        <textarea id="noteText" placeholder="Add a note (e.g. 'Confirmed false positive — internal scanner', 'Owner notified', 'Blocked at edge'). Notes are append-only."></textarea>
+        <button id="noteAdd" class="primary">＋ Note</button>
+      </div>
+    </div>`;
+}
+
+function renderDetail(a, summary, state, triage) {
   const sumHtml = summary ? `
     <div class="summary">
       <p><span class="label">What happened</span><br>${esc(summary.whatHappened)}</p>
@@ -314,6 +384,7 @@ function renderDetail(a, summary, state) {
       <div class="kv"><div class="k">Classification</div><div class="v">${esc(a.classification||'—')}</div></div>
       <div class="kv"><div class="k">Alert ID</div><div class="v">${esc(a.id)}</div></div>
     </div>
+    ${renderTriageSection(triage)}
     <div class="section"><h3>🧠 AI analysis</h3>${sumHtml}</div>
     <div class="section">
       <h3>🔬 Investigation tools</h3>
@@ -337,16 +408,71 @@ function renderDetail(a, summary, state) {
     <div class="section"><h3>📄 Raw event</h3><pre>${esc(a.raw)}</pre></div>`;
 }
 
-function wireActions(id, a) {
+function wireActions(id, a, triage) {
   const out = $("#invout");
   const busy = (label) => { out.innerHTML = `<div class="muted"><span class="spin"></span> ${label}…</div>`; };
+  let currentTriage = triage || { status: a.triageStatus || "open", notes: [] };
   const gen = $("#gen");
   if (gen) gen.onclick = async () => {
     gen.disabled = true; gen.innerHTML = '<span class="spin"></span> Analyzing…';
     try { const j = await api("/api/alerts/"+id+"/summarize",{method:"POST"});
-      a.hasSummary=true; const d=$("#detail"); d.innerHTML = renderDetail(a, j.summary, "ready"); wireActions(id, a);
+      a.hasSummary=true; const d=$("#detail"); d.innerHTML = renderDetail(a, j.summary, "ready", currentTriage); wireActions(id, a, currentTriage);
     } catch(e){ gen.disabled=false; gen.textContent="✨ Generate AI summary"; out.innerHTML='<pre>'+esc(e.message)+'</pre>'; }
   };
+  const tsSel = $("#triageStatus");
+  if (tsSel) tsSel.onchange = async () => {
+    const newStatus = tsSel.value;
+    const prev = currentTriage.status;
+    const flash = $("#triageSaved");
+    flash.textContent = "saving…";
+    try {
+      const j = await api("/api/alerts/"+id+"/status",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({status:newStatus})});
+      currentTriage = j.triage;
+      a.triageStatus = newStatus;
+      // Update the inline badge next to the dropdown
+      const badge = tsSel.parentElement.parentElement.querySelector(".triage-badge");
+      if (badge) { badge.textContent = newStatus; badge.className = "triage-badge ts-"+newStatus; }
+      flash.textContent = "✓ saved";
+      setTimeout(()=>{ if(flash) flash.textContent=""; }, 1400);
+      // Refresh the card in the list so the badge updates without a full reload.
+      const card = document.querySelector('.card[data-id="'+id+'"]');
+      if (card) {
+        card.classList.remove("ts-open","ts-investigating","ts-resolved","ts-false-positive");
+        if (newStatus !== "open") card.classList.add("ts-"+newStatus);
+      }
+      loadStatus();
+    } catch(e) {
+      tsSel.value = prev;
+      flash.textContent = "✗ "+e.message;
+    }
+  };
+  const noteAdd = $("#noteAdd");
+  const noteText = $("#noteText");
+  if (noteAdd && noteText) {
+    const submit = async () => {
+      const text = noteText.value.trim();
+      if (!text) return;
+      noteAdd.disabled = true;
+      try {
+        const j = await api("/api/alerts/"+id+"/note",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text})});
+        currentTriage = j.triage;
+        noteText.value = "";
+        const list = $("#noteList");
+        const ordered = currentTriage.notes.slice().sort((x,y)=>x.at-y.at);
+        list.innerHTML = ordered.map(n=>`<div class="note"><span class="when">${esc(fmt(n.at))} · ${esc(ago(n.at))}</span><div class="text">${esc(n.text)}</div></div>`).join("");
+        // Bump note count on the card.
+        a.noteCount = (a.noteCount || 0) + 1;
+        renderList();
+        loadStatus();
+      } catch(e) {
+        alert("Could not save note: "+e.message);
+      } finally {
+        noteAdd.disabled = false;
+      }
+    };
+    noteAdd.onclick = submit;
+    noteText.addEventListener("keydown", (e)=>{ if ((e.ctrlKey||e.metaKey) && e.key==="Enter") submit(); });
+  }
   $("#enrich").onclick = async () => { busy("Querying ip-api, VirusTotal & AbuseIPDB"); try {
     const j = await api("/api/alerts/"+id+"/enrich",{method:"POST"});
     let h = `<div class="grid">`;
@@ -685,6 +811,7 @@ $("#backAlerts3").onclick = showAlerts;
 $("#refresh").onclick = loadAlerts;
 $("#hours").onchange = loadAlerts;
 $("#showDismissed").onchange = loadAlerts;
+$("#triageFilter").onchange = loadAlerts;
 loadStatus(); loadAlerts();
 setInterval(() => { loadStatus(); if(!selected) loadAlerts(); }, 30000);
 </script>
