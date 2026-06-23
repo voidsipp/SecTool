@@ -157,6 +157,28 @@
   .note .when { font-family:var(--pix); font-size:7px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:4px; }
   .note .text { white-space:pre-wrap; word-break:break-word; color:#efeaff; }
   .note-empty { color:var(--muted); font-style:italic; font-size:15px; }
+  /* suppressions */
+  .supp-pill { color:#bdb5e0; border-color:#6e6390; }
+  .card.suppressed { opacity:.55; }
+  .card.suppressed .sig::after { content:" · muted"; color:#bdb5e0; font-size:13px; }
+  .srow { display:grid; grid-template-columns:1.4fr 110px 110px 130px 130px 90px; gap:10px; align-items:center;
+    padding:10px 12px; border-bottom:1px solid rgba(75,58,158,.4); font-size:15px; }
+  .srow .cond { font-family:var(--mono); color:var(--text); word-break:break-all; }
+  .srow .meta { color:var(--muted); font-size:14px; }
+  .srow .hits { font-family:var(--mono); }
+  .srow .hits.hot { color:var(--high); }
+  .srow .expires.expsoon { color:var(--high); }
+  .add-supp { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; margin-bottom:8px; }
+  .add-supp input, .add-supp select, .supp-reason input, .supp-ttl select {
+    background:var(--panel2); color:var(--text); border:2px solid var(--border); padding:8px 10px; font-size:15px;
+    font-family:var(--mono); }
+  .add-supp label { font-family:var(--pix); font-size:8px; text-transform:uppercase; color:var(--muted);
+    display:flex; flex-direction:column; gap:4px; }
+  .supp-bottom { display:grid; grid-template-columns:1fr 220px auto; gap:8px; align-items:end; margin-bottom:16px; }
+  .supp-reason, .supp-ttl { display:flex; flex-direction:column; gap:4px; }
+  .supp-reason label, .supp-ttl label { font-family:var(--pix); font-size:8px; text-transform:uppercase; color:var(--muted); }
+  .supp-reason input { width:100%; }
+  .supp-ttl select { width:100%; }
 </style>
 </head>
 <body>
@@ -184,6 +206,7 @@
   <button id="navWar">🗺️ War Map</button>
   <button id="navHosts">🖥️ Hosts</button>
   <button id="navWatch">👁 Watchlist</button>
+  <button id="navSupp">🔕 Suppressions</button>
   <button id="navBlocked">🚫 Blocked</button>
   <button id="refresh">↻ Refresh</button>
 </header>
@@ -253,6 +276,59 @@
   </div>
   <div id="watchBody"><div class="empty">Loading…</div></div>
 </div>
+<div id="suppView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+    <button id="backAlerts6">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">🔕 Suppression rules <span id="suppCount" class="muted"></span></h2>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">
+    Mute future alerts that match a pattern (signature, category, src/dst IP, or max severity). Matched alerts
+    still appear in the dashboard with a "muted" badge but skip Claude summarization and Discord notification.
+    Use an optional TTL for time-limited mutes (e.g. during planned maintenance).
+  </div>
+  <div class="section">
+    <h3>＋ Add rule</h3>
+    <div class="muted" style="font-size:13px; margin-bottom:8px;">All non-empty fields must match (AND). At least one field is required.</div>
+    <div class="add-supp">
+      <label>Signature contains <input id="suppSig" placeholder="e.g. ET POLICY" /></label>
+      <label>Category equals <input id="suppCat" placeholder="e.g. IDS/IPS" /></label>
+      <label>Source IP <input id="suppSrc" placeholder="e.g. 10.0.5.42" /></label>
+      <label>Dest IP <input id="suppDst" placeholder="e.g. 8.8.8.8" /></label>
+    </div>
+    <div class="supp-bottom">
+      <div class="supp-reason">
+        <label>Reason (optional)</label>
+        <input id="suppReason" placeholder="e.g. noisy vendor scanner — owner notified" />
+      </div>
+      <div class="supp-ttl">
+        <label>Expires</label>
+        <select id="suppTtl">
+          <option value="0">never</option>
+          <option value="3600000">1 hour</option>
+          <option value="14400000">4 hours</option>
+          <option value="86400000">1 day</option>
+          <option value="259200000">3 days</option>
+          <option value="604800000">7 days</option>
+          <option value="2592000000">30 days</option>
+        </select>
+      </div>
+      <button id="suppAdd" class="primary">＋ Add rule</button>
+    </div>
+    <div style="margin-top:4px">
+      <label class="muted" style="font-size:13px">Max severity (silences only at or below)
+        <select id="suppMaxSev" style="margin-left:4px;font-family:var(--mono);font-size:14px;background:var(--panel2);color:var(--text);border:2px solid var(--border);padding:4px 8px;">
+          <option value="">— any —</option>
+          <option value="info">info</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="critical">critical</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <div id="suppBody"><div class="empty">Loading…</div></div>
+</div>
 <div id="maptip"></div>
 
 <script>
@@ -276,7 +352,7 @@ async function loadStatus() {
     if (t.investigating) triageBits.push(t.investigating + " 🔎");
     if (t.resolved) triageBits.push(t.resolved + " ✓");
     const triageStr = triageBits.length ? ` · ${triageBits.join(" / ")}` : "";
-    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''}${s.watched?` · 👁 ${s.watched}`:''}${triageStr} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
+    $("#status").textContent = `${s.stored} stored${s.dismissed?` · ${s.dismissed} dismissed`:''}${s.watched?` · 👁 ${s.watched}`:''}${s.suppressions?` · 🔕 ${s.suppressions}`:''}${triageStr} · model ${s.model}` + (s.sshConfigured ? "" : " · ⚠ no SSH");
   } catch(e) { $("#status").textContent = ""; }
 }
 
@@ -302,8 +378,10 @@ function renderList() {
     const tsClass = ts==='open' ? '' : `ts-${ts}`;
     const tsBadge = ts==='open' ? '' : `<span class="triage-badge ts-${ts}" title="Triage status">${ts}</span>`;
     const noteBadge = a.noteCount ? `<span class="pill" title="${a.noteCount} note${a.noteCount===1?'':'s'}">📝 ${a.noteCount}</span>` : '';
+    const suppBadge = a.suppressedBy ? `<span class="pill supp-pill" title="Muted by rule: ${esc(a.suppressedBy.summary)}">🔕 muted</span>` : '';
+    const suppClass = a.suppressedBy ? 'suppressed' : '';
     return `
-    <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${tsClass} ${selected===a.id?'active':''}" data-id="${a.id}">
+    <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${suppClass} ${tsClass} ${selected===a.id?'active':''}" data-id="${a.id}">
       <button class="cardx" data-act="${a.dismissed?'restore':'dismiss'}" data-id="${a.id}" title="${a.dismissed?'Restore':'Dismiss'}">${a.dismissed?'↩':'✕'}</button>
       <div class="row1">
         <span class="badge sev-${a.severity}">${a.severity}</span>
@@ -312,6 +390,7 @@ function renderList() {
         ${a.notifiedAt?'<span class="pill">sent</span>':''}
         ${a.hasSummary?'<span class="pill">AI</span>':''}
         ${noteBadge}
+        ${suppBadge}
         ${a.dismissed?'<span class="pill">dismissed</span>':''}
         ${a.watched?'<span class="pill watch-pill">👁 watched</span>':''}
       </div>
@@ -576,7 +655,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -594,7 +673,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -662,7 +741,7 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -670,7 +749,7 @@ function showAsk(){
 let warMapData=null;
 function bytesH(n){ return n>1e9?(n/1e9).toFixed(1)+'GB':n>1e6?(n/1e6).toFixed(1)+'MB':n>1e3?(n/1e3).toFixed(1)+'KB':(n||0)+'B'; }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -739,7 +818,7 @@ async function clickCountry(code, country){
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none";
   $("#watchView").style.display="block";
   $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -790,7 +869,67 @@ async function addWatchFromForm(){
     showWatch(); loadStatus();
   } catch(e){ alert(e.message); }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#alertsView").style.display="grid"; }
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#alertsView").style.display="grid"; }
+async function showSupp(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none";
+  $("#suppView").style.display="block";
+  $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
+  try {
+    const j = await api("/api/suppressions");
+    $("#suppCount").textContent = "("+j.count+")";
+    if (!j.rules.length) { $("#suppBody").innerHTML='<div class="empty">No suppression rules.<br>Add one above to silence noisy alerts.</div>'; return; }
+    const now = Date.now();
+    $("#suppBody").innerHTML =
+      `<div class="srow muted" style="font-family:var(--pix);font-size:8px;text-transform:uppercase;border-bottom:2px solid var(--border)">
+         <span>Condition</span><span>Hits</span><span>Last hit</span><span>Expires</span><span>Added</span><span></span>
+       </div>` +
+      j.rules.map(r=>{
+        const exp = r.expiresAt ? r.expiresAt : null;
+        const expSoon = exp && (exp - now) < 3600000;
+        const expStr = exp ? (exp <= now ? 'expired' : 'in '+fmtDur(exp - now)) : 'never';
+        const hot = r.hitCount > 0;
+        return `<div class="srow">
+          <div>
+            <div class="cond">${esc(r.summary)}</div>
+            ${r.reason?`<div class="meta">${esc(r.reason)}</div>`:''}
+          </div>
+          <div class="hits ${hot?'hot':''}">${r.hitCount||0}</div>
+          <div class="meta">${r.lastHitAt?esc(ago(r.lastHitAt)):'—'}</div>
+          <div class="expires ${expSoon?'expsoon':''}">${esc(expStr)}</div>
+          <div class="meta">${esc(ago(r.createdAt))}</div>
+          <div style="text-align:right">
+            <button class="peerbtn" data-act="unsuppress" data-id="${esc(r.id)}">Remove</button>
+          </div>
+        </div>`;
+      }).join("");
+    document.querySelectorAll("#suppBody [data-act=unsuppress]").forEach(b=>b.onclick=async()=>{
+      if (!confirm("Remove this suppression rule? Future matching alerts will notify again.")) return;
+      try { await api("/api/unsuppress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:b.dataset.id})}); showSupp(); loadStatus(); loadAlerts(); }
+      catch(e){ alert(e.message); }
+    });
+  } catch(e){ $("#suppBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+async function addSuppFromForm(){
+  const body = {
+    signature: $("#suppSig").value.trim() || undefined,
+    category:  $("#suppCat").value.trim() || undefined,
+    srcIp:     $("#suppSrc").value.trim() || undefined,
+    dstIp:     $("#suppDst").value.trim() || undefined,
+    maxSeverity: $("#suppMaxSev").value || undefined,
+    reason:    $("#suppReason").value.trim() || undefined,
+    ttlMs:     Number($("#suppTtl").value) || undefined,
+  };
+  if (!body.signature && !body.category && !body.srcIp && !body.dstIp && !body.maxSeverity) {
+    alert("Provide at least one match field (signature, category, src/dst IP, or max severity).");
+    return;
+  }
+  try {
+    await api("/api/suppress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+    ["suppSig","suppCat","suppSrc","suppDst","suppReason"].forEach(id=>{ $("#"+id).value=""; });
+    $("#suppMaxSev").value = ""; $("#suppTtl").value = "0";
+    showSupp(); loadStatus(); loadAlerts();
+  } catch(e){ alert(e.message); }
+}
 $("#navWar").onclick = showWar;
 $("#warWin").onchange = showWar;
 $("#backAlerts4").onclick = showAlerts;
@@ -805,6 +944,9 @@ $("#watchAdd").onclick = addWatchFromForm;
 $("#watchTarget").addEventListener("keydown", e=>{ if(e.key==="Enter") addWatchFromForm(); });
 $("#watchNote").addEventListener("keydown", e=>{ if(e.key==="Enter") addWatchFromForm(); });
 $("#backAlerts5").onclick = showAlerts;
+$("#navSupp").onclick = showSupp;
+$("#suppAdd").onclick = addSuppFromForm;
+$("#backAlerts6").onclick = showAlerts;
 $("#backAlerts").onclick = showAlerts;
 $("#backAlerts2").onclick = showAlerts;
 $("#backAlerts3").onclick = showAlerts;
