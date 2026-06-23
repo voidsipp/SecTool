@@ -33,6 +33,8 @@ import { enrichIp } from "../investigate/enrich.ts";
 import { computeHostRisks } from "../investigate/hosts.ts";
 import { recentAnomalies } from "../anomaly/baseline.ts";
 import { safeStore } from "../store/safelist.ts";
+import { watchStore, canonicalizeTarget } from "../store/watchlist.ts";
+import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
@@ -103,6 +105,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           dryRun: cfg.runtime.dryRun,
           stored: alertStore.all().length,
           dismissed: dismissStore.count(),
+          watched: watchStore.count(),
         });
       }
 
@@ -147,6 +150,84 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         if (path === "/api/safe") safeStore.add(ip, typeof body["note"] === "string" ? body["note"] : undefined);
         else safeStore.remove(ip);
         return send(res, 200, { ok: true, safe: path === "/api/safe" });
+      }
+
+      // --- watchlist (operator-curated IPs/CIDRs to monitor) ---
+      if (method === "GET" && path === "/api/watchlist") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const entries = watchStore.all();
+        const since = Date.now() - hours * 3_600_000;
+        const flowStore = getActiveFlowStore();
+        const allFlows = flowStore ? flowStore.query([], since, Date.now(), 200_000) : [];
+        const allAlerts = alertStore.all();
+
+        const items = entries.map((e) => {
+          let flowHits = 0;
+          let bytesIn = 0;
+          let bytesOut = 0;
+          let lastSeen: number | null = null;
+          const peers = new Set<string>();
+          for (const f of allFlows) {
+            const src = f.srcIp;
+            const dst = f.dstIp;
+            const matchSrc = src ? watchStore.match(src)?.target === e.target : false;
+            const matchDst = dst ? watchStore.match(dst)?.target === e.target : false;
+            if (!matchSrc && !matchDst) continue;
+            flowHits++;
+            const fe = f.end ?? f.receivedAt;
+            if (lastSeen === null || fe > lastSeen) lastSeen = fe;
+            if (matchSrc && !matchDst) {
+              bytesOut += f.bytes ?? 0;
+              if (dst) peers.add(dst);
+            } else if (matchDst && !matchSrc) {
+              bytesIn += f.bytes ?? 0;
+              if (src) peers.add(src);
+            } else {
+              bytesIn += f.bytes ?? 0;
+            }
+          }
+          let alertHits = 0;
+          let lastAlertId: string | undefined;
+          let lastAlertTime: number | undefined;
+          for (const a of allAlerts) {
+            if (a.time < since) continue;
+            const matchSrc = a.srcIp ? watchStore.match(a.srcIp)?.target === e.target : false;
+            const matchDst = a.dstIp ? watchStore.match(a.dstIp)?.target === e.target : false;
+            if (!matchSrc && !matchDst) continue;
+            alertHits++;
+            if (lastAlertTime === undefined || a.time > lastAlertTime) {
+              lastAlertTime = a.time;
+              lastAlertId = a.id;
+            }
+          }
+          return {
+            ...e,
+            flowHits,
+            bytesIn,
+            bytesOut,
+            peers: peers.size,
+            lastSeen,
+            alertHits,
+            lastAlertId,
+            lastAlertTime,
+          };
+        });
+        return send(res, 200, { hours, count: items.length, items });
+      }
+      if (method === "POST" && path === "/api/watch") {
+        const body = await readJson(req);
+        const raw = String(body["ip"] ?? body["target"] ?? "");
+        const note = typeof body["note"] === "string" ? body["note"].slice(0, 200) : undefined;
+        const c = canonicalizeTarget(raw);
+        if (!c) return send(res, 400, { error: "Invalid IP or CIDR." });
+        const entry = watchStore.add(raw, note);
+        return send(res, 200, { ok: true, entry });
+      }
+      if (method === "POST" && path === "/api/unwatch") {
+        const body = await readJson(req);
+        const raw = String(body["ip"] ?? body["target"] ?? "");
+        const removed = watchStore.remove(raw);
+        return send(res, 200, { ok: true, removed });
       }
 
       // --- firewall blocklist ---
@@ -195,6 +276,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
               hasSummary: !!stored?.summary,
               notifiedAt: stored?.notifiedAt,
               dismissed: dismissStore.has(a.id),
+              watched: !!(watchStore.match(a.srcIp) || watchStore.match(a.dstIp)),
             };
           })
           .filter((a) => includeDismissed || !a.dismissed)
@@ -274,6 +356,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           } catch (err) {
             return send(res, 400, { error: (err as Error).message });
           }
+        }
+
+        if (method === "POST" && action === "watch") {
+          const ip = externalIp(alert);
+          if (!ip) return send(res, 400, { error: "No external IP on this alert to watch." });
+          const body = await readJson(req);
+          const note = typeof body["note"] === "string"
+            ? body["note"].slice(0, 200)
+            : `alert ${alert.signature ?? alert.category ?? alert.id}`;
+          const entry = watchStore.add(ip, note);
+          return send(res, 200, { ok: true, ip, entry });
         }
 
         if (method === "POST" && action === "related") {
