@@ -35,6 +35,8 @@ import { computeHostRisks } from "../investigate/hosts.ts";
 import { recentAnomalies } from "../anomaly/baseline.ts";
 import { safeStore } from "../store/safelist.ts";
 import { watchStore, canonicalizeTarget } from "../store/watchlist.ts";
+import { suppressionStore, describeMatch, type SuppressionInput } from "../store/suppressions.ts";
+import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
@@ -108,6 +110,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           dismissed: dismissStore.count(),
           watched: watchStore.count(),
           triage: triageStore.counts(),
+          suppressions: suppressionStore.count(),
         });
       }
 
@@ -232,6 +235,49 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         return send(res, 200, { ok: true, removed });
       }
 
+      // --- suppression rules (pattern-based mute of future alerts) ---
+      if (method === "GET" && path === "/api/suppressions") {
+        const rules = suppressionStore.all().map((r) => ({
+          ...r,
+          summary: describeMatch(r.match),
+        }));
+        return send(res, 200, { count: rules.length, rules });
+      }
+      if (method === "POST" && path === "/api/suppress") {
+        const body = await readJson(req);
+        const str = (k: string): string | undefined =>
+          typeof body[k] === "string" ? (body[k] as string) : undefined;
+        const num = (k: string): number | undefined =>
+          typeof body[k] === "number" && Number.isFinite(body[k]) ? (body[k] as number) : undefined;
+        const rawSev = body["maxSeverity"];
+        const maxSeverity: Severity | undefined =
+          typeof rawSev === "string" && (SEVERITY_ORDER as readonly string[]).includes(rawSev)
+            ? (rawSev as Severity)
+            : undefined;
+        const input: SuppressionInput = {
+          signature: str("signature"),
+          category: str("category"),
+          srcIp: str("srcIp"),
+          dstIp: str("dstIp"),
+          maxSeverity,
+          reason: str("reason"),
+          ttlMs: num("ttlMs"),
+        };
+        const rule = suppressionStore.add(input);
+        if (!rule) {
+          return send(res, 400, {
+            error: "Provide at least one of: signature, category, srcIp, dstIp, maxSeverity.",
+          });
+        }
+        return send(res, 200, { ok: true, rule: { ...rule, summary: describeMatch(rule.match) } });
+      }
+      if (method === "POST" && path === "/api/unsuppress") {
+        const body = await readJson(req);
+        const id = String(body["id"] ?? "");
+        const removed = suppressionStore.remove(id);
+        return send(res, 200, { ok: true, removed });
+      }
+
       // --- firewall blocklist ---
       if (method === "GET" && path === "/api/blocklist") {
         const blocks = await listBlocksWithStats();
@@ -267,6 +313,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             const a = m.alert;
             const stored = alertStore.get(a.id);
             const triage = triageStore.get(a.id);
+            const supp = suppressionStore.matchAlert(a);
             return {
               id: a.id,
               time: a.event.timestamp ?? a.event.receivedAt,
@@ -284,6 +331,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
               watched: !!(watchStore.match(a.srcIp) || watchStore.match(a.dstIp)),
               triageStatus: triage?.status ?? "open",
               noteCount: triage?.notes.length ?? 0,
+              suppressedBy: supp ? { id: supp.id, summary: describeMatch(supp.match) } : null,
             };
           })
           .filter((a) => includeDismissed || !a.dismissed)
