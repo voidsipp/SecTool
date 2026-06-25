@@ -71,7 +71,9 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /health` — host, platform, tracked connection count (no auth needed).
 - `GET /lookup?remoteIp=&remotePort=&localPort=&proto=` — connections matching the
   filter, each with `process`, `pid`, `path`, `state`, `firstSeen`/`lastSeen`.
-- `GET /connections` — current connection→process snapshot.
+- `GET /connections` — current connection→process snapshot. Each record includes
+  `localAddr` (v1.0.2+) so SecTool can tell whether a listening port is bound to
+  all interfaces or just localhost in the Devices page's **Listeners** audit.
 
 ## Security
 
