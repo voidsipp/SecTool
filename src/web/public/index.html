@@ -236,6 +236,7 @@
   <button id="navWar">🗺️ War Map</button>
   <button id="navTrends">📊 Trends</button>
   <button id="navHosts">🖥️ Hosts</button>
+  <button id="navDevices">📟 Devices</button>
   <button id="navWatch">👁 Watchlist</button>
   <button id="navSupp">🔕 Suppressions</button>
   <button id="navBlocked">🚫 Blocked</button>
@@ -259,6 +260,16 @@
   </div>
   <div class="muted" style="margin-bottom:12px;">Internal devices ranked by signs of compromise from collected flows (bad-outbound, beaconing, fan-out). Forward-only &amp; 1:512-sampled.</div>
   <div id="hostsBody"><div class="empty">Loading…</div></div>
+</div>
+<div id="devicesView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+    <button id="backAlerts8">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">📟 Devices <span id="devCount" class="muted"></span></h2>
+    <input id="devProbe" placeholder="probe extra host(s), e.g. 192.168.0.50" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; min-width:240px;" />
+    <button id="devRefresh">↻ Rescan</button>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Click a device to view its live connections.</div>
+  <div id="devicesBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="askView" style="display:none; height:calc(100vh - 53px); flex-direction:column;">
   <div style="display:flex; align-items:center; gap:12px; padding:16px 26px 8px;">
@@ -712,7 +723,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -730,7 +741,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -758,6 +769,61 @@ async function showHosts() {
       } catch(e){ alert(e.message); }
     });
   } catch(e){ $("#hostsBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+async function showDevices(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
+  $("#devicesView").style.display="block";
+  $("#devicesBody").innerHTML='<div class="empty">Scanning the LAN for agents…</div>';
+  try {
+    const extra = ($("#devProbe").value||"").trim();
+    const j = await api("/api/agents"+(extra?("?hosts="+encodeURIComponent(extra)):""));
+    if (!j.enabled){ $("#devCount").textContent=""; $("#devicesBody").innerHTML='<div class="empty">The agent feature is disabled. Set <code>AGENT_ENABLED=true</code> and restart SecTool.</div>'; return; }
+    $("#devCount").textContent = "("+j.agents.length+" online · "+j.scanned+" scanned)";
+    if (!j.agents.length){
+      $("#devicesBody").innerHTML = `<div class="section"><div class="empty" style="margin-bottom:10px">No agents responded on port ${j.port}.</div>
+        <div class="muted">Install the agent on a device, then rescan:</div>
+        <pre>irm http://${location.hostname}:7878/install.ps1 | iex      # Windows
+curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS</pre></div>`;
+      return;
+    }
+    $("#devicesBody").innerHTML = j.agents.map(a=>`
+      <div class="section devcard">
+        <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
+          <span class="mono">${esc(a.hostname||a.ip)}</span>
+          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}</span></h3>
+        <button class="devview" data-ip="${esc(a.ip)}">▸ View connections</button>
+        <div class="devconns" id="conns-${esc(a.ip).replace(/\./g,'-')}" style="display:none; margin-top:10px"></div>
+      </div>`).join("");
+    document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
+  } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+async function toggleConns(ip,btn){
+  const box = $("#conns-"+ip.replace(/\./g,'-'));
+  if (box.style.display!=="none"){ box.style.display="none"; btn.textContent="▸ View connections"; return; }
+  box.style.display="block"; btn.textContent="▾ Hide connections";
+  box.innerHTML='<div class="empty">Loading connections…</div>';
+  try {
+    const j = await api("/api/agents/connections?host="+encodeURIComponent(ip));
+    if (!j.ok){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"lookup failed")+'</pre>'; return; }
+    const conns = (j.connections||[]).slice();
+    if (!conns.length){ box.innerHTML='<div class="empty">No active connections reported.</div>'; return; }
+    conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
+    const base = name => (name||"").split(/[\\/]/).pop()||"";
+    const rows = conns.map(c=>`<tr>
+      <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}</td>
+      <td class="mono">${esc(c.proto||'')}</td>
+      <td class="mono">${c.localPort||''}</td>
+      <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
+      <td class="muted">${esc(c.state||'')}</td>
+      <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td></tr>`).join("");
+    box.innerHTML = `<input class="devfilter" placeholder="filter by process / ip / port…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
+      <div class="muted" style="margin-bottom:6px">${conns.length} connections</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--muted)"><th>Process</th><th>Proto</th><th>Local</th><th>Remote</th><th>State</th><th>Binary</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+    const filter = box.querySelector(".devfilter");
+    filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
+  } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 function md(s){
   let h = esc(s);
@@ -798,7 +864,7 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -822,7 +888,7 @@ async function agentProcess(internal, external, port){
   } catch(e){ return '<span class="muted">'+esc(e.message)+'</span>'; }
 }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -898,7 +964,7 @@ async function clickCountry(code, country){
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
   $("#watchView").style.display="block";
   $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -949,9 +1015,9 @@ async function addWatchFromForm(){
     showWatch(); loadStatus();
   } catch(e){ alert(e.message); }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#alertsView").style.display="grid"; }
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#alertsView").style.display="grid"; }
 async function showSupp(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
   $("#suppView").style.display="block";
   $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1056,7 +1122,7 @@ function triageBadgesHtml(byTri){
   }).join("") || '<span class="trends-empty">No triage activity.</span>';
 }
 async function showTrends(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none";
   $("#trendsView").style.display="block";
   $("#trendsBody").innerHTML='<div class="empty">Crunching numbers…</div>';
   try {
@@ -1121,6 +1187,10 @@ $("#askSend").onclick = sendAsk;
 $("#askInput").addEventListener("keydown", e=>{ if(e.key==="Enter") sendAsk(); });
 $("#navBlocked").onclick = showBlocked;
 $("#navHosts").onclick = showHosts;
+$("#navDevices").onclick = showDevices;
+$("#devRefresh").onclick = showDevices;
+$("#backAlerts8").onclick = showAlerts;
+$("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(); });
 $("#navWatch").onclick = showWatch;
 $("#watchHours").onchange = showWatch;
 $("#watchAdd").onclick = addWatchFromForm;

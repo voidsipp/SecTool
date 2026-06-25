@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.0.0";
+const AGENT_VERSION = "1.0.1";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -28,7 +28,10 @@ const SELF = fileURLToPath(import.meta.url);
 const SELFDIR = dirname(SELF);
 let fileCfg = {};
 try {
-  fileCfg = JSON.parse(readFileSync(join(SELFDIR, "agent.config.json"), "utf8"));
+  // strip a UTF-8 BOM (PowerShell's Set-Content -Encoding UTF8 prepends U+FEFF) so JSON.parse doesn't choke
+  let raw = readFileSync(join(SELFDIR, "agent.config.json"), "utf8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  fileCfg = JSON.parse(raw);
 } catch {
   /* no config file — use env/defaults */
 }

@@ -28,12 +28,12 @@ function authHeaders(cfg: Config): Record<string, string> {
   return cfg.agent.token ? { authorization: `Bearer ${cfg.agent.token}` } : {};
 }
 
-async function call(cfg: Config, host: string, path: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+async function call(cfg: Config, host: string, path: string, timeoutMs = 6000): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   if (isIP(host) === 0 || !isPrivate(host)) return { ok: false, error: "Agent lookups are only allowed for internal LAN hosts." };
   try {
     const r = await fetch(`http://${host}:${cfg.agent.port}${path}`, {
       headers: authHeaders(cfg),
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (r.status === 401) return { ok: false, error: "Agent rejected the token (check AGENT_TOKEN matches)." };
     if (!r.ok) return { ok: false, error: `Agent on ${host} returned HTTP ${r.status}.` };
@@ -43,8 +43,15 @@ async function call(cfg: Config, host: string, path: string): Promise<{ ok: bool
   }
 }
 
-export async function agentHealth(cfg: Config, host: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  return call(cfg, host, "/health");
+export async function agentHealth(cfg: Config, host: string, timeoutMs = 2500): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return call(cfg, host, "/health", timeoutMs);
+}
+
+export async function agentConnections(cfg: Config, host: string): Promise<{ ok: boolean; host?: string; connections?: AgentMatch[]; error?: string }> {
+  const r = await call(cfg, host, "/connections", 8000);
+  if (!r.ok) return { ok: false, error: r.error };
+  const d = r.data as { host?: string; connections?: AgentMatch[] };
+  return { ok: true, host: d.host, connections: d.connections ?? [] };
 }
 
 export async function agentLookup(

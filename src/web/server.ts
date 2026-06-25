@@ -41,7 +41,7 @@ import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
 
@@ -148,6 +148,42 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       }
       if (method === "GET" && path === "/api/agent/health") {
         return send(res, 200, await agentHealth(cfg, url.searchParams.get("host") ?? ""));
+      }
+
+      // --- discover agents: probe internal hosts (seen in flows) for a live agent ---
+      if (method === "GET" && path === "/api/agents") {
+        if (!cfg.agent.enabled) return send(res, 200, { enabled: false, port: cfg.agent.port, agents: [] });
+        const isPrivate = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+        const candidates = new Set<string>();
+        if (cfg.netflow.advertiseIp && isPrivate(cfg.netflow.advertiseIp)) candidates.add(cfg.netflow.advertiseIp);
+        const flowStore = getActiveFlowStore();
+        if (flowStore) {
+          for (const f of flowStore.query([], Date.now() - 24 * 3600_000, Date.now(), 200_000)) {
+            if (f.srcIp && isPrivate(f.srcIp)) candidates.add(f.srcIp);
+            if (f.dstIp && isPrivate(f.dstIp)) candidates.add(f.dstIp);
+          }
+        }
+        // also include any host an operator has explicitly probed before
+        const extra = (url.searchParams.get("hosts") ?? "").split(",").map((s) => s.trim()).filter((s) => isIP(s) > 0 && isPrivate(s));
+        for (const h of extra) candidates.add(h);
+        const list = [...candidates].slice(0, 64);
+        const probed = await Promise.all(
+          list.map(async (ip) => {
+            const r = await agentHealth(cfg, ip, 1500);
+            if (!r.ok || !r.data) return null;
+            const d = r.data as Record<string, unknown>;
+            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], retentionMin: d["retentionMin"] };
+          }),
+        );
+        const agents = probed.filter((a): a is NonNullable<typeof a> => a !== null);
+        return send(res, 200, { enabled: true, port: cfg.agent.port, scanned: list.length, agents });
+      }
+
+      // --- a single agent's live connections -> processes ---
+      if (method === "GET" && path === "/api/agents/connections") {
+        const host = url.searchParams.get("host") ?? "";
+        const r = await agentConnections(cfg, host);
+        return send(res, r.ok ? 200 : 502, r);
       }
 
       // --- conversational analyst ---

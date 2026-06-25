@@ -47,7 +47,8 @@ $dir = Join-Path $env:LOCALAPPDATA 'SecToolAgent'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 Write-Host "Downloading agent from $server ..."
 Invoke-WebRequest -UseBasicParsing "$server/agent" -OutFile (Join-Path $dir 'sectool-agent.mjs')
-@{ token = $token; updateUrl = $server; port = $port } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $dir 'agent.config.json')
+$cfgJson = @{ token = $token; updateUrl = $server; port = $port } | ConvertTo-Json
+[System.IO.File]::WriteAllText((Join-Path $dir 'agent.config.json'), $cfgJson)  # UTF-8 without BOM (JSON.parse-safe)
 $agent = Join-Path $dir 'sectool-agent.mjs'
 $vbsPath = Join-Path $dir 'launch.vbs'
 # tiny VBS shim launches node windowless (avoids a console flash + quoting issues)

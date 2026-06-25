@@ -225,6 +225,11 @@ buttons (alert detail + war-map country breakdown) query the agent on the intern
 host to name the owning **process / PID / path**. SecTool only ever queries LAN
 IPs. See [agent/README.md](agent/README.md).
 
+The **📟 Devices** page (`GET /api/agents`) discovers which internal hosts are
+running an agent (probing hosts seen in flows), shows each one's version / platform
+/ health, and lets you browse its **live connections → owning process**
+(`GET /api/agents/connections?host=`) with a filter box.
+
 ## 💬 Conversational analyst (dashboard "Ask", `POST /api/ask`)
 
 Ask plain-English questions and Claude answers by **querying your real telemetry**
