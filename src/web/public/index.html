@@ -527,6 +527,7 @@ function renderDetail(a, summary, state, triage) {
         <button id="cap">📡 Capture live traffic (8s)</button>
         <button id="conn">🔗 Active connections</button>
         <button id="surr">🕑 Surrounding activity (±15m)</button>
+        <button id="proc">🔍 Owning process (agent)</button>
       </div>
       <div id="invout"></div>
     </div>
@@ -663,6 +664,16 @@ function wireActions(id, a, triage) {
       a.watched = true; loadStatus();
     } catch(e){ out.innerHTML='<pre>'+esc(e.message)+'</pre>'; } };
 
+  $("#proc").onclick = async () => {
+    const priv = ip => ip && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+    const internal = priv(a.srcIp)?a.srcIp:(priv(a.dstIp)?a.dstIp:null);
+    const external = priv(a.srcIp)?a.dstIp:a.srcIp;
+    if (!internal) { out.innerHTML='<div class="muted">This alert has no internal host to query an agent on.</div>'; return; }
+    busy("Asking the endpoint agent on "+internal+" which program owns this connection");
+    const r = await agentProcess(internal, external, null);
+    out.innerHTML = `<div class="muted">Owning process on <b>${esc(internal)}</b> for traffic with <b>${esc(external)}</b>:</div><pre>${r}</pre>`;
+  };
+
   $("#cap").onclick = async () => { busy("Capturing live packets on the gateway"); try {
     const j = await api("/api/alerts/"+id+"/capture",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({seconds:8})});
     out.innerHTML = `<div class="muted">${esc(j.note||(j.packets+" packets in "+j.seconds+"s involving "+j.ips.join(", ")))}</div>`+(j.lines.length?`<pre>${esc(j.lines.join("\n"))}</pre>`:"");
@@ -794,6 +805,22 @@ function showAsk(){
 }
 let warMapData=null;
 function bytesH(n){ return n>1e9?(n/1e9).toFixed(1)+'GB':n>1e6?(n/1e6).toFixed(1)+'MB':n>1e3?(n/1e3).toFixed(1)+'KB':(n||0)+'B'; }
+async function agentProcess(internal, external, port){
+  try {
+    let q = "/api/agent/lookup?host="+encodeURIComponent(internal)+"&remoteIp="+encodeURIComponent(external);
+    if(port) q += "&remotePort="+encodeURIComponent(port);
+    const j = await api(q);
+    if (!j.ok) return '<span class="muted" title="'+esc(j.error||'')+'">no agent ⚠</span>';
+    if (!j.matches || !j.matches.length){
+      // retry without the port (the exact connection may have closed/rotated)
+      const j2 = await api("/api/agent/lookup?host="+encodeURIComponent(internal)+"&remoteIp="+encodeURIComponent(external));
+      if (j2.ok && j2.matches && j2.matches.length) j.matches = j2.matches; else return '<span class="muted">no match (connection closed)</span>';
+    }
+    const seen = new Set(); const procs=[];
+    for (const m of j.matches){ const k=m.process+"|"+m.pid; if(seen.has(k))continue; seen.add(k); procs.push(m); if(procs.length>=4)break; }
+    return procs.map(m=>`<b style="color:var(--cyan)">${esc(m.process||"?")}</b> <span class="muted">pid ${m.pid} · ${esc(m.proto)}:${m.remotePort}</span>${m.path?`<br><span class="muted" style="font-size:12px">${esc(m.path)}</span>`:""}`).join("<br>");
+  } catch(e){ return '<span class="muted">'+esc(e.message)+'</span>'; }
+}
 async function showWar(){
   $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
   $("#warView").style.display="block";
@@ -855,12 +882,19 @@ async function clickCountry(code, country){
       <td class="mono">${esc(c.external)} <button class="peerbtn block" data-ip="${esc(c.external)}" style="margin-left:4px">🚫</button><button class="peerbtn safe" data-ip="${esc(c.external)}">✓</button></td>
       <td>↓${bytesH(c.inBytes)} / ↑${bytesH(c.outBytes)}</td>
       <td>${c.flows}</td>
-      <td class="muted">${c.ports.slice(0,6).join(", ")}</td></tr>`).join("");
+      <td class="muted">${c.ports.slice(0,6).join(", ")}</td>
+      <td class="procres" data-int="${esc(c.internal)}" data-ext="${esc(c.external)}" data-port="${c.ports[0]||''}"><button class="peerbtn proc">🔍 process</button></td></tr>`).join("");
     d.innerHTML=`<div class="section"><h3>🌐 ${esc(j.country||code)} — ${j.connections.length} connections · ${bytesH(j.totalBytes)} · ${j.ips} IPs</h3>
-      <table class="bl"><thead><tr><th>Internal host</th><th></th><th>External IP (${esc(code)})</th><th>Bytes (in/out)</th><th>Flows</th><th>Ports</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-    d.querySelectorAll(".peerbtn").forEach(b=>b.onclick=async()=>{ const ip=b.dataset.ip;
+      <div class="muted" style="margin-bottom:8px">Click 🔍 to ask the endpoint agent on that internal host which program owns the connection.</div>
+      <table class="bl"><thead><tr><th>Internal host</th><th></th><th>External IP (${esc(code)})</th><th>Bytes (in/out)</th><th>Flows</th><th>Ports</th><th>Owning process</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    d.querySelectorAll(".peerbtn.block, .peerbtn.safe").forEach(b=>b.onclick=async()=>{ const ip=b.dataset.ip;
       try { if(b.classList.contains("block")){ if(!confirm("Block "+ip+"?"))return; await api("/api/block",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip,reason:"from war map ("+code+")"})}); alert(ip+" blocked"); }
         else { await api("/api/safe",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip})}); alert(ip+" marked safe"); } } catch(e){ alert(e.message); } });
+    d.querySelectorAll(".peerbtn.proc").forEach(b=>b.onclick=async()=>{ const cell=b.closest(".procres");
+      b.innerHTML='<span class="spin"></span>';
+      const r = await agentProcess(cell.dataset.int, cell.dataset.ext, cell.dataset.port);
+      cell.innerHTML = r;
+    });
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){

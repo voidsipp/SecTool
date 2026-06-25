@@ -124,6 +124,11 @@ export interface Config {
     volumeSpikeFactor: number;
     alertDiscord: boolean;
   };
+  agent: {
+    enabled: boolean;
+    port: number;
+    token?: string;
+  };
 }
 
 class ConfigError extends Error {}
@@ -303,6 +308,11 @@ export function loadConfig(): Config {
       intervalSec: int("ANOMALY_INTERVAL_SEC", 300),
       volumeSpikeFactor: int("ANOMALY_VOLUME_SPIKE_FACTOR", 8),
       alertDiscord: bool("ANOMALY_ALERT_DISCORD", true),
+    },
+    agent: {
+      enabled: bool("AGENT_ENABLED", false),
+      port: int("AGENT_PORT", 7879),
+      token: optStr("AGENT_TOKEN"),
     },
   };
 }

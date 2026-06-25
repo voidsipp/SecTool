@@ -41,6 +41,7 @@ import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
+import { agentLookup, agentHealth } from "../agent/agentClient.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
 
@@ -132,6 +133,21 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const hours = Number(url.searchParams.get("hours")) || 24;
         if (!code) return send(res, 400, { error: "Missing country code." });
         return send(res, 200, await buildCountryFlows(code, hours, Date.now()));
+      }
+
+      // --- endpoint agent: attribute a connection to a process ---
+      if (method === "GET" && path === "/api/agent/lookup") {
+        const host = url.searchParams.get("host") ?? "";
+        const r = await agentLookup(cfg, host, {
+          remoteIp: url.searchParams.get("remoteIp") ?? undefined,
+          remotePort: Number(url.searchParams.get("remotePort")) || undefined,
+          localPort: Number(url.searchParams.get("localPort")) || undefined,
+          proto: url.searchParams.get("proto") ?? undefined,
+        });
+        return send(res, r.ok ? 200 : 502, r);
+      }
+      if (method === "GET" && path === "/api/agent/health") {
+        return send(res, 200, await agentHealth(cfg, url.searchParams.get("host") ?? ""));
       }
 
       // --- conversational analyst ---
