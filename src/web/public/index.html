@@ -269,6 +269,17 @@
     <button id="devRefresh">↻ Rescan</button>
   </div>
   <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Per device you can inspect <b>connections</b>, its <b>traffic</b> footprint (from gateway flows), <b>listeners</b> (open-port attack surface) and <b>egress</b> to public IPs scored against threat intel.</div>
+
+  <div class="section" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+      <h3 style="margin:0; font-size:15px;">🔍 LAN auto-discovery <span id="discoCount" class="muted" style="font-weight:400"></span></h3>
+      <input id="discoSubnet" placeholder="subnet override, e.g. 192.168.1.0/24" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; min-width:220px;" />
+      <button id="discoScan">🔍 Scan LAN</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px; font-size:12px;">Active sweep of this host's directly-connected private subnet(s): a TCP-connect ping finds live hosts (even agent-less ones), the ARP cache attaches MAC + vendor, and NetFlow fills in devices that are quiet right now. Only RFC1918 ranges are ever scanned.</div>
+    <div id="discoBody"><div class="empty">Click <b>Scan LAN</b> to enumerate every device on your local network.</div></div>
+  </div>
+
   <div id="devicesBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="askView" style="display:none; height:calc(100vh - 53px); flex-direction:column;">
@@ -806,6 +817,41 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
     document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
   } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
+async function scanLan(){
+  const btn=$("#discoScan"), body=$("#discoBody");
+  const subnet=($("#discoSubnet").value||"").trim();
+  btn.disabled=true; const label=btn.textContent; btn.textContent="⏳ Scanning…";
+  body.innerHTML='<div class="empty"><span class="spin"></span> Sweeping the LAN — this can take ~10–30s…</div>';
+  $("#discoCount").textContent="";
+  try {
+    const j = await api("/api/discovery"+(subnet?("?subnet="+encodeURIComponent(subnet)):""));
+    if (j.ok===false){ body.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"discovery failed")+'</pre>'; return; }
+    $("#discoCount").textContent="("+j.alive+" alive · "+j.total+" known · "+(j.durationMs/1000).toFixed(1)+"s)";
+    const SRC={scan:['#3ad29f','SCAN'],arp:['var(--accent)','ARP'],flow:['#46d6ff','FLOW'],self:['var(--muted)','THIS HOST']};
+    const badge=s=>{ const m=SRC[s]||['var(--muted)',s.toUpperCase()]; return `<span class="badge" style="background:${m[0]};font-size:9px">${m[1]}</span>`; };
+    const row=d=>`<tr style="${d.isSelf?'opacity:.7':''}">
+      <td><span class="badge" style="background:${d.alive?'var(--good,#3ad29f)':'var(--muted)'}">${d.alive?'●':'○'}</span></td>
+      <td class="mono">${esc(d.ip)}</td>
+      <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(d.hostname||'')}</td>
+      <td class="mono">${esc(d.mac||'')}</td>
+      <td>${esc(d.vendor||'')}</td>
+      <td class="mono">${(d.openPorts||[]).slice(0,8).join(', ')}${d.hasAgentPort?' <span class="badge" style="background:var(--accent)">AGENT</span>':''}</td>
+      <td class="muted">${d.lastFlow?ago(d.lastFlow):''}</td>
+      <td>${(d.sources||[]).map(badge).join(' ')}</td></tr>`;
+    let h='';
+    if (j.truncated) h+=`<div class="muted" style="margin-bottom:6px;color:var(--accent)">⚠ Candidate list capped — raise <code>DISCOVERY_MAX_HOSTS</code> to scan a wider range.</div>`;
+    h+=`<div class="muted" style="margin-bottom:6px">Subnets: <span class="mono">${(j.subnets||[]).map(esc).join(', ')||'—'}</span> · ${j.scanned} hosts probed</div>`;
+    if (!(j.devices||[]).length){ body.innerHTML=h+'<div class="empty">No devices found.</div>'; return; }
+    h+=`<input class="devfilter" placeholder="filter by ip / host / vendor / mac…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--muted)"><th></th><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th><th>Open ports</th><th>Last flow</th><th>Via</th></tr></thead>
+        <tbody>${j.devices.map(row).join("")}</tbody></table>`;
+    body.innerHTML=h;
+    const filter=body.querySelector(".devfilter");
+    if(filter) filter.oninput=()=>{ const q=filter.value.toLowerCase(); body.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
+  } catch(e){ body.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+  finally { btn.disabled=false; btn.textContent=label; }
+}
 async function toggleConns(ip,btn){
   const box = $("#conns-"+ip.replace(/\./g,'-'));
   if (box.style.display!=="none"){ box.style.display="none"; btn.textContent="▸ Connections"; return; }
@@ -1269,6 +1315,8 @@ $("#navDevices").onclick = showDevices;
 $("#devRefresh").onclick = showDevices;
 $("#backAlerts8").onclick = showAlerts;
 $("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(); });
+$("#discoScan").onclick = scanLan;
+$("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });
 $("#navWatch").onclick = showWatch;
 $("#watchHours").onchange = showWatch;
 $("#watchAdd").onclick = addWatchFromForm;
