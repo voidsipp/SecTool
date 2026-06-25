@@ -33,6 +33,9 @@ function versionOf(src: string): string {
 }
 
 function psInstall(server: string, token: string, port: number): string {
+  // Note: only ${server}/${token}/${port} are JS-interpolated; every $name below
+  // is a literal PowerShell variable. No backticks/backslash-escapes (PowerShell
+  // uses different quoting than JS/bash).
   return `# SecTool endpoint agent installer (Windows)
 $ErrorActionPreference = 'Stop'
 $server = '${server}'
@@ -46,14 +49,17 @@ Write-Host "Downloading agent from $server ..."
 Invoke-WebRequest -UseBasicParsing "$server/agent" -OutFile (Join-Path $dir 'sectool-agent.mjs')
 @{ token = $token; updateUrl = $server; port = $port } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $dir 'agent.config.json')
 $agent = Join-Path $dir 'sectool-agent.mjs'
-$arg = "-WindowStyle Hidden -NonInteractive -Command \\"& '$node' '$agent'\\""
-$action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg -WorkingDirectory $dir
+$vbsPath = Join-Path $dir 'launch.vbs'
+# tiny VBS shim launches node windowless (avoids a console flash + quoting issues)
+$vbs = 'CreateObject("WScript.Shell").Run """' + $node + '"" ""' + $agent + '""", 0, False'
+Set-Content -Path $vbsPath -Value $vbs -Encoding ASCII
+$action   = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbsPath + '"')
 $trigger  = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName 'SecToolAgent' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName 'SecToolAgent'
-Start-Sleep -Seconds 2
-try { $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5; Write-Host "SecTool agent v$($h.version) installed and running on $($h.host)." -ForegroundColor Green }
+Start-Sleep -Seconds 3
+try { $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5; Write-Host ('SecTool agent v' + $h.version + ' installed and running on ' + $h.host + '.') -ForegroundColor Green }
 catch { Write-Host 'SecTool agent installed (Scheduled Task: SecToolAgent). It will start on next logon.' -ForegroundColor Yellow }
 `;
 }
