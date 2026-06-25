@@ -268,7 +268,7 @@
     <input id="devProbe" placeholder="probe extra host(s), e.g. 192.168.0.50" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; min-width:240px;" />
     <button id="devRefresh">↻ Rescan</button>
   </div>
-  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Click a device to view its live connections.</div>
+  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Per device you can inspect <b>connections</b>, its <b>traffic</b> footprint (from gateway flows), <b>listeners</b> (open-port attack surface) and <b>egress</b> to public IPs scored against threat intel.</div>
   <div id="devicesBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="askView" style="display:none; height:calc(100vh - 53px); flex-direction:column;">
@@ -786,21 +786,30 @@ async function showDevices(){
 curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS</pre></div>`;
       return;
     }
-    $("#devicesBody").innerHTML = j.agents.map(a=>`
+    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); return `
       <div class="section devcard">
         <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
           <span class="mono">${esc(a.hostname||a.ip)}</span>
           <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}</span></h3>
-        <button class="devview" data-ip="${esc(a.ip)}">▸ View connections</button>
-        <div class="devconns" id="conns-${esc(a.ip).replace(/\./g,'-')}" style="display:none; margin-top:10px"></div>
-      </div>`).join("");
+        <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="devview" data-ip="${esc(a.ip)}">▸ Connections</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="traffic">🌐 Traffic</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="egress">🚨 Egress</button>
+        </div>
+        <div class="devconns" id="conns-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="traffic-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="listeners-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="egress-${id}" style="display:none; margin-top:10px"></div>
+      </div>`; }).join("");
     document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
+    document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
   } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function toggleConns(ip,btn){
   const box = $("#conns-"+ip.replace(/\./g,'-'));
-  if (box.style.display!=="none"){ box.style.display="none"; btn.textContent="▸ View connections"; return; }
-  box.style.display="block"; btn.textContent="▾ Hide connections";
+  if (box.style.display!=="none"){ box.style.display="none"; btn.textContent="▸ Connections"; return; }
+  box.style.display="block"; btn.textContent="▾ Connections";
   box.innerHTML='<div class="empty">Loading connections…</div>';
   try {
     const j = await api("/api/agents/connections?host="+encodeURIComponent(ip));
@@ -824,6 +833,75 @@ async function toggleConns(ip,btn){
     const filter = box.querySelector(".devfilter");
     filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+const DEV_TOOLS = {
+  traffic:   { label:"🌐 Traffic",   path:i=>"/api/agents/traffic?host="+encodeURIComponent(i)+"&hours=24", render:renderTraffic, loading:"Reading collected flows…" },
+  listeners: { label:"🛰️ Listeners", path:i=>"/api/agents/listeners?host="+encodeURIComponent(i), render:renderListeners, loading:"Auditing open ports…" },
+  egress:    { label:"🚨 Egress",    path:i=>"/api/agents/egress?host="+encodeURIComponent(i),    render:renderEgress,    loading:"Scoring public peers against threat intel…" },
+};
+async function toggleTool(ip, tool, btn){
+  const spec = DEV_TOOLS[tool]; if(!spec) return;
+  const box = $("#"+tool+"-"+ip.replace(/\./g,'-'));
+  if (box.style.display!=="none"){ box.style.display="none"; btn.textContent=spec.label; return; }
+  box.style.display="block"; btn.textContent="▾ "+spec.label.replace(/^\S+\s/,'');
+  box.innerHTML='<div class="empty"><span class="spin"></span> '+spec.loading+'</div>';
+  try {
+    const j = await api(spec.path(ip));
+    if (j.ok===false){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"failed")+'</pre>'; return; }
+    box.innerHTML = spec.render(j);
+  } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+function renderTraffic(j){
+  const s=j.summary||{};
+  const peer=p=>`<tr>
+    <td class="mono">${esc(p.ip)}${p.external?'':' <span class="muted">(local)</span>'}</td>
+    <td class="mono">${(p.protos||[]).join('/')||''}</td>
+    <td class="mono">${(p.ports||[]).slice(0,6).join(', ')||''}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${bytesH(p.bytesOut)}</td>
+    <td class="mono" style="color:var(--good,#3ad29f)">${bytesH(p.bytesIn)}</td>
+    <td class="muted">${p.flows}</td>
+    <td class="muted">${ago(p.lastSeen)}</td></tr>`;
+  const port=p=>`<tr><td class="mono">${esc(p.proto)} ${p.port}</td><td class="muted">${p.flows} flows</td><td class="mono">${bytesH(p.bytes)}</td></tr>`;
+  const alert=a=>`<tr><td class="muted">${fmt(a.time)}</td><td>${esc(a.severity)}</td><td class="muted">${a.direction}</td><td class="mono">${esc(a.signature)}</td></tr>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${s.flows||0} flows over ${j.hours}h · ${s.peers||0} peers (${s.externalPeers||0} external) · ↑${bytesH(s.bytesOut)} ↓${bytesH(s.bytesIn)}</div>`;
+  if (!(j.topPeers||[]).length){ return h+'<div class="empty">No flows recorded for this host in the window.</div>'; }
+  h+=`<div class="muted" style="margin:6px 0 4px">Top peers</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Peer</th><th>Proto</th><th>Ports</th><th>Out</th><th>In</th><th>Flows</th><th>Last</th></tr></thead><tbody>${j.topPeers.map(peer).join("")}</tbody></table>`;
+  if ((j.topPorts||[]).length) h+=`<div class="muted" style="margin:10px 0 4px">Top remote service ports</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${j.topPorts.map(port).join("")}</tbody></table>`;
+  if ((j.alerts||[]).length) h+=`<div class="muted" style="margin:10px 0 4px">Recent alerts involving this host</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${j.alerts.map(alert).join("")}</tbody></table>`;
+  return h;
+}
+function renderListeners(j){
+  if (!(j.listeners||[]).length) return '<div class="empty">No listening sockets reported by the agent.</div>';
+  const EXP={'all-interfaces':['ALL IFACES','var(--critical,#ff5c7c)'],'localhost':['LOCALHOST','var(--muted)'],'specific':['BOUND','var(--accent)'],'unknown':['?','var(--muted)']};
+  const row=l=>{ const e=EXP[l.exposure]||EXP.unknown; return `<tr>
+    <td class="mono">${esc(l.proto)} ${l.port}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
+    <td><span class="badge" style="background:${e[1]}">${e[0]}</span></td>
+    <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td></tr>`; };
+  let h=`<div class="muted" style="margin-bottom:8px">${j.count} listening service(s)${j.exposed?` · <span style="color:var(--critical,#ff5c7c)">${j.exposed} on all interfaces</span>`:''}</div>`;
+  h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Port</th><th>Process</th><th>Exposure</th><th>Binary</th></tr></thead><tbody>${j.listeners.map(row).join("")}</tbody></table>`;
+  if (j.note) h+=`<div class="muted" style="margin-top:6px;font-size:11px">${esc(j.note)}</div>`;
+  return h;
+}
+function renderEgress(j){
+  if (!(j.peers||[]).length) return '<div class="empty">No connections to public IPs reported by the agent.</div>';
+  const row=p=>{ const g=p.geo||{}; const loc=[g.country,g.city].filter(Boolean).join(' / ');
+    const rep=p.riskReasons&&p.riskReasons.length?p.riskReasons.join(', '):(p.feeds&&p.feeds.length?p.feeds.join(', '):'clean');
+    return `<tr style="${p.risk?'background:rgba(255,92,124,.08)':''}">
+    <td class="mono">${p.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${p.blocked?'<span class="badge" style="background:var(--muted)">BLOCKED</span> ':''}${esc(p.ip)}</td>
+    <td class="muted">${esc(loc||'?')}</td>
+    <td class="muted" title="${esc(g.org||g.isp||'')}">${esc((g.asname||g.org||g.isp||'').slice(0,28))}${g.hosting?' <span class="badge" style="background:var(--accent)">HOST</span>':''}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${esc((p.processes||[]).slice(0,3).join(', '))}</td>
+    <td class="mono">${(p.ports||[]).slice(0,5).join(', ')}</td>
+    <td class="muted">${p.conns}</td>
+    <td style="color:${p.risk?'var(--critical,#ff5c7c)':'var(--muted)'}">${esc(rep)}</td></tr>`; };
+  let h=`<div class="muted" style="margin-bottom:8px">${j.distinctRemote} distinct public peer(s) · ${j.audited} enriched${j.riskyCount?` · <span style="color:var(--critical,#ff5c7c)">${j.riskyCount} flagged</span>`:''}</div>`;
+  h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Remote IP</th><th>Location</th><th>Network</th><th>Process</th><th>Ports</th><th>Conns</th><th>Reputation</th></tr></thead><tbody>${j.peers.map(row).join("")}</tbody></table>`;
+  if (j.note) h+=`<div class="muted" style="margin-top:6px;font-size:11px">${esc(j.note)}</div>`;
+  return h;
 }
 function md(s){
   let h = esc(s);

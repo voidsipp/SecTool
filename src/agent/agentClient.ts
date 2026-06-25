@@ -9,6 +9,7 @@ import type { Config } from "../config.ts";
 
 export interface AgentMatch {
   proto: string;
+  localAddr?: string; // present on agent v1.0.2+ — which interface the socket is bound to
   localPort: number;
   remoteIp: string;
   remotePort: number;

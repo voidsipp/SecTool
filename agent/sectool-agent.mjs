@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.0.1";
+const AGENT_VERSION = "1.0.2";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -197,7 +197,7 @@ const server = http.createServer((req, res) => {
     return json(200, { ok: true, version: AGENT_VERSION, host: os.hostname(), platform: os.platform(), tracked: buffer.size, retentionMin: RETENTION_MS / 60000, auth: !!TOKEN });
   }
   if (!ok) return json(401, { error: "unauthorized" });
-  const shape = (r) => ({ proto: r.proto, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, firstSeen: r.firstSeen, lastSeen: r.lastSeen });
+  const shape = (r) => ({ proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, firstSeen: r.firstSeen, lastSeen: r.lastSeen });
   if (url.pathname === "/lookup") {
     const q = Object.fromEntries(url.searchParams);
     const found = [...buffer.values()]
