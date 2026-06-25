@@ -15,15 +15,69 @@
  */
 import http from "node:http";
 import os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-const PORT = Number(process.env.AGENT_PORT || 7879);
-const HOST = process.env.AGENT_HOST || "0.0.0.0";
-const TOKEN = process.env.AGENT_TOKEN || "";
-const POLL_MS = Number(process.env.AGENT_POLL_MS || 4000);
-const RETENTION_MS = Number(process.env.AGENT_RETENTION_MIN || 30) * 60000;
+const AGENT_VERSION = "1.0.0";
+
+// Config resolves from env first, then agent.config.json next to this script
+// (written by the installer), so a scheduled task/service needs no env wiring.
+const SELF = fileURLToPath(import.meta.url);
+const SELFDIR = dirname(SELF);
+let fileCfg = {};
+try {
+  fileCfg = JSON.parse(readFileSync(join(SELFDIR, "agent.config.json"), "utf8"));
+} catch {
+  /* no config file — use env/defaults */
+}
+
+const PORT = Number(process.env.AGENT_PORT || fileCfg.port || 7879);
+const HOST = process.env.AGENT_HOST || fileCfg.host || "0.0.0.0";
+const TOKEN = process.env.AGENT_TOKEN || fileCfg.token || "";
+const UPDATE_URL = (process.env.AGENT_UPDATE_URL || fileCfg.updateUrl || "").replace(/\/+$/, "");
+const POLL_MS = Number(process.env.AGENT_POLL_MS || fileCfg.pollMs || 4000);
+const RETENTION_MS = Number(process.env.AGENT_RETENTION_MIN || fileCfg.retentionMin || 30) * 60000;
 
 if (!TOKEN) console.warn("WARNING: AGENT_TOKEN not set — the API is unauthenticated. Set AGENT_TOKEN for real use.");
+
+function isNewer(a, b) {
+  const pa = String(a).split("."), pb = String(b).split(".");
+  for (let i = 0; i < 3; i++) {
+    const x = Number(pa[i] || 0), y = Number(pb[i] || 0);
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+/** Check the SecTool server for a newer agent; if found, overwrite self + relaunch. */
+async function selfUpdate() {
+  if (!UPDATE_URL || process.env.AGENT_NO_UPDATE) return;
+  try {
+    const r = await fetch(`${UPDATE_URL}/version`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const { version } = await r.json();
+    if (!version || !isNewer(version, AGENT_VERSION)) {
+      console.log(`Agent v${AGENT_VERSION} is current.`);
+      return;
+    }
+    console.log(`Update available: v${AGENT_VERSION} -> v${version}. Downloading…`);
+    const code = await (await fetch(`${UPDATE_URL}/agent`, { signal: AbortSignal.timeout(20000) })).text();
+    if (!/AGENT_VERSION\s*=/.test(code) || code.length < 1000) {
+      console.warn("Update payload looked invalid; keeping current version.");
+      return;
+    }
+    writeFileSync(SELF, code);
+    console.log(`Updated to v${version}; relaunching…`);
+    // Relaunch the new code independently of how we were started, then exit.
+    spawn(process.execPath, [SELF], { detached: true, stdio: "ignore", env: process.env }).unref();
+    process.exit(0);
+  } catch (err) {
+    console.warn(`Update check failed (continuing on v${AGENT_VERSION}): ${err.message}`);
+  }
+}
 
 /** key -> { proto, lport, raddr, rport, state, pid, pname, ppath, firstSeen, lastSeen } */
 const buffer = new Map();
@@ -137,7 +191,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(body));
   };
   if (url.pathname === "/health") {
-    return json(200, { ok: true, host: os.hostname(), platform: os.platform(), tracked: buffer.size, retentionMin: RETENTION_MS / 60000, auth: !!TOKEN });
+    return json(200, { ok: true, version: AGENT_VERSION, host: os.hostname(), platform: os.platform(), tracked: buffer.size, retentionMin: RETENTION_MS / 60000, auth: !!TOKEN });
   }
   if (!ok) return json(401, { error: "unauthorized" });
   const shape = (r) => ({ proto: r.proto, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, firstSeen: r.firstSeen, lastSeen: r.lastSeen });
@@ -156,8 +210,16 @@ const server = http.createServer((req, res) => {
   json(404, { error: "not found" });
 });
 
+await selfUpdate(); // check for a newer agent on every startup
 await poll();
 setInterval(poll, POLL_MS);
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} already in use (another agent instance?). Exiting.`);
+    process.exit(1);
+  }
+  console.error(`Server error: ${e.message}`);
+});
 server.listen(PORT, HOST, () => {
-  console.log(`SecTool agent on ${HOST}:${PORT} (${os.hostname()}, ${os.platform()}), history ${RETENTION_MS / 60000}min, auth=${!!TOKEN}`);
+  console.log(`SecTool agent v${AGENT_VERSION} on ${HOST}:${PORT} (${os.hostname()}, ${os.platform()}), history ${RETENTION_MS / 60000}min, auth=${!!TOKEN}, updates=${UPDATE_URL || "off"}`);
 });

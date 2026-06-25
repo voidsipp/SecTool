@@ -24,6 +24,7 @@ import { startBlocker } from "./respond/blocker.ts";
 import { startReactiveBlocker } from "./respond/reactiveBlock.ts";
 import { startHoneypot } from "./deception/honeypot.ts";
 import { startBaselineMonitor } from "./anomaly/baseline.ts";
+import { startAgentDistServer } from "./agent/distServer.ts";
 import { runDigest } from "./digest/digest.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -126,6 +127,15 @@ async function runService(): Promise<void> {
 
   // Behavioral baselining: learn per-host normal, flag deviations.
   if (cfg.anomaly.enabled) startBaselineMonitor(cfg);
+
+  // Agent distribution + update server (one-liner install for LAN devices).
+  if (cfg.agent.enabled) {
+    try {
+      startAgentDistServer(cfg);
+    } catch (err) {
+      log.error(`Agent dist server failed to start: ${(err as Error).message}`);
+    }
+  }
 
   // Local web dashboard (alerts + investigation tools).
   if (cfg.web.enabled) {

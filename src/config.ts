@@ -128,6 +128,8 @@ export interface Config {
     enabled: boolean;
     port: number;
     token?: string;
+    distHost: string;
+    distPort: number;
   };
 }
 
@@ -313,6 +315,8 @@ export function loadConfig(): Config {
       enabled: bool("AGENT_ENABLED", false),
       port: int("AGENT_PORT", 7879),
       token: optStr("AGENT_TOKEN"),
+      distHost: str("AGENT_DIST_HOST", "0.0.0.0"),
+      distPort: int("AGENT_DIST_PORT", 7878),
     },
   };
 }

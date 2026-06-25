@@ -7,7 +7,29 @@ traffic on a port, SecTool can tell you *exactly which program* owned that socke
 
 Just one file: `sectool-agent.mjs`. Requires **Node.js 18+** on the device.
 
-## Run it
+## One-line install (recommended)
+
+SecTool serves an installer on `http://<sectool-host>:7878`. On the device:
+
+```powershell
+# Windows (PowerShell)
+irm http://192.168.0.60:7878/install.ps1 | iex
+```
+```bash
+# Linux / macOS
+curl -fsSL http://192.168.0.60:7878/install.sh | bash
+```
+
+This downloads the agent, writes its config (token + update URL), and registers it
+to run on boot/login (Scheduled Task on Windows, systemd user service on Linux,
+launchd on macOS). **No manual token handling** — it's baked in by the server.
+
+### Auto-update
+On **every start**, the agent asks `http://<sectool-host>:7878/version`; if SecTool
+has a newer agent, it downloads it, replaces itself, and relaunches. So updating
+all your devices is just updating `agent/sectool-agent.mjs` on the SecTool host.
+
+## Manual run
 
 ```bash
 # pick a strong shared secret and use the SAME value in SecTool's AGENT_TOKEN

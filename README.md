@@ -207,6 +207,24 @@ in-service daily at `DIGEST_HOUR`, or on demand:
 node src/index.ts --digest 24    # or: npm run digest
 ```
 
+## 🔍 Endpoint agent (process attribution)
+
+Network data tells you *that* a host talked to an IP; the agent
+([`agent/sectool-agent.mjs`](agent/sectool-agent.mjs)) on the device tells you
+*which program* owned the socket. When `AGENT_ENABLED=true`, SecTool serves a
+**one-line installer + auto-updater** on `:7878`:
+
+```powershell
+irm http://<sectool-host>:7878/install.ps1 | iex     # Windows
+curl -fsSL http://<sectool-host>:7878/install.sh | bash   # Linux/macOS
+```
+
+The agent registers itself to run on boot, **self-updates on each start** (checks
+`/version`), and exposes a token-protected lookup API. In the dashboard, the **🔍**
+buttons (alert detail + war-map country breakdown) query the agent on the internal
+host to name the owning **process / PID / path**. SecTool only ever queries LAN
+IPs. See [agent/README.md](agent/README.md).
+
 ## 💬 Conversational analyst (dashboard "Ask", `POST /api/ask`)
 
 Ask plain-English questions and Claude answers by **querying your real telemetry**
