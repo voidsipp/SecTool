@@ -230,6 +230,19 @@ running an agent (probing hosts seen in flows), shows each one's version / platf
 / health, and lets you browse its **live connections → owning process**
 (`GET /api/agents/connections?host=`) with a filter box.
 
+### 🔍 LAN auto-discovery (`DISCOVERY_ENABLED`, `GET /api/discovery`)
+
+The Devices page's **🔍 Scan LAN** button actively enumerates *every* device on
+the local network — not just hosts running the agent or seen in flows. It runs a
+TCP-connect ping sweep across the host's directly-connected private subnet(s) (an
+open *or* refused port both prove liveness even when ICMP is firewalled), reads
+the OS ARP cache to attach each device's **MAC address and vendor** (resolved from
+the MAC's OUI prefix), best-effort reverse-DNS for a hostname, and folds in
+NetFlow-seen hosts so quiet devices still appear with their last-seen time. Only
+RFC1918 ranges are ever scanned and the candidate count is hard-capped
+(`DISCOVERY_MAX_HOSTS`) so a wide netmask can't trigger a runaway sweep. Pass
+`?subnet=192.168.1.0/24` (or set `DISCOVERY_SUBNETS`) to target a specific range.
+
 ## 💬 Conversational analyst (dashboard "Ask", `POST /api/ask`)
 
 Ask plain-English questions and Claude answers by **querying your real telemetry**
@@ -348,6 +361,9 @@ All keys live in `.env`; see **`.env.example`** for the annotated list. Highligh
 | `DEDUPE_WINDOW_SEC` | `300` | Suppress repeat alerts for N seconds. |
 | `CORRELATION_WINDOW_SEC` | `180` | Time window for related-log gathering. |
 | `ALERT_PATTERN` | — | Optional regex an event must match to be an alert. |
+| `DISCOVERY_ENABLED` | `true` | Active LAN device sweep (Devices → 🔍 Scan LAN). |
+| `DISCOVERY_MAX_HOSTS` | `1024` | Hard cap on hosts probed per sweep. |
+| `DISCOVERY_SUBNETS` | — | Override auto-detected subnet(s), e.g. `192.168.1.0/24`. |
 | `DRY_RUN` | `false` | `true` → log instead of posting to Discord. |
 
 ## Running as a background service (Windows)

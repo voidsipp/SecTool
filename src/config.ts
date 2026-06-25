@@ -131,6 +131,14 @@ export interface Config {
     distHost: string;
     distPort: number;
   };
+  discovery: {
+    enabled: boolean;
+    ports: number[];
+    timeoutMs: number;
+    concurrency: number;
+    maxHosts: number;
+    subnets: string[];
+  };
 }
 
 class ConfigError extends Error {}
@@ -317,6 +325,20 @@ export function loadConfig(): Config {
       token: optStr("AGENT_TOKEN"),
       distHost: str("AGENT_DIST_HOST", "0.0.0.0"),
       distPort: int("AGENT_DIST_PORT", 7878),
+    },
+    discovery: {
+      enabled: bool("DISCOVERY_ENABLED", true),
+      ports: (optStr("DISCOVERY_PORTS") ?? "22,80,443,445,3389,53,7879")
+        .split(",")
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0 && n < 65536),
+      timeoutMs: int("DISCOVERY_TIMEOUT_MS", 600),
+      concurrency: int("DISCOVERY_CONCURRENCY", 128),
+      maxHosts: int("DISCOVERY_MAX_HOSTS", 1024),
+      subnets: (optStr("DISCOVERY_SUBNETS") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     },
   };
 }

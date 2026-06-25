@@ -11,6 +11,7 @@
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
+ *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   GET  /api/agents/traffic?host=  -> a device's flow footprint (peers/ports/alerts)
  *   GET  /api/agents/listeners?host=-> a device's listening sockets + owning process
  *   GET  /api/agents/egress?host=   -> a device's public peers + threat-intel reputation
@@ -46,6 +47,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
+import { discoverDevices } from "../investigate/discovery.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
 
@@ -152,6 +154,16 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       }
       if (method === "GET" && path === "/api/agent/health") {
         return send(res, 200, await agentHealth(cfg, url.searchParams.get("host") ?? ""));
+      }
+
+      // --- active LAN sweep: discover every device on the local network ---
+      if (method === "GET" && path === "/api/discovery") {
+        const subnetParam = (url.searchParams.get("subnet") ?? "").trim();
+        const subnets = subnetParam
+          ? subnetParam.split(",").map((s) => s.trim()).filter(Boolean)
+          : undefined;
+        const r = await discoverDevices(cfg, subnets ? { subnets } : {});
+        return send(res, r.ok ? 200 : 502, r);
       }
 
       // --- discover agents: probe internal hosts (seen in flows) for a live agent ---
