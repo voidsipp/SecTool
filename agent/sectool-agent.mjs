@@ -11,7 +11,8 @@
  *   AGENT_TOKEN=yoursecret node sectool-agent.mjs
  *
  * Env: AGENT_TOKEN (shared secret, required for real use), AGENT_PORT (7879),
- *      AGENT_HOST (0.0.0.0), AGENT_POLL_MS (4000), AGENT_RETENTION_MIN (30).
+ *      AGENT_HOST (0.0.0.0), AGENT_POLL_MS (4000), AGENT_RETENTION_MIN (30),
+ *      AGENT_UPDATE_CHECK_MIN (360 = 6h, 0 disables the recurring heartbeat).
  */
 import http from "node:http";
 import os from "node:os";
@@ -20,7 +21,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.0.2";
+const AGENT_VERSION = "1.0.3";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -42,8 +43,27 @@ const TOKEN = process.env.AGENT_TOKEN || fileCfg.token || "";
 const UPDATE_URL = (process.env.AGENT_UPDATE_URL || fileCfg.updateUrl || "").replace(/\/+$/, "");
 const POLL_MS = Number(process.env.AGENT_POLL_MS || fileCfg.pollMs || 4000);
 const RETENTION_MS = Number(process.env.AGENT_RETENTION_MIN || fileCfg.retentionMin || 30) * 60000;
+// Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
+// floor keeps a misconfigured value from hammering the update server.
+const UPDATE_CHECK_RAW = Number(
+  process.env.AGENT_UPDATE_CHECK_MIN ?? fileCfg.updateCheckMin ?? 360,
+);
+const UPDATE_CHECK_MS = UPDATE_CHECK_RAW > 0 ? Math.max(UPDATE_CHECK_RAW, 5) * 60000 : 0;
 
 if (!TOKEN) console.warn("WARNING: AGENT_TOKEN not set — the API is unauthenticated. Set AGENT_TOKEN for real use.");
+
+// Observable state for the update-check heartbeat, surfaced via /health so the
+// SecTool dashboard can tell at a glance whether an agent is current, stale, or
+// failing its checks (e.g. update server unreachable).
+const updateState = {
+  enabled: !!UPDATE_URL && !process.env.AGENT_NO_UPDATE,
+  intervalMin: UPDATE_CHECK_MS / 60000,
+  lastCheckAt: 0, // epoch ms of the last completed check (0 = never)
+  lastResult: "pending", // pending | current | available | updating | error | disabled
+  lastError: "",
+  latestSeen: AGENT_VERSION, // newest version advertised by the update server
+  checks: 0, // total checks performed since start
+};
 
 function isNewer(a, b) {
   const pa = String(a).split("."), pb = String(b).split(".");
@@ -55,29 +75,47 @@ function isNewer(a, b) {
   return false;
 }
 
-/** Check the SecTool server for a newer agent; if found, overwrite self + relaunch. */
-async function selfUpdate() {
-  if (!UPDATE_URL || process.env.AGENT_NO_UPDATE) return;
+/**
+ * Check the SecTool server for a newer agent; if found, overwrite self + relaunch.
+ * Records the outcome in `updateState` so the heartbeat is observable via /health.
+ * @param {string} [reason] label for the log line ("startup" | "heartbeat").
+ */
+async function selfUpdate(reason = "startup") {
+  if (!updateState.enabled) {
+    updateState.lastResult = "disabled";
+    return;
+  }
+  updateState.checks++;
+  updateState.lastCheckAt = Date.now();
+  updateState.lastError = "";
   try {
     const r = await fetch(`${UPDATE_URL}/version`, { signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(`version endpoint returned HTTP ${r.status}`);
     const { version } = await r.json();
+    if (version) updateState.latestSeen = version;
     if (!version || !isNewer(version, AGENT_VERSION)) {
-      console.log(`Agent v${AGENT_VERSION} is current.`);
+      updateState.lastResult = "current";
+      console.log(`Agent v${AGENT_VERSION} is current (${reason} check).`);
       return;
     }
+    updateState.lastResult = "available";
     console.log(`Update available: v${AGENT_VERSION} -> v${version}. Downloading…`);
     const code = await (await fetch(`${UPDATE_URL}/agent`, { signal: AbortSignal.timeout(20000) })).text();
     if (!/AGENT_VERSION\s*=/.test(code) || code.length < 1000) {
+      updateState.lastResult = "error";
+      updateState.lastError = "update payload looked invalid";
       console.warn("Update payload looked invalid; keeping current version.");
       return;
     }
+    updateState.lastResult = "updating";
     writeFileSync(SELF, code);
     console.log(`Updated to v${version}; relaunching…`);
     // Relaunch the new code independently of how we were started, then exit.
     spawn(process.execPath, [SELF], { detached: true, stdio: "ignore", env: process.env }).unref();
     process.exit(0);
   } catch (err) {
+    updateState.lastResult = "error";
+    updateState.lastError = err.message;
     console.warn(`Update check failed (continuing on v${AGENT_VERSION}): ${err.message}`);
   }
 }
@@ -194,7 +232,26 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(body));
   };
   if (url.pathname === "/health") {
-    return json(200, { ok: true, version: AGENT_VERSION, host: os.hostname(), platform: os.platform(), tracked: buffer.size, retentionMin: RETENTION_MS / 60000, auth: !!TOKEN });
+    return json(200, {
+      ok: true,
+      version: AGENT_VERSION,
+      host: os.hostname(),
+      platform: os.platform(),
+      tracked: buffer.size,
+      retentionMin: RETENTION_MS / 60000,
+      auth: !!TOKEN,
+      update: {
+        enabled: updateState.enabled,
+        intervalMin: updateState.intervalMin,
+        lastCheckAt: updateState.lastCheckAt || null,
+        ageMs: updateState.lastCheckAt ? Date.now() - updateState.lastCheckAt : null,
+        result: updateState.lastResult,
+        error: updateState.lastError || undefined,
+        latestSeen: updateState.latestSeen,
+        upToDate: !isNewer(updateState.latestSeen, AGENT_VERSION),
+        checks: updateState.checks,
+      },
+    });
   }
   if (!ok) return json(401, { error: "unauthorized" });
   const shape = (r) => ({ proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, firstSeen: r.firstSeen, lastSeen: r.lastSeen });
@@ -213,7 +270,12 @@ const server = http.createServer((req, res) => {
   json(404, { error: "not found" });
 });
 
-await selfUpdate(); // check for a newer agent on every startup
+await selfUpdate("startup"); // check for a newer agent on every startup
+// Recurring update-check heartbeat: keep long-lived agents current without a
+// restart. selfUpdate() relaunches + exits the process if it pulls a new build.
+if (UPDATE_CHECK_MS > 0 && updateState.enabled) {
+  setInterval(() => selfUpdate("heartbeat"), UPDATE_CHECK_MS).unref();
+}
 await poll();
 setInterval(poll, POLL_MS);
 server.on("error", (e) => {
@@ -224,5 +286,6 @@ server.on("error", (e) => {
   console.error(`Server error: ${e.message}`);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`SecTool agent v${AGENT_VERSION} on ${HOST}:${PORT} (${os.hostname()}, ${os.platform()}), history ${RETENTION_MS / 60000}min, auth=${!!TOKEN}, updates=${UPDATE_URL || "off"}`);
+  const beat = updateState.enabled && UPDATE_CHECK_MS > 0 ? `every ${UPDATE_CHECK_MS / 60000}min` : "off";
+  console.log(`SecTool agent v${AGENT_VERSION} on ${HOST}:${PORT} (${os.hostname()}, ${os.platform()}), history ${RETENTION_MS / 60000}min, auth=${!!TOKEN}, updates=${UPDATE_URL || "off"}, update-heartbeat=${beat}`);
 });
