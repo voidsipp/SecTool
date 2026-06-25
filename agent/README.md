@@ -29,6 +29,13 @@ On **every start**, the agent asks `http://<sectool-host>:7878/version`; if SecT
 has a newer agent, it downloads it, replaces itself, and relaunches. So updating
 all your devices is just updating `agent/sectool-agent.mjs` on the SecTool host.
 
+It also runs a recurring **update-check heartbeat** (every 6h by default, see
+`AGENT_UPDATE_CHECK_MIN`) so long-lived agents pick up new builds without waiting
+for a restart. The last heartbeat's outcome is reported under `update` in
+`GET /health` — `result` (`current`/`available`/`error`/…), `latestSeen`,
+`upToDate`, `ageMs` since the last check, and `checks` performed — so the SecTool
+dashboard can flag agents that are stale or failing their checks.
+
 ## Manual run
 
 ```bash
@@ -52,6 +59,9 @@ at `http://<device-LAN-IP>:7879`.
 | `AGENT_HOST` | `0.0.0.0` | Bind address. |
 | `AGENT_POLL_MS` | `4000` | How often to snapshot connections. |
 | `AGENT_RETENTION_MIN` | `30` | How long to keep connection→process history. |
+| `AGENT_UPDATE_CHECK_MIN` | `360` | Recurring update-check heartbeat interval (minutes). `0` disables it; values below `5` are clamped to 5. |
+| `AGENT_UPDATE_URL` | *(from config)* | Update server base URL. Heartbeat is off unless this (or `updateUrl` in `agent.config.json`) is set. |
+| `AGENT_NO_UPDATE` | *(unset)* | Set to any value to disable self-update + the heartbeat entirely. |
 
 ## Keep it running
 
@@ -68,7 +78,8 @@ at `http://<device-LAN-IP>:7879`.
 
 ## API (token via `Authorization: Bearer <token>`)
 
-- `GET /health` — host, platform, tracked connection count (no auth needed).
+- `GET /health` — host, platform, tracked connection count, and an `update`
+  object summarising the update-check heartbeat (no auth needed).
 - `GET /lookup?remoteIp=&remotePort=&localPort=&proto=` — connections matching the
   filter, each with `process`, `pid`, `path`, `state`, `firstSeen`/`lastSeen`.
 - `GET /connections` — current connection→process snapshot. Each record includes
