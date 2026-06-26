@@ -29,6 +29,7 @@
  *   node src/index.ts --direction 168 # offline traffic-direction / exposure (inbound/outbound/lateral) report (Markdown)
  *   node src/index.ts --lifecycle 168 # offline signature lifecycle / chronic-vs-acute report (Markdown)
  *   node src/index.ts --risk 168      # offline risk-index / threat-posture (severity-weighted) report (Markdown)
+ *   node src/index.ts --insight 168   # offline AI analyst-insight digest (summary coverage / re-grading / actions) (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -75,6 +76,7 @@ import { buildCoverage } from "./analytics/coverage.ts";
 import { buildDirection } from "./analytics/direction.ts";
 import { buildLifecycle } from "./analytics/lifecycle.ts";
 import { buildRisk } from "./analytics/risk.ts";
+import { buildInsight } from "./analytics/insight.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -913,6 +915,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown risk-index report to stdout.
       console.log(buildRisk(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const insightIdx = argv.findIndex((a) => a === "--insight" || a.startsWith("--insight="));
+    if (insightIdx !== -1) {
+      const inline = argv[insightIdx]!.split("=")[1];
+      const next = argv[insightIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so coverage / re-grading reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --insight hours: "${raw}". Use e.g. --insight 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the candidate / action tables.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown AI analyst-insight digest to stdout.
+      console.log(buildInsight(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
