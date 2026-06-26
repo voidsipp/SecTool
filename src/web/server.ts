@@ -25,6 +25,9 @@
  *   GET  /api/agents/ports?host=    -> a device's live port activity (gateway conntrack)
  *   GET  /api/agents/listeners?host=-> a device's listening sockets + owning process
  *   GET  /api/agents/egress?host=   -> a device's public peers + threat-intel reputation
+ *   POST /api/ask                   -> read-only conversational analyst (queries telemetry)
+ *   POST /api/agent/act             -> action-capable automation agent (creates suppressions,
+ *                                      manages safelist/watchlist/blocklist/triage); supports dryRun
  *
  * Bound to 127.0.0.1 by default — it can run privileged investigation commands
  * on the gateway, so do not expose it on the LAN without adding authentication.
@@ -54,6 +57,7 @@ import { suppressionStore, describeMatch, type SuppressionInput } from "../store
 import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
+import { runAgent } from "../analyst/agent.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
@@ -297,6 +301,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const question = String(body["question"] ?? "").slice(0, 1000);
         if (!question.trim()) return send(res, 400, { error: "Empty question." });
         const result = await askAnalyst(cfg, question);
+        return send(res, 200, result);
+      }
+
+      // --- action-capable automation agent (creates suppressions, manages
+      //     safelist/watchlist/blocklist/triage on a natural-language instruction) ---
+      if (method === "POST" && path === "/api/agent/act") {
+        const body = await readJson(req);
+        const instruction = String(body["instruction"] ?? body["question"] ?? "").slice(0, 1000);
+        if (!instruction.trim()) return send(res, 400, { error: "Empty instruction." });
+        const dryRun = body["dryRun"] === true || body["dryRun"] === "1";
+        const result = await runAgent(cfg, instruction, { dryRun });
         return send(res, 200, result);
       }
 
