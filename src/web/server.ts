@@ -50,6 +50,8 @@
  *   GET  /api/notify.md?hours=N     -> the same notification-audit report as a downloadable .md file
  *   GET  /api/classify?hours=N      -> threat-classification breakdown (threat-type mix + control gaps; model + Markdown)
  *   GET  /api/classify.md?hours=N   -> the same classification report as a downloadable .md file
+ *   GET  /api/focus?hours=N         -> threat-focus / concentration (Pareto/Gini per axis; model + Markdown)
+ *   GET  /api/focus.md?hours=N      -> the same threat-focus report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -124,6 +126,7 @@ import { buildPersistence, persistenceFilename } from "../analytics/persistence.
 import { buildEdges, edgesFilename } from "../analytics/edges.ts";
 import { buildNotify, notifyFilename } from "../analytics/notify.ts";
 import { buildClassify, classifyFilename } from "../analytics/classify.ts";
+import { buildFocus, focusFilename } from "../analytics/focus.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -961,6 +964,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${classifyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- threat-focus / concentration (Pareto/Gini distribution shape) ---
+      if (method === "GET" && path === "/api/focus") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 8;
+        return send(res, 200, buildFocus(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/focus.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 8;
+        const now = Date.now();
+        const { markdown } = buildFocus(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${focusFilename(now)}"`,
         });
         res.end(markdown);
         return;
