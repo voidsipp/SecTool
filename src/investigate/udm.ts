@@ -105,7 +105,7 @@ function summarizeCapture(lines: string[], hosts: Set<string>): string | undefin
   const topPorts = [...portCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0] - b[0])
     .slice(0, 4)
-    .map(([port, count]) => `${port}×${count}`);
+    .map(([port, count]) => `${portLabel(port)}×${count}`);
 
   const peerWord = peers.size === 1 ? "peer" : "peers";
   let note = `${parsed} IP packet${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
@@ -276,7 +276,7 @@ function summarizeConnections(lines: string[], host: string): string | undefined
   const topPorts = [...portCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0] - b[0])
     .slice(0, 4)
-    .map(([port, count]) => `${port}×${count}`);
+    .map(([port, count]) => `${portLabel(port)}×${count}`);
 
   const peerWord = peers.size === 1 ? "peer" : "peers";
   let note = `${parsed} active session${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
@@ -624,6 +624,50 @@ export function protoName(p: number | undefined): string {
   return p === undefined ? "?" : (PROTO_NAMES[p] ?? String(p));
 }
 
+// Well-known / triage-relevant TCP-UDP service ports. Curated for security
+// review rather than exhaustive: the common application protocols an operator
+// recognizes at a glance, plus the management/database/remote-access ports whose
+// presence in a host's busiest-port list is itself a signal. Names follow the
+// short IANA service identifiers so they read uniformly next to a port number.
+const SERVICE_NAMES: Record<number, string> = {
+  20: "ftp-data", 21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 37: "time",
+  43: "whois", 49: "tacacs", 53: "domain", 67: "dhcp", 68: "dhcp", 69: "tftp",
+  79: "finger", 80: "http", 88: "kerberos", 110: "pop3", 111: "rpcbind",
+  119: "nntp", 123: "ntp", 135: "msrpc", 137: "netbios-ns", 138: "netbios-dgm",
+  139: "netbios-ssn", 143: "imap", 161: "snmp", 162: "snmp-trap", 179: "bgp",
+  389: "ldap", 443: "https", 445: "smb", 465: "smtps", 500: "isakmp",
+  514: "syslog", 515: "printer", 520: "rip", 523: "ibm-db2", 540: "uucp",
+  554: "rtsp", 587: "submission", 593: "msrpc-http", 623: "ipmi", 631: "ipp",
+  636: "ldaps", 873: "rsync", 902: "vmware", 989: "ftps-data", 990: "ftps",
+  993: "imaps", 995: "pop3s", 1080: "socks", 1194: "openvpn", 1433: "mssql",
+  1434: "mssql-mon", 1521: "oracle", 1701: "l2tp", 1723: "pptp", 1883: "mqtt",
+  1900: "ssdp", 2049: "nfs", 2082: "cpanel", 2083: "cpanel-ssl", 2222: "ssh-alt",
+  2375: "docker", 2376: "docker-tls", 3128: "squid", 3268: "ldap-gc",
+  3306: "mysql", 3389: "rdp", 3478: "stun", 4444: "metasploit", 4500: "ipsec-nat",
+  4789: "vxlan", 5000: "upnp", 5060: "sip", 5061: "sips", 5222: "xmpp",
+  5353: "mdns", 5432: "postgres", 5555: "adb", 5601: "kibana", 5672: "amqp",
+  5683: "coap", 5800: "vnc-http", 5900: "vnc", 5938: "teamviewer", 5985: "winrm",
+  5986: "winrm-ssl", 6000: "x11", 6379: "redis", 6443: "kube-api", 6660: "irc",
+  6667: "irc", 7547: "tr-069", 8000: "http-alt", 8008: "http-alt", 8080: "http-proxy",
+  8086: "influxdb", 8443: "https-alt", 8888: "http-alt", 9000: "http-alt",
+  9001: "tor-orport", 9090: "prometheus", 9100: "jdwp", 9200: "elasticsearch",
+  9300: "elasticsearch", 10000: "webmin", 11211: "memcached", 15672: "rabbitmq",
+  27017: "mongodb", 32400: "plex", 49152: "upnp", 51413: "bittorrent",
+  51820: "wireguard",
+};
+
+/**
+ * Annotate a port number with its well-known service name for triage notes —
+ * e.g. 443 → "443/https", 53 → "53/domain". Returns the bare number when the
+ * port isn't in the curated table, so unrecognized ports stay readable. Mirrors
+ * `protoName`: a small, security-relevant lookup that keeps the raw value when no
+ * label applies.
+ */
+export function portLabel(port: number): string {
+  const name = SERVICE_NAMES[port];
+  return name ? `${port}/${name}` : String(port);
+}
+
 /** Render a byte count in compact human terms (B / KB / MB / GB / TB, base 1024). */
 function humanBytes(n: number): string {
   if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n) || 0)} B`;
@@ -699,7 +743,7 @@ function summarizeFlows(flows: FlowRow[], hosts: Set<string>): string | undefine
   const topPorts = [...portCounts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0] - b[0])
     .slice(0, 4)
-    .map(([port, count]) => `${port}×${count}`);
+    .map(([port, count]) => `${portLabel(port)}×${count}`);
 
   const peerWord = peers.size === 1 ? "peer" : "peers";
   let note = `${parsed} flow${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
