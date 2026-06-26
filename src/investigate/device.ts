@@ -133,7 +133,12 @@ export interface TrafficProfile {
    * peer is never lost to the top-N byte cut. Empty/omitted when nothing matched.
    */
   flagged?: TrafficPeer[];
-  /** Human-readable caveat highlighting blocked/watched peers, when any matched. */
+  /**
+   * Human-readable caveat over the flagged peers, leading with the strongest
+   * signal: suspicious outbound ports first, then firewall-blocklist hits, then
+   * watchlist matches (naming the operator's own notes for *why* each address is
+   * watched). Undefined when nothing matched.
+   */
   note?: string;
 }
 
@@ -277,7 +282,25 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
     );
   }
   if (watchedPeers > 0) {
-    notes.push(`${watchedPeers} watchlisted peer(s) seen in this window.`);
+    // Surface the operator's own annotations on the matched watchlist entries so
+    // the takeaway says *why* these addresses are watched (mirroring egressAudit),
+    // not just how many matched. Distinct, ordered, and length-capped so a long
+    // or noisy free-form note can't dominate the summary line.
+    const watchNotes = [
+      ...new Set(
+        [...peers.values()]
+          .filter((p) => p.watched && p.watchNote)
+          .map((p) => p.watchNote!.replace(/\s+/g, " ").trim())
+          .filter((n) => n.length > 0),
+      ),
+    ];
+    let detail = "";
+    if (watchNotes.length > 0) {
+      const shown = watchNotes.slice(0, 3).map((n) => (n.length > 80 ? `${n.slice(0, 79)}…` : n));
+      const more = watchNotes.length - shown.length;
+      detail = ` (note: ${shown.join("; ")}${more > 0 ? `; +${more} more` : ""})`;
+    }
+    notes.push(`${watchedPeers} watchlisted peer(s) seen in this window${detail}.`);
   }
 
   return {
