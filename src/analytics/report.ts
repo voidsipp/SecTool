@@ -4,8 +4,9 @@
  * Produces a shareable, SOC-style security report for a time window straight
  * from local state — no SSH, no Claude, no network. It rolls up the stored
  * alert history (via the same math as the Trends view), the operator's triage
- * workflow, the watchlist, and the active suppression rules into both a
- * structured model and a ready-to-paste Markdown document.
+ * workflow, the watchlist, any safelisted addresses that are still alerting,
+ * and the active suppression rules into both a structured model and a
+ * ready-to-paste Markdown document.
  *
  * This complements:
  *   - the Trends view   (interactive dashboard, not exportable)
@@ -66,6 +67,29 @@ export interface NotableDetection {
   watchNote?: string;
 }
 
+export interface SafeHit {
+  /**
+   * A safelisted (operator-trusted) IP that nonetheless generated alerts in the
+   * window. Surfaced because a trusted address that keeps firing is exactly the
+   * false-positive / stale-allowlist signal an analyst wants to revisit.
+   */
+  ip: string;
+  /**
+   * Operator's free-form reason recorded when the IP was marked safe, if any
+   * ("internal vuln scanner", "vendor VPN"). The safelist's counterpart to
+   * {@link WatchHit.note} — it explains *why* the address was trusted.
+   */
+  note?: string;
+  /** Number of distinct alerts in the window that touched this IP. */
+  alertHits: number;
+  /** Most recent alert time for this IP, ms epoch. */
+  lastAlertTime?: number;
+  /** Highest severity observed across this IP's alerts (e.g. "high"). */
+  worstSeverity?: string;
+  /** The signature (or category) this IP triggered most often. */
+  topSignature?: string;
+}
+
 export interface ReportModel {
   /** Window length in hours (clamped). */
   hours: number;
@@ -90,6 +114,12 @@ export interface ReportModel {
   activeSuppressions: number;
   /** Number of IPs marked safe (context for the false-positive posture). */
   safeCount: number;
+  /**
+   * Safelisted (operator-trusted) IPs that still generated alerts in the
+   * window, worst first. Empty when no trusted address fired — the common,
+   * healthy case where the allowlist is doing its job.
+   */
+  safeHits: SafeHit[];
   /** The finished Markdown document. */
   markdown: string;
 }
@@ -206,6 +236,74 @@ function collectWatchHits(allAlerts: StoredAlert[], windowStartMs: number): Watc
   });
 }
 
+/** Internal accumulator: a SafeHit plus the running stats needed to fill it. */
+interface SafeAccum {
+  hit: SafeHit;
+  worstWeight: number;
+  sigCounts: Map<string, number>;
+}
+
+/**
+ * Find safelisted IPs that *still* fired alerts in the window. The safelist
+ * exempts an address from risk scoring and auto-blocking, so a safelisted peer
+ * that keeps generating detections is worth an analyst's attention: either the
+ * trust is stale, or the noise warrants a proper suppression rule. We only
+ * report addresses that actually fired — a quiet allowlist is the healthy case
+ * and shouldn't pad the report.
+ */
+function collectSafeHits(allAlerts: StoredAlert[], windowStartMs: number, windowEndMs: number): SafeHit[] {
+  const entries = safeStore.all();
+  if (!entries.length) return [];
+  const byIp = new Map<string, SafeAccum>();
+  for (const e of entries) {
+    byIp.set(e.ip, {
+      hit: { ip: e.ip, note: e.note, alertHits: 0 },
+      worstWeight: -1,
+      sigCounts: new Map(),
+    });
+  }
+  for (const a of allAlerts) {
+    if (a.time < windowStartMs || a.time > windowEndMs) continue;
+    // One alert counts once per IP even if it's both source and dest.
+    const counted = new Set<string>();
+    for (const ip of [a.srcIp, a.dstIp]) {
+      if (!ip || counted.has(ip)) continue;
+      const acc = byIp.get(ip);
+      if (!acc) continue;
+      counted.add(ip);
+      acc.hit.alertHits++;
+      if (acc.hit.lastAlertTime === undefined || a.time > acc.hit.lastAlertTime) acc.hit.lastAlertTime = a.time;
+      const w = SEV_WEIGHT[a.severity] ?? 0;
+      if (w > acc.worstWeight) {
+        acc.worstWeight = w;
+        acc.hit.worstSeverity = a.severity;
+      }
+      const sig = a.signature || a.category || "—";
+      acc.sigCounts.set(sig, (acc.sigCounts.get(sig) ?? 0) + 1);
+    }
+  }
+  const hits: SafeHit[] = [];
+  for (const acc of byIp.values()) {
+    if (acc.hit.alertHits === 0) continue;
+    let topSig: string | undefined;
+    let topN = 0;
+    for (const [sig, n] of acc.sigCounts) {
+      if (n > topN) {
+        topN = n;
+        topSig = sig;
+      }
+    }
+    acc.hit.topSignature = topSig;
+    hits.push(acc.hit);
+  }
+  // Rank by danger first (worst severity), then by volume.
+  return hits.sort((a, b) => {
+    const wa = SEV_WEIGHT[a.worstSeverity ?? ""] ?? 0;
+    const wb = SEV_WEIGHT[b.worstSeverity ?? ""] ?? 0;
+    return wb - wa || b.alertHits - a.alertHits;
+  });
+}
+
 /** Lowest severity weight that qualifies an individual alert as "notable". */
 const NOTABLE_MIN_WEIGHT = SEV_WEIGHT.medium!;
 
@@ -253,7 +351,12 @@ function collectNotableDetections(
 }
 
 /** Compose the plain-language executive summary from the numbers. */
-function writeExecutiveSummary(trends: Trends, watchHits: WatchHit[], now: number): { summary: string; highlights: string[] } {
+function writeExecutiveSummary(
+  trends: Trends,
+  watchHits: WatchHit[],
+  safeHits: SafeHit[],
+  now: number,
+): { summary: string; highlights: string[] } {
   const { label } = posture(trends);
   const sevMap = new Map(trends.bySeverity.map((s) => [s.severity, s.count]));
   const crit = sevMap.get("critical") ?? 0;
@@ -311,6 +414,13 @@ function writeExecutiveSummary(trends: Trends, watchHits: WatchHit[], now: numbe
     } else {
       highlights.push(`${watchHits.length} watchlist target(s) active this window.`);
     }
+  }
+
+  if (safeHits.length) {
+    const total = safeHits.reduce((n, s) => n + s.alertHits, 0);
+    highlights.push(
+      `${safeHits.length} safelisted address(es) still generated ${total} alert(s) — re-verify the allowlist.`,
+    );
   }
 
   if (trends.notified > 0) parts.push(`${trends.notified} alert(s) were pushed to Discord.`);
@@ -522,6 +632,29 @@ function renderMarkdown(model: ReportModel): string {
     lines.push("");
   }
 
+  if (model.safeHits.length) {
+    lines.push(`## Safelisted addresses still alerting`);
+    lines.push("");
+    lines.push(
+      `_These IPs are on the operator allowlist (exempt from risk scoring and auto-blocking) yet still triggered detections this window — review whether the trust still holds or a suppression rule is the better fit._`,
+    );
+    lines.push("");
+    lines.push(
+      mdTable(
+        ["IP", "Alerts", "Worst severity", "Top signature", "Last seen", "Note"],
+        model.safeHits.map((s) => [
+          cell(s.ip),
+          String(s.alertHits),
+          cell(s.worstSeverity ?? "—"),
+          cell(s.topSignature ?? "—"),
+          s.lastAlertTime ? fmtAgo(s.lastAlertTime, model.generatedAt) : "—",
+          cell(s.note ?? ""),
+        ]),
+      ),
+    );
+    lines.push("");
+  }
+
   const suppRules = suppressionStore.all();
   if (suppRules.length) {
     lines.push(`## Active suppression rules`);
@@ -550,8 +683,9 @@ export function buildReport(hours: number, nowMs = Date.now()): ReportModel {
   const trends = buildTrends(hours, 10, nowMs);
   const allAlerts = alertStore.all();
   const watchHits = collectWatchHits(allAlerts, trends.windowStartMs);
+  const safeHits = collectSafeHits(allAlerts, trends.windowStartMs, trends.windowEndMs);
   const notable = collectNotableDetections(allAlerts, trends.windowStartMs, trends.windowEndMs, 12);
-  const { summary, highlights } = writeExecutiveSummary(trends, watchHits, nowMs);
+  const { summary, highlights } = writeExecutiveSummary(trends, watchHits, safeHits, nowMs);
   const activeSuppressions = suppressionStore.count();
   const safeCount = safeStore.count();
 
@@ -568,6 +702,7 @@ export function buildReport(hours: number, nowMs = Date.now()): ReportModel {
     notable,
     activeSuppressions,
     safeCount,
+    safeHits,
     markdown: "",
   };
   model.markdown = renderMarkdown(model);

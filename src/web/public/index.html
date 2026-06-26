@@ -535,7 +535,7 @@
     <button id="reportCopy">⧉ Copy Markdown</button>
     <button id="reportDownload" class="primary">⬇ Download .md</button>
   </div>
-  <div id="reportDesc" class="muted" style="margin-bottom:12px;">A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.</div>
+  <div id="reportDesc" class="muted" style="margin-bottom:12px;">A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity, safelisted addresses that are still alerting, and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.</div>
   <div id="reportBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="intelView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
@@ -2013,6 +2013,7 @@ function reportSummaryCards(t, model){
     <div class="kv low"><div class="k">Dismissed</div><div class="v">${t.dismissed}</div></div>
     <div class="kv"><div class="k">Suppressions</div><div class="v">${model.activeSuppressions}</div></div>
     <div class="kv"><div class="k">Watchlist active</div><div class="v">${model.watchHits.length}</div></div>
+    <div class="kv${(model.safeHits&&model.safeHits.length)?' high':''}"><div class="k">Safelisted alerting</div><div class="v">${(model.safeHits||[]).length}</div></div>
   </div>`;
 }
 // Report tab hosts two offline documents: the single-window incident report and
@@ -2045,7 +2046,7 @@ async function showReport(){
   $("#reportCompare").textContent = compareMode ? "📄 Incident report" : "⇆ Compare periods";
   if (compareMode) return showCompare();
   $("#reportView").querySelector("h2").innerHTML = '📄 Incident Report <span id="reportMeta" class="muted"></span>';
-  $("#reportDesc").innerHTML = "A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.";
+  $("#reportDesc").innerHTML = "A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity, safelisted addresses that are still alerting, and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.";
   $("#reportBody").innerHTML='<div class="empty">Building report…</div>';
   try {
     const hours = $("#reportHours").value;
