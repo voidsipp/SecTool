@@ -661,16 +661,24 @@ function classifyListenerRisk(l: Listener): string[] {
   if (!svc) return [];
   // Prefer NetFlow-corroborated wording: when the bind address was missing but
   // observed traffic proves the port is reachable, say so concretely instead of
-  // hedging with "possibly".
-  const where = l.observedInbound
-    ? l.observedInbound.external
-      ? "confirmed reachable from a public peer (seen in gateway NetFlow)"
-      : "confirmed reachable off-host (seen in gateway NetFlow)"
-    : l.exposure === "all-interfaces"
-      ? "exposed on all interfaces"
-      : l.exposure === "specific"
-        ? "bound to a network interface"
-        : "possibly network-exposed (agent can't confirm the bind address)";
+  // hedging with "possibly". Include the distinct off-host peer breadth the flow
+  // evidence already counted — a sensitive port probed by one peer is a very
+  // different threat than one reached by dozens, so the operator can triage by
+  // how widely it is actually being hit rather than just whether it's reachable.
+  let where: string;
+  if (l.observedInbound) {
+    const n = l.observedInbound.peers;
+    const breadth = `${n} distinct off-host peer${n === 1 ? "" : "s"}`;
+    where = l.observedInbound.external
+      ? `confirmed reached from a public peer, by ${breadth} (seen in gateway NetFlow)`
+      : `confirmed reachable off-host, by ${breadth} (seen in gateway NetFlow)`;
+  } else if (l.exposure === "all-interfaces") {
+    where = "exposed on all interfaces";
+  } else if (l.exposure === "specific") {
+    where = "bound to a network interface";
+  } else {
+    where = "possibly network-exposed (agent can't confirm the bind address)";
+  }
   return [`${svc.name} (${svc.why}) ${where}`];
 }
 
@@ -712,6 +720,10 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   // services inherit the corroborated, evidence-based wording.
   let corroborated = 0;
   let corroboratedExternal = 0;
+  // Peak distinct off-host peer count on any single corroborated port. A peak
+  // (not a sum) so the figure stays accurate even when one peer reaches several
+  // ports — summing per-port counts would double-count that peer.
+  let corroboratedPeerPeak = 0;
   let flowStoreActive = false;
   if (!sawLocalAddr && listeners.length > 0) {
     const evidence = flowExposureEvidence(host);
@@ -722,6 +734,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
       l.observedInbound = hit;
       corroborated++;
       if (hit.external) corroboratedExternal++;
+      if (hit.peers > corroboratedPeerPeak) corroboratedPeerPeak = hit.peers;
     }
   }
   // Flag dangerous, network-reachable services now that each listener's
@@ -751,6 +764,9 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
       note +=
         ` However, the gateway's NetFlow recorded off-host connections to ${corroborated} of these port(s)` +
         (corroboratedExternal > 0 ? `, ${corroboratedExternal} from a public peer,` : "") +
+        (corroboratedPeerPeak > 1
+          ? ` reached by as many as ${corroboratedPeerPeak} distinct peers on a single port,`
+          : "") +
         ` confirming they are network-reachable regardless — see the flagged listeners.`;
     } else if (flowStoreActive) {
       note +=
