@@ -1319,15 +1319,19 @@ function renderEgress(j){
   if (!(j.peers||[]).length) return '<div class="empty">No connections to public IPs reported by the agent.</div>';
   const row=p=>{ const g=p.geo||{}; const loc=[g.country,g.city].filter(Boolean).join(' / ');
     const rep=p.riskReasons&&p.riskReasons.length?p.riskReasons.join(', '):(p.feeds&&p.feeds.length?p.feeds.join(', '):'clean');
+    const sus=new Set(p.suspiciousPorts||[]);
+    const portsCell=(p.ports||[]).slice(0,5).map(pt=>sus.has(pt)
+      ? `<span style="color:var(--critical,#ff5c7c)" title="Suspicious outbound destination port">${pt}⚠</span>`
+      : String(pt)).join(', ');
     return `<tr style="${p.risk?'background:rgba(255,92,124,.08)':''}">
-    <td class="mono">${p.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${p.blocked?'<span class="badge" style="background:var(--muted)">BLOCKED</span> ':''}${p.watched?`<span class="badge" style="background:var(--accent)" title="${esc('On the watchlist'+(p.watchNote?': '+p.watchNote:''))}">WATCH</span> `:''}${esc(p.ip)}</td>
+    <td class="mono">${p.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${p.blocked?'<span class="badge" style="background:var(--muted)">BLOCKED</span> ':''}${p.watched?`<span class="badge" style="background:var(--accent)" title="${esc('On the watchlist'+(p.watchNote?': '+p.watchNote:''))}">WATCH</span> `:''}${(p.suspiciousPorts||[]).length?'<span class="badge" style="background:var(--high,#ff9e3d)" title="Reached on a suspicious destination port (backdoor/C2/should-not-traverse-WAN)">BAD PORT</span> ':''}${esc(p.ip)}</td>
     <td class="muted">${esc(loc||'?')}</td>
     <td class="muted" title="${esc(g.org||g.isp||'')}">${esc((g.asname||g.org||g.isp||'').slice(0,28))}${g.hosting?' <span class="badge" style="background:var(--accent)">HOST</span>':''}</td>
     <td class="mono" style="color:var(--cyan,#46d6ff)">${esc((p.processes||[]).slice(0,3).join(', '))}</td>
-    <td class="mono">${(p.ports||[]).slice(0,5).join(', ')}</td>
+    <td class="mono">${portsCell}</td>
     <td class="muted">${p.conns}</td>
     <td style="color:${p.risk?'var(--critical,#ff5c7c)':'var(--muted)'}">${esc(rep)}</td></tr>`; };
-  let h=`<div class="muted" style="margin-bottom:8px">${j.distinctRemote} distinct public peer(s) · ${j.audited} enriched${j.riskyCount?` · <span style="color:var(--critical,#ff5c7c)">${j.riskyCount} flagged</span>`:''}${j.watchedCount?` · <span style="color:var(--accent)">👁 ${j.watchedCount} watched</span>`:''}${j.reputationDegraded?` · <span style="color:var(--high,#ff9e3d)">⚠ reputation degraded</span>`:''}</div>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${j.distinctRemote} distinct public peer(s) · ${j.audited} enriched${j.riskyCount?` · <span style="color:var(--critical,#ff5c7c)">${j.riskyCount} flagged</span>`:''}${j.suspiciousPortCount?` · <span style="color:var(--high,#ff9e3d)">⚠ ${j.suspiciousPortCount} bad-port</span>`:''}${j.watchedCount?` · <span style="color:var(--accent)">👁 ${j.watchedCount} watched</span>`:''}${j.reputationDegraded?` · <span style="color:var(--high,#ff9e3d)">⚠ reputation degraded</span>`:''}</div>`;
   h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Remote IP</th><th>Location</th><th>Network</th><th>Process</th><th>Ports</th><th>Conns</th><th>Reputation</th></tr></thead><tbody>${j.peers.map(row).join("")}</tbody></table>`;
   if (j.note) h+=`<div style="margin-top:6px;font-size:11px;color:${j.reputationDegraded?'var(--high,#ff9e3d)':'var(--muted)'}">${esc(j.note)}</div>`;
   return h;

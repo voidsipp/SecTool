@@ -621,6 +621,12 @@ export interface EgressPeer {
   watched: boolean;
   /** The watchlist entry's free-form note, when the peer is watched and one exists. */
   watchNote?: string;
+  /**
+   * Destination ports this peer was reached on that are suspicious as outbound
+   * targets (remote-control backdoors, botnet C2, or services that should never
+   * traverse the WAN). Empty when none matched. See `SUSPICIOUS_EGRESS_PORTS`.
+   */
+  suspiciousPorts: number[];
   risk: boolean;
   riskReasons: string[];
   geo?: Enrichment["geo"];
@@ -648,6 +654,50 @@ export interface EgressAudit {
   peers?: EgressPeer[];
   /** Human-readable caveats: result truncation and/or degraded enrichment. */
   note?: string;
+  /**
+   * Audited peers reached on a destination port that is suspicious as an
+   * *outbound* target (remote-control backdoor, botnet C2, or a service that
+   * should never traverse the WAN). See each peer's `suspiciousPorts`.
+   */
+  suspiciousPortCount?: number;
+}
+
+// Destination ports that are strongly suspicious as the *target* of an outbound
+// connection from an internal host to a public IP. This is the egress mirror of
+// the listener `RISKY_SERVICES` table: that one flags dangerous services
+// *exposed on* the host, while this flags the host *reaching out* to a port that
+// legitimate client software rarely contacts across the open internet —
+// remote-control backdoors, botnet C2 rendezvous, and services that should stay
+// on the LAN. A host beaconing to one of these is a classic compromise/exfil
+// signal even at trivial volume, so matching peers are always enriched (never
+// lost to the busiest-N cut) and risk-flagged. Purely offline: a local lookup on
+// already-collected port numbers, no agent round-trip or external API call.
+// Keyed by port; the value is the operator-facing reason fragment.
+const SUSPICIOUS_EGRESS_PORTS: Record<number, string> = {
+  23: "Telnet — IoT-worm (Mirai-class) propagation",
+  2323: "Telnet alt-port — IoT-worm propagation",
+  139: "NetBIOS to the internet — legacy SMB exposure",
+  445: "SMB to the internet — worm spread / data exfiltration",
+  1080: "SOCKS proxy — common malware relay",
+  1337: "common backdoor port",
+  3389: "RDP out to the internet — remote-desktop pivot",
+  4444: "Metasploit/Meterpreter default callback",
+  4445: "Metasploit alt callback",
+  5555: "Android Debug Bridge / RAT control",
+  5900: "VNC out to the internet — remote-desktop pivot",
+  6667: "IRC — classic botnet C2 channel",
+  6697: "IRC over TLS — botnet C2 channel",
+  31337: '"elite" backdoor port (Back Orifice-class)',
+};
+
+/** The subset of `ports` that are suspicious outbound targets, paired with why. */
+function suspiciousEgressPorts(ports: Iterable<number>): { port: number; why: string }[] {
+  const out: { port: number; why: string }[] = [];
+  for (const p of ports) {
+    const why = SUSPICIOUS_EGRESS_PORTS[p];
+    if (why) out.push({ port: p, why });
+  }
+  return out.sort((a, b) => a.port - b.port);
 }
 
 export async function egressAudit(cfg: Config, host: string): Promise<EgressAudit> {
@@ -682,21 +732,23 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   const distinctRemote = byIp.size;
   const all = [...byIp.values()];
 
-  // Operator-flagged peers (firewall blocklist or watchlist) are enriched and
-  // surfaced regardless of connection volume. A low-traffic beacon to a watched
-  // or blocked address is precisely the egress that must never be lost to the
-  // busiest-N enrichment cut — yet block/watch membership is a pure local join
-  // (no agent/API call), so always including these peers costs nothing extra and
-  // keeps `watchedCount`/`blocked` accurate across the whole peer set rather than
-  // just the top slice. The remaining bounded enrichment budget then goes to the
-  // busiest peers that aren't already flagged.
+  // Peers of interest are enriched and surfaced regardless of connection volume:
+  // those on the firewall blocklist/watchlist, and those reached on a suspicious
+  // outbound destination port (backdoor/C2/should-not-traverse-WAN). A low-traffic
+  // beacon to a watched, blocked, or backdoor-port address is precisely the egress
+  // that must never be lost to the busiest-N enrichment cut — and all three checks
+  // are pure local joins (no agent/API call), so always including these peers costs
+  // nothing extra and keeps `watchedCount`/`blocked`/`suspiciousPorts` accurate
+  // across the whole peer set rather than just the top slice. The remaining bounded
+  // enrichment budget then goes to the busiest peers that aren't already of interest.
   const isFlagged = (a: Agg): boolean => blockStore.has(a.ip) || watchStore.match(a.ip) !== undefined;
-  const flaggedAggs = all.filter(isFlagged);
+  const isOfInterest = (a: Agg): boolean => isFlagged(a) || suspiciousEgressPorts(a.ports).length > 0;
+  const interestAggs = all.filter(isOfInterest);
   const busiest = all
-    .filter((a) => !isFlagged(a))
+    .filter((a) => !isOfInterest(a))
     .sort((a, b) => b.conns - a.conns)
-    .slice(0, Math.max(0, MAX_ENRICH - flaggedAggs.length));
-  const top = [...flaggedAggs, ...busiest];
+    .slice(0, Math.max(0, MAX_ENRICH - interestAggs.length));
+  const top = [...interestAggs, ...busiest];
 
   const peers: EgressPeer[] = await Promise.all(
     top.map(async (a): Promise<EgressPeer> => {
@@ -722,9 +774,15 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       const watch = watchStore.match(a.ip);
       const watched = watch !== undefined;
       if (watched) reasons.push(watch!.note ? `on watchlist: ${watch!.note}` : "on watchlist");
+      // Suspicious outbound destination ports — a pure local join (no agent/API).
+      // A host reaching a public IP on a backdoor/C2/should-not-traverse-WAN port
+      // is a strong compromise signal independent of the peer's reputation.
+      const susPorts = suspiciousEgressPorts(a.ports);
+      for (const s of susPorts) reasons.push(`outbound to :${s.port} (${s.why})`);
       // hosting/proxy alone are weak signals — only flag risk on a real verdict
-      // or an explicit operator signal (blocklist/watchlist).
-      const risk = vtBad > 0 || abuse >= 50 || (e?.feeds.length ?? 0) > 0 || blocked || watched;
+      // or an explicit operator/behavioral signal (blocklist/watchlist/bad port).
+      const risk =
+        vtBad > 0 || abuse >= 50 || (e?.feeds.length ?? 0) > 0 || blocked || watched || susPorts.length > 0;
       return {
         ip: a.ip,
         conns: a.conns,
@@ -734,6 +792,7 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
         blocked,
         watched,
         watchNote: watch?.note,
+        suspiciousPorts: susPorts.map((s) => s.port),
         risk,
         riskReasons: reasons,
         geo: e?.geo,
@@ -762,8 +821,16 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   }
 
   const watchedCount = peers.filter((p) => p.watched).length;
+  const suspiciousPortCount = peers.filter((p) => p.suspiciousPorts.length > 0).length;
 
   const notes: string[] = [];
+  if (suspiciousPortCount > 0) {
+    notes.push(
+      `${suspiciousPortCount} audited peer(s) are being contacted on suspicious destination ports ` +
+        `(remote-control backdoors, botnet C2, or services that should never traverse the WAN) — ` +
+        `a classic compromised-host signal; review the flagged peers.`,
+    );
+  }
   if (watchedCount > 0) {
     notes.push(
       `${watchedCount} audited peer(s) are on the operator watchlist — this host is reaching an address ` +
@@ -772,8 +839,9 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   }
   if (distinctRemote > peers.length) {
     notes.push(
-      `Audited ${peers.length} of ${distinctRemote} external peers (every block/watch-listed peer ` +
-        `plus the busiest of the rest); lower-volume unflagged peers were not enriched.`,
+      `Audited ${peers.length} of ${distinctRemote} external peers (every block/watch-listed peer and ` +
+        `every peer reached on a suspicious destination port, plus the busiest of the rest); ` +
+        `lower-volume unflagged peers were not enriched.`,
     );
   }
   if (degraded.length > 0) {
@@ -790,6 +858,7 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     audited: peers.length,
     riskyCount: peers.filter((p) => p.risk).length,
     watchedCount: watchedCount > 0 ? watchedCount : undefined,
+    suspiciousPortCount: suspiciousPortCount > 0 ? suspiciousPortCount : undefined,
     reputationDegraded: degraded.length > 0,
     peers,
     note: notes.length > 0 ? notes.join(" ") : undefined,
