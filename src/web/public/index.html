@@ -344,12 +344,18 @@
   <div id="devicesBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="askView" style="display:none; height:calc(100vh - 53px); flex-direction:column;">
-  <div style="display:flex; align-items:center; gap:12px; padding:16px 26px 8px;">
+  <div style="display:flex; align-items:center; gap:12px; padding:16px 26px 8px; flex-wrap:wrap;">
     <button id="backAlerts3">← Alerts</button>
-    <h2 style="margin:0; font-size:18px;">💬 Ask your network</h2>
+    <h2 id="askTitle" style="margin:0; font-size:18px;">💬 Ask your network</h2>
+    <span class="spacer" style="flex:1"></span>
+    <div class="status" style="display:inline-flex; gap:2px; border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+      <button id="modeAsk" class="primary" title="Read-only: query your telemetry" style="border:none; border-radius:0;">💬 Ask</button>
+      <button id="modeAct" title="Let the agent make changes (suppressions, blocks, triage…)" style="border:none; border-radius:0;">🤖 Act</button>
+    </div>
+    <label id="dryRunWrap" class="status" title="Preview what the agent would change without applying it" style="display:none;"><input type="checkbox" id="agentDryRun" checked> Preview (dry-run)</label>
   </div>
   <div id="chat" style="flex:1; overflow-y:auto; padding:8px 26px;">
-    <div class="muted" style="padding:8px 0">Ask anything about your network — it queries your real flows, alerts, DNS, IP reputation, and host risk. Try:</div>
+    <div id="chatIntro" class="muted" style="padding:8px 0">Ask anything about your network — it queries your real flows, alerts, DNS, IP reputation, and host risk. Try:</div>
     <div id="suggestions"></div>
   </div>
   <div style="display:flex; gap:8px; padding:14px 26px; border-top:1px solid var(--border);">
@@ -1328,9 +1334,43 @@ const SUGGESTIONS = [
   "Show DNS lookups for anything containing \"telemetry\"",
   "Are any of my internal devices showing compromise signs?",
 ];
+const ACT_SUGGESTIONS = [
+  "Suppress notifications for the noisiest signature for the next 24 hours",
+  "Mute all low-severity alerts from 192.168.0.0/24 with a reason",
+  "Add 185.220.101.0/24 to my watchlist as a known Tor range",
+  "Block the IP that attacked me most this week (check its reputation first)",
+];
+// Agent mode: "ask" (read-only) or "act" (action-capable automation agent).
+let agentMode = "ask";
 function renderSuggestions(){
-  $("#suggestions").innerHTML = SUGGESTIONS.map(s=>`<div class="pill" style="display:inline-block;margin:3px;padding:6px 10px;cursor:pointer" data-q="${esc(s)}">${esc(s)}</div>`).join("");
+  const list = agentMode === "act" ? ACT_SUGGESTIONS : SUGGESTIONS;
+  $("#suggestions").innerHTML = list.map(s=>`<div class="pill" style="display:inline-block;margin:3px;padding:6px 10px;cursor:pointer" data-q="${esc(s)}">${esc(s)}</div>`).join("");
   document.querySelectorAll("#suggestions .pill").forEach(p=>p.onclick=()=>{ $("#askInput").value=p.dataset.q; sendAsk(); });
+}
+function setAgentMode(mode){
+  agentMode = mode;
+  const act = mode === "act";
+  $("#modeAsk").classList.toggle("primary", !act);
+  $("#modeAct").classList.toggle("primary", act);
+  $("#dryRunWrap").style.display = act ? "inline-flex" : "none";
+  $("#askTitle").textContent = act ? "🤖 Automation agent" : "💬 Ask your network";
+  $("#askInput").placeholder = act
+    ? "e.g. Suppress the SSH-scan signature from 10.0.0.5 for 24h"
+    : "e.g. Has anything internal talked to a hosting provider abroad this week?";
+  $("#chatIntro").innerHTML = act
+    ? "Tell the agent what to change — it can create/remove <b>suppressions</b>, manage the <b>safelist</b>/<b>watchlist</b>, <b>block</b>/<b>unblock</b> IPs and drive <b>triage</b>. Leave <b>Preview</b> on to see what it would do without applying it. Try:"
+    : "Ask anything about your network — it queries your real flows, alerts, DNS, IP reputation, and host risk. Try:";
+  renderSuggestions();
+}
+function renderActions(actions){
+  if(!actions || !actions.length) return "";
+  const rows = actions.map(a=>{
+    const icon = a.ok ? (a.planned ? "📝" : "✅") : "⛔";
+    const color = a.ok ? (a.planned ? "var(--cyan)" : "var(--ok,#3fb950)") : "var(--critical)";
+    return `<div style="margin:3px 0"><span style="color:${color}">${icon}</span> <code style="background:#0b0f15;padding:1px 4px;border-radius:3px">${esc(a.tool)}</code> <span class="muted">${esc(a.detail||"")}</span></div>`;
+  }).join("");
+  const planned = actions.some(a=>a.planned);
+  return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><div class="muted" style="font-size:11px;margin-bottom:4px">${planned?"planned changes (dry-run — nothing applied)":"changes applied"}:</div>${rows}</div>`;
 }
 function addMsg(who, html){
   const d=document.createElement("div");
@@ -1341,19 +1381,27 @@ function addMsg(who, html){
 let asking=false;
 async function sendAsk(){
   const q = $("#askInput").value.trim(); if(!q||asking) return;
-  asking=true; $("#askInput").value=""; $("#suggestions").innerHTML="";
+  asking=true; $("#askInput").value=""; $("#suggestions").innerHTML=""; $("#chatIntro").style.display="none";
   addMsg("you", esc(q));
-  const thinking = addMsg("ai", '<span class="spin"></span> thinking…');
+  const act = agentMode === "act";
+  const thinking = addMsg("ai", '<span class="spin"></span> '+(act?"working…":"thinking…"));
   try {
-    const j = await api("/api/ask",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question:q})});
-    thinking.querySelector("div").innerHTML = md(j.answer) + (j.toolsUsed&&j.toolsUsed.length?`<div class="muted" style="margin-top:8px;font-size:11px">queried: ${esc([...new Set(j.toolsUsed)].join(", "))}</div>`:"");
+    let j;
+    if(act){
+      const dryRun = $("#agentDryRun").checked;
+      j = await api("/api/agent/act",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:q,dryRun})});
+      thinking.querySelector("div").innerHTML = md(j.answer) + renderActions(j.actions);
+    } else {
+      j = await api("/api/ask",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question:q})});
+      thinking.querySelector("div").innerHTML = md(j.answer) + (j.toolsUsed&&j.toolsUsed.length?`<div class="muted" style="margin-top:8px;font-size:11px">queried: ${esc([...new Set(j.toolsUsed)].join(", "))}</div>`:"");
+    }
   } catch(e){ thinking.querySelector("div").innerHTML = '<span style="color:var(--critical)">'+esc(e.message)+'</span>'; }
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
   $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#askView").style.display="flex";
-  if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
+  if(!$("#chat").dataset.init){ setAgentMode(agentMode); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
 }
 let warMapData=null;
@@ -2051,6 +2099,8 @@ $("#backAlerts4").onclick = showAlerts;
 $("#navAsk").onclick = showAsk;
 $("#askSend").onclick = sendAsk;
 $("#askInput").addEventListener("keydown", e=>{ if(e.key==="Enter") sendAsk(); });
+$("#modeAsk").onclick = ()=>setAgentMode("ask");
+$("#modeAct").onclick = ()=>setAgentMode("act");
 $("#navBlocked").onclick = showBlocked;
 $("#navHosts").onclick = showHosts;
 $("#navDevices").onclick = showDevices;

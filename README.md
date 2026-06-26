@@ -306,6 +306,23 @@ me most this week and are they dangerous?"*, *"Has any internal host talked to a
 VPS abroad?"*, *"Show DNS lookups containing telemetry."* Needs no extra config —
 uses your existing Claude auth. (A Discord bot can call the same endpoint.)
 
+## 🤖 Automation agent (dashboard "Act", `POST /api/agent/act`)
+
+The same chat surface has an **🤖 Act** mode backed by an *action-capable* agent
+(`src/analyst/agent.ts`). Where Ask only reads, Act can **operate every
+operator-facing feature** from a plain-English instruction: create/remove
+**suppression** rules, manage the **safelist** and **watchlist**, **block**/
+**unblock** IPs at the firewall, and drive per-alert **triage** (status, notes,
+dismiss/restore). Examples: *"Suppress the noisy SSH-scan signature from 10.0.0.5
+for 24h"*, *"Add 185.220.101.0/24 to my watchlist as a Tor range"*, *"Block the IP
+that attacked me most this week — check its reputation first."*
+
+Every mutating call is returned as an **audit list** of exactly what changed, and a
+default-on **Preview (dry-run)** toggle lets you see the planned changes without
+applying anything. Firewall blocks still pass the same `blockGuard` allowlist that
+protects private/internal/gateway/safelisted IPs. Send `{"instruction": "...",
+"dryRun": true|false}` to the endpoint.
+
 ## 🍯 Deception / honeypots (`HONEYPOT_ENABLED`)
 
 Opens decoy services on ports nothing legitimate should touch. **Any** connection
