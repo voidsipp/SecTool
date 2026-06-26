@@ -999,7 +999,8 @@ function wireActions(id, a, triage) {
   $("#surr").onclick = async () => { busy("Gathering surrounding events, DNS & connections"); try {
     const j = await api("/api/alerts/"+id+"/surrounding",{method:"POST",headers:{'content-type':'application/json'},body:JSON.stringify({windowMin:15})});
     const ev = j.events.map(e=>`${fmt(e.time)}  [${e.severity||'-'}]  ${e.key||''}  ${e.src||'?'} → ${e.dst||'?'}`).join("\n");
-    let html = `<div class="muted">Logged events: ${j.events.length} within ±${j.windowMinutes}m</div><pre>${esc(ev||"(none)")}</pre>`;
+    let html = j.note?`<div class="section" style="background:rgba(110,86,255,.1);border-left:3px solid var(--accent);padding:8px 10px;margin:0 0 10px;font-size:12px">${esc(j.note)}</div>`:"";
+    html += `<div class="muted">Logged events: ${j.events.length} within ±${j.windowMinutes}m</div><pre>${esc(ev||"(none)")}</pre>`;
     if (j.dns) {
       const dns = j.dns.domains.map(d=>`${String(d.count).padStart(4)}  ${d.domain}`).join("\n");
       html += `<div class="muted" style="margin-top:10px">DNS resolutions in window: ${j.dns.total} queries, ${j.dns.domains.length} unique domains</div><pre>${esc(dns||"(none)")}</pre><div class="muted">${esc(j.dns.note||"")}</div>`;
