@@ -553,6 +553,43 @@ SSH, no Claude, no live gateway query**.
 - `GET /api/classify.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --classify 168 [--limit 25]` (or `npm run classify`) → print the Markdown to stdout (defaults to a 7-day window so the mix reflects more than one shift's chatter).
 
+## 📊 Threat-focus / concentration report (`GET /api/focus[.md]`, `--focus`)
+
+Every other report answers **"*which* ones?"** — it ranks the worst sources,
+hosts, pairs, signatures or threat classes. None of them answer the question a
+responder asks *before* picking a strategy: **"what is the *shape* of the
+distribution?"** A "top 20 sources" table looks identical whether those 20 IPs
+are 95% of all traffic (block them, done) or 4% of it (whack-a-mole against a
+5,000-host botnet) — and that distinction changes the entire response plan. The
+numbers that tell the two apart live *between* the rows, never in them.
+
+This report measures **concentration** across four independent axes — **source
+IPs**, **destination IPs**, **signatures** and **threat classes** — from the
+stored alert history. For each it computes the share held by the top 1 / 5 / 10
+values, the **Pareto point** (the fewest values that cover ≥80% of the volume,
+and that count as a fraction of all distinct values), the **Gini coefficient**
+(0 = perfectly even … →1 = one value holds everything) and a 0-100 concentration
+index, then renders a categorical verdict — `▰ concentrated`, `░ diffuse`,
+`▱ moderate` or `● single` — with the raw numbers always shown so you can
+overrule the heuristic.
+
+The payoff is an action, not just a description. **Concentrated sources** →
+*"block these N IPs to cut 80% of the noise"* (a high-leverage quick win, with a
+note on how many are already blocked). **Diffuse sources** → blocking won't
+scale; tune rules and rate-limit. **Concentrated destinations** → the attacker
+has picked favourites; harden those assets. **A single dominant signature** →
+the classic false-positive / tuning tell.
+
+Honest about its limits: concentration describes *where the noise lives*, not how
+dangerous it is — pair it with the severity-ranked reports before triaging; and
+"diffuse" means diffuse among *alerting* actors only, since a source that never
+trips a rule is invisible here. Pure offline math over the local alert history —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/focus?hours=N[&limit=8]` → the structured per-axis model **plus** rendered Markdown (a concentration-at-a-glance table plus a top-values table per axis).
+- `GET /api/focus.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --focus 168 [--limit 8]` (or `npm run focus`) → print the Markdown to stdout (defaults to a 7-day window so the shape reflects more than one shift).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
