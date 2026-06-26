@@ -1316,9 +1316,9 @@ function renderEgress(j){
     <td class="mono">${(p.ports||[]).slice(0,5).join(', ')}</td>
     <td class="muted">${p.conns}</td>
     <td style="color:${p.risk?'var(--critical,#ff5c7c)':'var(--muted)'}">${esc(rep)}</td></tr>`; };
-  let h=`<div class="muted" style="margin-bottom:8px">${j.distinctRemote} distinct public peer(s) · ${j.audited} enriched${j.riskyCount?` · <span style="color:var(--critical,#ff5c7c)">${j.riskyCount} flagged</span>`:''}</div>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${j.distinctRemote} distinct public peer(s) · ${j.audited} enriched${j.riskyCount?` · <span style="color:var(--critical,#ff5c7c)">${j.riskyCount} flagged</span>`:''}${j.reputationDegraded?` · <span style="color:var(--high,#ff9e3d)">⚠ reputation degraded</span>`:''}</div>`;
   h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Remote IP</th><th>Location</th><th>Network</th><th>Process</th><th>Ports</th><th>Conns</th><th>Reputation</th></tr></thead><tbody>${j.peers.map(row).join("")}</tbody></table>`;
-  if (j.note) h+=`<div class="muted" style="margin-top:6px;font-size:11px">${esc(j.note)}</div>`;
+  if (j.note) h+=`<div style="margin-top:6px;font-size:11px;color:${j.reputationDegraded?'var(--high,#ff9e3d)':'var(--muted)'}">${esc(j.note)}</div>`;
   return h;
 }
 function md(s){
