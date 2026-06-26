@@ -54,10 +54,14 @@
   input { font-family:var(--mono)!important; border-radius:0!important; }
   .layout { display:grid; grid-template-columns:380px 1fr; height:calc(100vh - 55px); }
   .list { overflow-y:auto; border-right:2px solid var(--border); }
-  .card { padding:11px 30px 11px 14px; border-bottom:1px solid rgba(75,58,158,.5); cursor:pointer; border-left:4px solid transparent; position:relative; }
+  .card { padding:11px 30px 11px 14px; border-bottom:1px solid rgba(75,58,158,.5); cursor:pointer; border-left:4px solid transparent; position:relative; overflow:hidden; transition:opacity .18s ease, background .12s ease; }
   .card:hover { background:rgba(29,22,80,.6); }
   .card.active { background:var(--panel2); border-left-color:var(--cyan); box-shadow:inset 0 0 18px rgba(70,214,255,.18); }
   .card.dismissed { opacity:.38; }
+  /* seamless dismiss: collapse the card out instead of reloading the whole list */
+  .card.removing { transition:max-height .26s ease, opacity .2s ease, padding .26s ease, margin .26s ease, border-width .26s ease; pointer-events:none; }
+  .card.toggling { animation:cardPulse .3s ease; }
+  @keyframes cardPulse { 0%{opacity:.2;} 100%{opacity:1;} }
   .cardx { position:absolute; top:8px; right:6px; background:transparent; border:none; box-shadow:none; color:var(--muted); font-size:14px; padding:2px 6px; line-height:1; opacity:0; }
   .card:hover .cardx, .card.dismissed .cardx { opacity:1; }
   .cardx:hover { color:var(--critical); border:none; background:transparent; box-shadow:none; transform:none; }
@@ -616,16 +620,14 @@ async function loadAlerts() {
   }
 }
 
-function renderList() {
-  if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
-  $("#list").innerHTML = alerts.map(a => {
-    const ts = a.triageStatus || 'open';
-    const tsClass = ts==='open' ? '' : `ts-${ts}`;
-    const tsBadge = ts==='open' ? '' : `<span class="triage-badge ts-${ts}" title="Triage status">${ts}</span>`;
-    const noteBadge = a.noteCount ? `<span class="pill" title="${a.noteCount} note${a.noteCount===1?'':'s'}">📝 ${a.noteCount}</span>` : '';
-    const suppBadge = a.suppressedBy ? `<span class="pill supp-pill" title="Muted by rule: ${esc(a.suppressedBy.summary)}">🔕 muted</span>` : '';
-    const suppClass = a.suppressedBy ? 'suppressed' : '';
-    return `
+function cardHtml(a) {
+  const ts = a.triageStatus || 'open';
+  const tsClass = ts==='open' ? '' : `ts-${ts}`;
+  const tsBadge = ts==='open' ? '' : `<span class="triage-badge ts-${ts}" title="Triage status">${ts}</span>`;
+  const noteBadge = a.noteCount ? `<span class="pill" title="${a.noteCount} note${a.noteCount===1?'':'s'}">📝 ${a.noteCount}</span>` : '';
+  const suppBadge = a.suppressedBy ? `<span class="pill supp-pill" title="Muted by rule: ${esc(a.suppressedBy.summary)}">🔕 muted</span>` : '';
+  const suppClass = a.suppressedBy ? 'suppressed' : '';
+  return `
     <div class="card ${a.dismissed?'dismissed':''} ${a.watched?'watched':''} ${suppClass} ${tsClass} ${selected===a.id?'active':''}" data-id="${a.id}">
       <button class="cardx" data-act="${a.dismissed?'restore':'dismiss'}" data-id="${a.id}" title="${a.dismissed?'Restore':'Dismiss'}">${a.dismissed?'↩':'✕'}</button>
       <div class="row1">
@@ -642,14 +644,80 @@ function renderList() {
       <div class="sig">${esc(a.signature || a.category)}</div>
       <div class="flow">${esc(a.srcIp||'?')} → ${esc(a.dstIp||'?')}</div>
     </div>`;
-  }).join("");
-  document.querySelectorAll('.card').forEach(c => c.onclick = () => selectAlert(c.dataset.id));
-  document.querySelectorAll('.cardx').forEach(b => b.onclick = async (e) => {
-    e.stopPropagation();
-    try { await api("/api/alerts/"+b.dataset.id+"/"+b.dataset.act,{method:"POST"}); } catch(err){}
-    if (selected===b.dataset.id && b.dataset.act==='dismiss') { selected=null; $("#detail").innerHTML='<div class="empty">Select an alert to investigate.</div>'; }
+}
+
+// Wire click + dismiss handlers for a single card element (used on full render and after in-place updates).
+function wireCard(c) {
+  c.onclick = () => selectAlert(c.dataset.id);
+  const b = c.querySelector('.cardx');
+  if (b) b.onclick = (e) => onDismissClick(e, b);
+}
+
+function renderList() {
+  if (!alerts.length) { $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>'; return; }
+  $("#list").innerHTML = alerts.map(cardHtml).join("");
+  document.querySelectorAll('#list .card').forEach(wireCard);
+}
+
+// Animate a card collapsing out of the list, then remove it from the DOM.
+function collapseCard(card) {
+  card.style.maxHeight = card.offsetHeight + 'px';
+  card.classList.add('removing');
+  // Force a reflow so the browser registers the start height before we collapse it.
+  void card.offsetHeight;
+  card.style.maxHeight = '0px';
+  card.style.opacity = '0';
+  card.style.paddingTop = '0px';
+  card.style.paddingBottom = '0px';
+  card.style.borderBottomWidth = '0px';
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true;
+    card.remove();
+    if (!alerts.length) $("#list").innerHTML = '<div class="empty">No alerts in this window.</div>';
+  };
+  card.addEventListener('transitionend', finish, { once:true });
+  setTimeout(finish, 400); // fallback if transitionend doesn't fire
+}
+
+// Dismiss/restore without reloading the whole list — optimistic, in-place, reverts on error.
+async function onDismissClick(e, b) {
+  e.stopPropagation();
+  const id = b.dataset.id, act = b.dataset.act;
+  const a = alerts.find(x => x.id === id);
+  const card = b.closest('.card');
+  if (!a || !card) return;
+  const willDismiss = act === 'dismiss';
+  const showDismissed = $("#showDismissed").checked;
+
+  // Clear the detail pane if we're dismissing the currently-selected alert.
+  if (willDismiss && selected === id) { selected = null; $("#detail").innerHTML = '<div class="empty">Select an alert to investigate.</div>'; }
+
+  // Optimistic local state update.
+  a.dismissed = willDismiss;
+
+  if (willDismiss && !showDismissed) {
+    // Card no longer belongs in this view: drop it from state and animate it out.
+    alerts = alerts.filter(x => x.id !== id);
+    collapseCard(card);
+  } else {
+    // Card stays visible (dismissed shown, or a restore): swap it in place with a subtle pulse.
+    const tmp = document.createElement('div');
+    tmp.innerHTML = cardHtml(a).trim();
+    const fresh = tmp.firstChild;
+    fresh.classList.add('toggling');
+    card.replaceWith(fresh);
+    wireCard(fresh);
+  }
+
+  try {
+    await api("/api/alerts/" + id + "/" + act, { method:"POST" });
+    loadStatus();
+  } catch (err) {
+    // Revert optimistic change and fall back to a full reload to resync with the server.
+    a.dismissed = !willDismiss;
     loadAlerts(); loadStatus();
-  });
+  }
 }
 
 async function selectAlert(id) {
