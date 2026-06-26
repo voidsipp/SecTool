@@ -11,6 +11,7 @@
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
+ *   GET  /api/campaigns?hours=N     -> cluster stored alerts by external attacker IP
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -55,6 +56,8 @@ import { discoverDevices } from "../investigate/discovery.ts";
 import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
+import { buildCampaigns, type Campaign } from "../analytics/campaigns.ts";
+import { geolocate } from "../investigate/geo.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -431,6 +434,31 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const limitRaw = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(50, Math.floor(limitRaw)) : 10;
         return send(res, 200, buildTrends(hours, limit, Date.now()));
+      }
+
+      // --- attack campaigns (cluster stored alerts by external attacker IP) ---
+      if (method === "GET" && path === "/api/campaigns") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
+        const report = buildCampaigns(hours, limit, Date.now());
+        // Optional geo enrichment: attach country/code to each attacker IP. Best
+        // effort — failures (offline / rate-limited) just leave geo undefined.
+        if (url.searchParams.get("geo") === "1" && report.campaigns.length) {
+          try {
+            const locs = await geolocate(report.campaigns.map((c) => c.ip));
+            for (const c of report.campaigns as Array<Campaign & { country?: string; countryCode?: string }>) {
+              const g = locs.get(c.ip);
+              if (g) {
+                c.country = g.country;
+                c.countryCode = g.code;
+              }
+            }
+          } catch {
+            /* enrichment is optional */
+          }
+        }
+        return send(res, 200, report);
       }
 
       // --- firewall blocklist ---
