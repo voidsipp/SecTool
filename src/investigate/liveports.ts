@@ -94,10 +94,14 @@ export interface LivePortActivity {
   /**
    * Human-readable caveat about the snapshot's completeness and provenance.
    * Always set when the query succeeds. It explains that conntrack is a live,
-   * current-sessions-only view, notes when no matching connections exist, and —
-   * importantly — flags when the snapshot was truncated by the gateway-side line
-   * cap (aggregates are then only a lower bound) or by the per-connection detail
-   * cap, so an operator never mistakes a bounded sample for the full picture.
+   * current-sessions-only view and notes when no matching connections exist;
+   * surfaces the host's live WAN egress — which outbound service ports are
+   * reaching external peers right now, i.e. the very activity an outbound-port
+   * IDS/IPS alert is about — and flags any unsolicited inbound from the WAN; and
+   * — importantly — flags when the snapshot was truncated by the gateway-side
+   * line cap (aggregates are then only a lower bound) or by the per-connection
+   * detail cap, so an operator never mistakes a bounded sample for the full
+   * picture.
    */
   note?: string;
 }
@@ -244,6 +248,11 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   // the bounded `conns` detail list dropped any entries.
   let attributedConns = 0;
   const externalPeers = new Set<string>();
+  // Split external (WAN) peers by direction: outbound egress is the expected
+  // signal this view investigates, while inbound from the WAN to a LAN host is
+  // anomalous and called out separately in the note.
+  const externalOutPeers = new Set<string>();
+  const externalInPeers = new Set<string>();
 
   for (const line of lines) {
     const p = parseConntrackLine(line);
@@ -276,9 +285,11 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
     const bytes = p.bytes ?? 0;
     if (direction === "outbound") {
       outboundConns++;
+      if (remoteExternal && remoteIp) externalOutPeers.add(remoteIp);
       if (remotePort) pushGroup(outbound, p.proto, remotePort, remoteIp, p.state, bytes);
     } else if (direction === "inbound") {
       inboundConns++;
+      if (remoteExternal && remoteIp) externalInPeers.add(remoteIp);
       if (localPort) pushGroup(inbound, p.proto, localPort, remoteIp, p.state, bytes);
     }
 
@@ -304,8 +315,9 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   const outGroups = sortGroups([...outbound.values()]);
   const inGroups = sortGroups([...inbound.values()]);
 
-  // Compose the snapshot note: provenance first, then any truncation caveats so
-  // a bounded sample is never mistaken for a complete view of the host.
+  // Compose the snapshot note: provenance first, then the live WAN egress/ingress
+  // finding (the reason this view is open), then any truncation caveats so a
+  // bounded sample is never mistaken for a complete view of the host.
   const noteParts: string[] = [];
   if (lines.length === 0) {
     noteParts.push(
@@ -314,6 +326,29 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   } else {
     noteParts.push(
       "Live snapshot of the gateway's connection-tracking table (current sessions only; no agent required).",
+    );
+  }
+  // Name the live WAN egress explicitly. The whole point of this view is an
+  // outbound-port IDS/IPS alert on an agent-less host, so the operator should
+  // see which external service ports are active right now without re-reading the
+  // port groups by hand. Derive the port list from the full outbound map (not
+  // the display-capped groups) so a host with an unusual number of distinct
+  // external ports is still reported accurately.
+  if (externalOutPeers.size > 0) {
+    const extOutGroups = [...outbound.values()]
+      .filter((g) => g.externalPeers > 0)
+      .sort((a, b) => b.externalPeers - a.externalPeers || b.connections - a.connections || a.port - b.port);
+    const portList = extOutGroups.slice(0, 6).map((g) => `${g.proto}/${g.port}`).join(", ");
+    const more = extOutGroups.length > 6 ? ` (+${extOutGroups.length - 6} more)` : "";
+    noteParts.push(
+      `${host} is reaching ${externalOutPeers.size} external (WAN) peer${externalOutPeers.size === 1 ? "" : "s"} on ${extOutGroups.length} outbound service port${extOutGroups.length === 1 ? "" : "s"}: ${portList}${more} — these are the live egress sessions an outbound-port alert would be flagging.`,
+    );
+  }
+  // Unsolicited inbound from the WAN to an internal host is rarer and more
+  // alarming than egress, so flag it on its own line when present.
+  if (externalInPeers.size > 0) {
+    noteParts.push(
+      `${externalInPeers.size} external (WAN) peer${externalInPeers.size === 1 ? "" : "s"} ${externalInPeers.size === 1 ? "is" : "are"} connecting inbound to ${host} — unusual for a LAN host; confirm it against any intended port-forward/NAT rules.`,
     );
   }
   if (truncatedSnapshot) {
