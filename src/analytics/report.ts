@@ -29,7 +29,9 @@ export interface WatchHit {
   /**
    * Operator's free-form note for the entry, if any. Surfaced both in the
    * Watchlist section and inline against any Notable detection that touches
-   * this target (see {@link NotableDetection.watchNote}).
+   * this target (see {@link NotableDetection.watchNote}). The full note is
+   * preserved here; the Markdown rendering bounds it via {@link clampNote} so
+   * a long note can't blow out the report's table grid.
    */
   note?: string;
   /** Number of distinct alerts in the window that touched this target. */
@@ -463,6 +465,24 @@ function cell(v: unknown): string {
   return String(v ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
+/** Longest operator note we render inline before truncating with an ellipsis. */
+const NOTE_MAX_LEN = 140;
+
+/**
+ * Normalise a free-form operator note for inline rendering in the document.
+ * Notes are unbounded operator text (see {@link WatchHit.note}); pasting a
+ * multi-sentence justification straight into a table cell collapses the report
+ * into an unreadable, mile-wide grid. We flatten interior whitespace and cap
+ * the length with an ellipsis. The structured {@link ReportModel} keeps the
+ * full note untouched — only the Markdown rendering is bounded. Returns plain
+ * text; pass the result through {@link cell} for pipe-escaping where needed.
+ */
+function clampNote(note: string | undefined, max = NOTE_MAX_LEN): string {
+  const v = (note ?? "").replace(/\s+/g, " ").trim();
+  if (v.length <= max) return v;
+  return `${v.slice(0, max - 1).trimEnd()}…`;
+}
+
 function renderMarkdown(model: ReportModel): string {
   const t = model.trends;
   const { label, score } = posture(t);
@@ -523,7 +543,7 @@ function renderMarkdown(model: ReportModel): string {
             cell(d.triageStatus),
           ];
           if (showWatch) {
-            const note = d.watchNote ? ` — ${d.watchNote}` : "";
+            const note = d.watchNote ? ` — ${clampNote(d.watchNote)}` : "";
             row.push(d.watchTarget ? cell(`⚑ ${d.watchTarget}${note}`) : "—");
           }
           return row;
@@ -625,7 +645,7 @@ function renderMarkdown(model: ReportModel): string {
           cell(w.worstSeverity ?? "—"),
           cell(w.topSignature ?? "—"),
           w.lastAlertTime ? fmtAgo(w.lastAlertTime, model.generatedAt) : "—",
-          cell(w.note ?? ""),
+          cell(clampNote(w.note)),
         ]),
       ),
     );
@@ -648,7 +668,7 @@ function renderMarkdown(model: ReportModel): string {
           cell(s.worstSeverity ?? "—"),
           cell(s.topSignature ?? "—"),
           s.lastAlertTime ? fmtAgo(s.lastAlertTime, model.generatedAt) : "—",
-          cell(s.note ?? ""),
+          cell(clampNote(s.note)),
         ]),
       ),
     );
