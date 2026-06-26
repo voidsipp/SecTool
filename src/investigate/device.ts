@@ -688,6 +688,15 @@ export interface EgressAudit {
   distinctRemote?: number;
   audited?: number;
   riskyCount?: number;
+  /**
+   * Audited peers whose IP is on the operator's firewall blocklist. The agent
+   * reports the host's *actual* socket connections, so a connection to a blocked
+   * address means the host is still reaching an IP the firewall is meant to drop
+   * — the block is being bypassed (an off-gateway path/VPN, or a rule that isn't
+   * catching this traffic). The strongest egress signal here: an explicit
+   * operator decision being violated, not a heuristic.
+   */
+  blockedCount?: number;
   /** Audited peers whose IP matches the operator's watchlist (IP or CIDR). */
   watchedCount?: number;
   /**
@@ -866,10 +875,24 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       degraded.push("AbuseIPDB (no verdicts returned — rate-limited or unreachable)");
   }
 
+  // Every blocked peer is "of interest" (isFlagged) and therefore always
+  // enriched, so this count is accurate across the full external peer set, not
+  // just the busiest-N enriched slice.
+  const blockedCount = peers.filter((p) => p.blocked).length;
   const watchedCount = peers.filter((p) => p.watched).length;
   const suspiciousPortCount = peers.filter((p) => p.suspiciousPorts.length > 0).length;
 
   const notes: string[] = [];
+  // Lead with a blocklisted egress destination: the operator already decided
+  // this address is hostile and blocked it, yet the host is still connecting to
+  // it — a firewall bypass, the most actionable signal an egress view can give.
+  if (blockedCount > 0) {
+    notes.push(
+      `${blockedCount} audited peer(s) are on the firewall blocklist — this host is still establishing ` +
+        `connections to address(es) the firewall is meant to drop, so the block is being bypassed ` +
+        `(an off-gateway path/VPN, or a rule not catching this traffic); review the flagged peers.`,
+    );
+  }
   if (suspiciousPortCount > 0) {
     notes.push(
       `${suspiciousPortCount} audited peer(s) are being contacted on suspicious destination ports ` +
@@ -903,6 +926,7 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     distinctRemote,
     audited: peers.length,
     riskyCount: peers.filter((p) => p.risk).length,
+    blockedCount: blockedCount > 0 ? blockedCount : undefined,
     watchedCount: watchedCount > 0 ? watchedCount : undefined,
     suspiciousPortCount: suspiciousPortCount > 0 ? suspiciousPortCount : undefined,
     reputationDegraded: degraded.length > 0,
