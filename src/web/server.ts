@@ -26,6 +26,8 @@
  *   GET  /api/watchlist-activity.md?hours=N -> the same watchlist activity report as a downloadable .md file
  *   GET  /api/rhythm?hours=N&tz=M   -> temporal activity rhythm (hour/day heat-map; model + Markdown)
  *   GET  /api/rhythm.md?hours=N&tz=M -> the same rhythm report as a downloadable .md file
+ *   GET  /api/backlog?hours=N       -> triage SLA backlog (open/overdue queue + throughput; model + Markdown)
+ *   GET  /api/backlog.md?hours=N    -> the same backlog report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -89,6 +91,7 @@ import { buildAssets, assetsFilename } from "../analytics/assets.ts";
 import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
 import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
+import { buildBacklog, backlogFilename } from "../analytics/backlog.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -667,6 +670,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${rhythmFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- triage SLA backlog (what is still open / overdue, and throughput) ---
+      if (method === "GET" && path === "/api/backlog") {
+        const hours = Number(url.searchParams.get("hours")) || 720;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        return send(res, 200, buildBacklog(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/backlog.md") {
+        const hours = Number(url.searchParams.get("hours")) || 720;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const now = Date.now();
+        const { markdown } = buildBacklog(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${backlogFilename(now)}"`,
         });
         res.end(markdown);
         return;
