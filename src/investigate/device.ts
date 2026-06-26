@@ -15,6 +15,7 @@
  */
 import { isIP } from "node:net";
 import type { Config } from "../config.ts";
+import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { agentConnections, agentHealth, type AgentMatch } from "../agent/agentClient.ts";
 import { enrichIp, type Enrichment } from "./enrich.ts";
 import { protoName } from "./udm.ts";
@@ -52,6 +53,13 @@ function isPrivateIp(ip: string): boolean {
 }
 
 const WILDCARD = new Set(["", "*", "0.0.0.0", "::", "[::]"]);
+
+// Position of a severity on the info→critical scale (-1 if unknown), mirroring
+// the sevRank helper used across the analytics modules so ordering stays
+// consistent wherever severities are compared.
+function sevRank(s: string | undefined): number {
+  return (SEVERITY_ORDER as readonly string[]).indexOf(s ?? "");
+}
 
 // ---------------------------------------------------------------------------
 // Tool 1 — Traffic profile (from collected NetFlow; no agent needed)
@@ -134,10 +142,11 @@ export interface TrafficProfile {
    */
   flagged?: TrafficPeer[];
   /**
-   * Human-readable caveat over the flagged peers, leading with the strongest
-   * signal: suspicious outbound ports first, then firewall-blocklist hits, then
-   * watchlist matches (naming the operator's own notes for *why* each address is
-   * watched). Undefined when nothing matched.
+   * Human-readable caveat over this host's activity, leading with the strongest
+   * signal: fired IDS/IPS detections first (peak severity + direction), then
+   * suspicious outbound ports, then firewall-blocklist hits, then watchlist
+   * matches (naming the operator's own notes for *why* each address is watched).
+   * Undefined when nothing notable was found.
    */
   note?: string;
 }
@@ -243,26 +252,58 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
   flagged.forEach((p) => p.ports.sort((a, b) => a - b));
   const topPorts = [...ports.values()].sort((a, b) => b.flows - a.flows).slice(0, 12);
 
+  // Collect this host's recent IDS/IPS detections. The displayed list is capped
+  // at 20 (most-recent-first, since alertStore.all() is time-descending), but we
+  // tally severity and direction across *every* matching alert in the window so
+  // the summary note below reflects the true picture, not just the first 20.
   const alerts: TrafficAlert[] = [];
+  let alertCount = 0;
+  let alertPeak: Severity = "info";
+  let alertsFromHost = 0; // host was the source (outbound — possible beaconing/scanning)
+  let alertsToHost = 0; // host was the target (inbound — being attacked)
   for (const a of alertStore.all()) {
     if (a.time < since) continue;
     const to = a.dstIp === host;
     const from = a.srcIp === host;
     if (!to && !from) continue;
-    alerts.push({
-      id: a.id,
-      time: a.time,
-      severity: a.severity,
-      signature: a.signature ?? a.category ?? "—",
-      direction: from ? "from" : "to",
-    });
-    if (alerts.length >= 20) break;
+    alertCount++;
+    if (sevRank(a.severity) > sevRank(alertPeak)) alertPeak = a.severity as Severity;
+    if (from) alertsFromHost++;
+    else alertsToHost++;
+    if (alerts.length < 20) {
+      alerts.push({
+        id: a.id,
+        time: a.time,
+        severity: a.severity,
+        signature: a.signature ?? a.category ?? "—",
+        direction: from ? "from" : "to",
+      });
+    }
   }
 
   const notes: string[] = [];
-  // Lead with the strongest compromise signal: an internal host reaching a public
-  // IP on a backdoor/C2/should-not-traverse-WAN port. Name the actual ports so the
-  // takeaway is actionable without scanning the flagged list.
+  // Lead with the most concrete compromise evidence: a fired IDS/IPS signature is
+  // a confirmed detection, not an inference from flow shape. Name the peak
+  // severity and whether the host was the source (likely beaconing/scanning out)
+  // or the target (being attacked) so the takeaway is actionable without opening
+  // the alerts list. Tallied across the full window above, not just the shown 20.
+  if (alertCount > 0) {
+    const peakNote = alertPeak === "info" ? "all informational" : `peak severity ${alertPeak}`;
+    let dir: string;
+    if (alertsFromHost > 0 && alertsToHost > 0) {
+      dir = `${alertsFromHost} originated from the host, ${alertsToHost} targeted it`;
+    } else if (alertsFromHost > 0) {
+      dir = "all originated from the host — possible outbound beaconing or scanning";
+    } else {
+      dir = "all targeted the host";
+    }
+    notes.push(
+      `${alertCount} IDS/IPS alert(s) involve this host in this window (${peakNote}); ${dir}. Review the alerts list.`,
+    );
+  }
+  // Next, the strongest flow-derived compromise signal: an internal host reaching
+  // a public IP on a backdoor/C2/should-not-traverse-WAN port. Name the actual
+  // ports so the takeaway is actionable without scanning the flagged list.
   if (suspiciousEgressPeers > 0) {
     const susPorts = [
       ...new Set(
