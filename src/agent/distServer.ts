@@ -32,10 +32,39 @@ function versionOf(src: string): string {
   return m ? m[1]! : "0.0.0";
 }
 
-function psInstall(server: string, token: string, port: number): string {
-  // Note: only ${server}/${token}/${port} are JS-interpolated; every $name below
-  // is a literal PowerShell variable. No backticks/backslash-escapes (PowerShell
-  // uses different quoting than JS/bash).
+/**
+ * Escape an untrusted value for embedding inside a PowerShell single-quoted
+ * literal. PowerShell's only escape inside '...' is a doubled quote ('' -> ').
+ * This prevents a stray quote in `server` (derived from the request Host header)
+ * or `token` (operator-set) from breaking out of the string and injecting code.
+ */
+function psSingleQuote(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Escape an untrusted value for embedding inside a bash single-quoted literal.
+ * bash has no escapes inside '...', so close-quote/escaped-quote/re-open:
+ * a single ' becomes '\''.
+ */
+function shSingleQuote(value: string): string {
+  return value.replace(/'/g, "'\\''");
+}
+
+/** Coerce a port to a safe positive integer literal (defensive; type is number). */
+function portLiteral(port: number): string {
+  const n = Math.trunc(Number(port));
+  return Number.isFinite(n) && n > 0 && n <= 65535 ? String(n) : "0";
+}
+
+function psInstall(serverRaw: string, tokenRaw: string, portRaw: number): string {
+  // Only server/token/port are JS-interpolated; every other $name below is a
+  // literal PowerShell variable. Untrusted server/token are escaped for a
+  // PS single-quoted literal (doubled quotes); port is validated to an integer.
+  // PowerShell uses different quoting than JS/bash, so no backticks/backslashes.
+  const server = psSingleQuote(serverRaw);
+  const token = psSingleQuote(tokenRaw);
+  const port = portLiteral(portRaw);
   return `# SecTool endpoint agent installer (Windows)
 $ErrorActionPreference = 'Stop'
 $server = '${server}'
@@ -65,7 +94,13 @@ catch { Write-Host 'SecTool agent installed (Scheduled Task: SecToolAgent). It w
 `;
 }
 
-function shInstall(server: string, token: string, port: number): string {
+function shInstall(serverRaw: string, tokenRaw: string, portRaw: number): string {
+  // Only server/token/port are JS-interpolated. Untrusted server/token are
+  // escaped for a bash single-quoted literal ('\'' sequence); port is validated
+  // to an integer. Every other $NAME below is a literal bash variable.
+  const server = shSingleQuote(serverRaw);
+  const token = shSingleQuote(tokenRaw);
+  const port = portLiteral(portRaw);
   return `#!/usr/bin/env bash
 # SecTool endpoint agent installer (Linux/macOS)
 set -e
