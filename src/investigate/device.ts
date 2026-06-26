@@ -22,15 +22,31 @@ import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { alertStore } from "../store/alertStore.ts";
 import { blockStore } from "../store/blocklist.ts";
 
+// Collapse the IPv6 wrappers a host's socket/flow source can emit so address
+// matching sees a single canonical form. Strips "[::1]" brackets and unwraps
+// IPv4-mapped IPv6 ("::ffff:192.168.1.5" -> "192.168.1.5"), mirroring the same
+// normalisation done in classifyExposure for listener bind addresses.
+function normalizeIp(ip: string): string {
+  let a = ip.trim().toLowerCase();
+  if (a.startsWith("[") && a.endsWith("]")) a = a.slice(1, -1); // strip "[::1]" brackets
+  const mapped = a.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/); // unwrap IPv4-mapped IPv6
+  return mapped ? mapped[1] : a;
+}
+
+// Normalise first so the IPv4 private-range checks also catch LAN hosts reported
+// in IPv4-mapped IPv6 form. Without this an internal peer arriving as
+// "::ffff:10.0.0.5" slips past the gate and is mis-audited as a public/external
+// egress destination (then needlessly enriched and risk-scored).
 function isPrivateIp(ip: string): boolean {
+  const a = normalizeIp(ip);
   return (
-    /^10\./.test(ip) ||
-    /^192\.168\./.test(ip) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
-    /^127\./.test(ip) ||
-    /^169\.254\./.test(ip) ||
-    /^0\./.test(ip) ||
-    /^(::1|fe80|fc|fd)/i.test(ip)
+    /^10\./.test(a) ||
+    /^192\.168\./.test(a) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(a) ||
+    /^127\./.test(a) ||
+    /^169\.254\./.test(a) ||
+    /^0\./.test(a) ||
+    /^(::1|fe80|fc|fd)/.test(a)
   );
 }
 
@@ -472,8 +488,10 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   }
   const byIp = new Map<string, Agg>();
   for (const c of conns) {
-    const ip = c.remoteIp;
-    if (!ip || isIP(ip) === 0 || isPrivateIp(ip)) continue;
+    if (!c.remoteIp || isIP(c.remoteIp) === 0 || isPrivateIp(c.remoteIp)) continue;
+    // Collapse IPv4-mapped IPv6 to its dotted form so a peer reached both ways
+    // aggregates into one entry and is enriched as a plain IPv4 address.
+    const ip = normalizeIp(c.remoteIp);
     let a = byIp.get(ip);
     if (!a) {
       a = { ip, conns: 0, ports: new Set(), processes: new Set(), lastSeen: 0 };
