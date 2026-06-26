@@ -19,6 +19,7 @@ import { alertStore, type StoredAlert } from "../store/alertStore.ts";
 import { watchStore } from "../store/watchlist.ts";
 import { suppressionStore, describeMatch } from "../store/suppressions.ts";
 import { safeStore } from "../store/safelist.ts";
+import { triageStore } from "../store/triage.ts";
 import { buildTrends, type Trends } from "./trends.ts";
 
 export interface WatchHit {
@@ -34,6 +35,27 @@ export interface WatchHit {
   worstSeverity?: string;
   /** The signature (or category) this target triggered most often. */
   topSignature?: string;
+}
+
+export interface NotableDetection {
+  /** Stable alert id (for cross-referencing with the dashboard / search tab). */
+  id: string;
+  /** Alert time, ms epoch. */
+  time: number;
+  /** Severity label (e.g. "high", "critical"). */
+  severity: string;
+  /** Best human label: signature, falling back to category. */
+  signature: string;
+  /** Raw category, kept for context where signature was used as the label. */
+  category: string;
+  /** Source address, if the alert carried one. */
+  srcIp?: string;
+  /** Destination address, if the alert carried one. */
+  dstIp?: string;
+  /** Normalised disposition (blocked / detected / allowed / unknown). */
+  action: string;
+  /** Current triage workflow status (defaults to "open" when untouched). */
+  triageStatus: string;
 }
 
 export interface ReportModel {
@@ -54,6 +76,8 @@ export interface ReportModel {
   highlights: string[];
   /** Watchlist entries that registered alert hits in the window. */
   watchHits: WatchHit[];
+  /** The most severe individual detections in the window (medium+), worst first. */
+  notable: NotableDetection[];
   /** Number of active (non-expired) suppression rules. */
   activeSuppressions: number;
   /** Number of IPs marked safe (context for the false-positive posture). */
@@ -63,6 +87,13 @@ export interface ReportModel {
 }
 
 const SEV_WEIGHT: Record<string, number> = { info: 0, low: 1, medium: 2, high: 4, critical: 8 };
+
+/** Mirror of the trends action buckets so the report labels dispositions identically. */
+function normalizeAction(a: string | undefined): string {
+  const v = (a ?? "").toLowerCase().trim();
+  if (v === "blocked" || v === "detected" || v === "allowed") return v;
+  return "unknown";
+}
 
 function pct(n: number, total: number): number {
   return total > 0 ? Math.round((n / total) * 100) : 0;
@@ -165,6 +196,42 @@ function collectWatchHits(allAlerts: StoredAlert[], windowStartMs: number): Watc
     const wb = SEV_WEIGHT[b.worstSeverity ?? ""] ?? 0;
     return wb - wa || b.alertHits - a.alertHits;
   });
+}
+
+/** Lowest severity weight that qualifies an individual alert as "notable". */
+const NOTABLE_MIN_WEIGHT = SEV_WEIGHT.medium!;
+
+/**
+ * Pick the most severe individual detections in the window so the report names
+ * concrete events — not just aggregates — for an analyst to action. Ranked by
+ * severity, then recency; only medium-and-above alerts qualify so a quiet
+ * window never pads the section with informational noise.
+ */
+function collectNotableDetections(
+  allAlerts: StoredAlert[],
+  windowStartMs: number,
+  windowEndMs: number,
+  limit: number,
+): NotableDetection[] {
+  const notable = allAlerts.filter(
+    (a) =>
+      typeof a.time === "number" &&
+      a.time >= windowStartMs &&
+      a.time <= windowEndMs &&
+      (SEV_WEIGHT[a.severity] ?? 0) >= NOTABLE_MIN_WEIGHT,
+  );
+  notable.sort((a, b) => (SEV_WEIGHT[b.severity] ?? 0) - (SEV_WEIGHT[a.severity] ?? 0) || b.time - a.time);
+  return notable.slice(0, limit).map((a) => ({
+    id: a.id,
+    time: a.time,
+    severity: a.severity,
+    signature: a.signature || a.category || "—",
+    category: a.category,
+    srcIp: a.srcIp,
+    dstIp: a.dstIp,
+    action: normalizeAction(a.action),
+    triageStatus: triageStore.get(a.id)?.status ?? "open",
+  }));
 }
 
 /** Compose the plain-language executive summary from the numbers. */
@@ -306,6 +373,26 @@ function renderMarkdown(model: ReportModel): string {
   );
   lines.push("");
 
+  if (model.notable.length) {
+    lines.push(`## Notable detections`);
+    lines.push("");
+    lines.push(
+      mdTable(
+        ["#", "When", "Severity", "Signature", "Source → Dest", "Action", "Triage"],
+        model.notable.map((d, i) => [
+          String(i + 1),
+          cell(`${fmtTime(d.time)} (${fmtAgo(d.time, model.generatedAt)})`),
+          cell(d.severity),
+          cell(d.signature),
+          cell(`${d.srcIp ?? "—"} → ${d.dstIp ?? "—"}`),
+          cell(d.action),
+          cell(d.triageStatus),
+        ]),
+      ),
+    );
+    lines.push("");
+  }
+
   lines.push(`## Severity breakdown`);
   lines.push("");
   lines.push(
@@ -433,6 +520,7 @@ export function buildReport(hours: number, nowMs = Date.now()): ReportModel {
   const trends = buildTrends(hours, 10, nowMs);
   const allAlerts = alertStore.all();
   const watchHits = collectWatchHits(allAlerts, trends.windowStartMs);
+  const notable = collectNotableDetections(allAlerts, trends.windowStartMs, trends.windowEndMs, 12);
   const { summary, highlights } = writeExecutiveSummary(trends, watchHits, nowMs);
   const activeSuppressions = suppressionStore.count();
   const safeCount = safeStore.count();
@@ -447,6 +535,7 @@ export function buildReport(hours: number, nowMs = Date.now()): ReportModel {
     executiveSummary: summary,
     highlights,
     watchHits,
+    notable,
     activeSuppressions,
     safeCount,
     markdown: "",
