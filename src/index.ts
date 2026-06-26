@@ -24,6 +24,7 @@
  *   node src/index.ts --notify 168    # offline notification audit / alert-fatigue report (Markdown)
  *   node src/index.ts --classify 168  # offline threat-classification breakdown report (Markdown)
  *   node src/index.ts --focus 168     # offline threat-focus / concentration (Pareto) report (Markdown)
+ *   node src/index.ts --netblocks 168 # offline source-netblock / infrastructure (CIDR) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,7 @@ import { buildEdges } from "./analytics/edges.ts";
 import { buildNotify } from "./analytics/notify.ts";
 import { buildClassify } from "./analytics/classify.ts";
 import { buildFocus } from "./analytics/focus.ts";
+import { buildNetblock } from "./analytics/netblock.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -770,6 +772,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown concentration report to stdout.
       console.log(buildFocus(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const netblocksIdx = argv.findIndex((a) => a === "--netblocks" || a.startsWith("--netblocks="));
+    if (netblocksIdx !== -1) {
+      const inline = argv[netblocksIdx]!.split("=")[1];
+      const next = argv[netblocksIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so adjacent-IP rotation across days is visible, not one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --netblocks hours: "${raw}". Use e.g. --netblocks 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each (/24 and /16) block table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown netblock report to stdout.
+      console.log(buildNetblock(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
