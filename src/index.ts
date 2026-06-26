@@ -11,6 +11,7 @@
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
  *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
  *   node src/index.ts --rhythm 168    # offline temporal activity rhythm report (Markdown)
+ *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -38,6 +39,7 @@ import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
 import { buildWatchlist } from "./analytics/watchlist.ts";
 import { buildRhythm } from "./analytics/rhythm.ts";
+import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -354,6 +356,32 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown activity rhythm report to stdout.
       console.log(buildRhythm(hours, tzOffsetMinutes, Date.now()).markdown);
+      return;
+    }
+    const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
+    if (iocsIdx !== -1) {
+      const inline = argv[iocsIdx]!.split("=")[1];
+      const next = argv[iocsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --iocs hours: "${raw}". Use e.g. --iocs 168`);
+        process.exit(2);
+      }
+      // Optional `--format json|csv|plain|markdown` (default plain on the CLI for piping).
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseIocFormat(fmtRaw ?? "plain");
+      // Optional `--min-severity info|low|medium|high|critical` (default medium).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested export format to stdout.
+      const model = buildIocExport(hours, { minSeverity, nowMs: Date.now() });
+      const out = renderIoc(model, format);
+      process.stdout.write(out.endsWith("\n") ? out : out + "\n");
       return;
     }
     if (args.has("--web")) {

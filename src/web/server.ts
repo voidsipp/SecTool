@@ -26,6 +26,7 @@
  *   GET  /api/watchlist-activity.md?hours=N -> the same watchlist activity report as a downloadable .md file
  *   GET  /api/rhythm?hours=N&tz=M   -> temporal activity rhythm (hour/day heat-map; model + Markdown)
  *   GET  /api/rhythm.md?hours=N&tz=M -> the same rhythm report as a downloadable .md file
+ *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -88,6 +89,14 @@ import { buildAssets, assetsFilename } from "../analytics/assets.ts";
 import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
 import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
+import {
+  buildIocExport,
+  renderIoc,
+  iocFilename,
+  parseIocFormat,
+  parseSeverityFloor,
+  type IocFormat,
+} from "../analytics/iocExport.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -660,6 +669,32 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-disposition": `attachment; filename="${rhythmFilename(now)}"`,
         });
         res.end(markdown);
+        return;
+      }
+
+      // --- threat-indicator (IOC) export for blocklists / SIEM / TI feeds ---
+      // ?format=json (default) | csv | plain | markdown · ?hours=N · ?minSeverity=medium
+      if (method === "GET" && path === "/api/iocs") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const format: IocFormat = parseIocFormat(url.searchParams.get("format"));
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const now = Date.now();
+        const model = buildIocExport(hours, { minSeverity, includeSafe, nowMs: now });
+        if (format === "json") return send(res, 200, model);
+        const body = renderIoc(model, format);
+        const contentType =
+          format === "csv"
+            ? "text/csv; charset=utf-8"
+            : format === "markdown"
+              ? "text/markdown; charset=utf-8"
+              : "text/plain; charset=utf-8";
+        res.writeHead(200, {
+          "content-type": contentType,
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${iocFilename(now, format)}"`,
+        });
+        res.end(body);
         return;
       }
 

@@ -374,6 +374,27 @@ history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/rhythm.md?hours=N&tz=M` → the same report as a downloadable `.md` file.
 - `node src/index.ts --rhythm 168 [--tz -300]` (or `npm run rhythm`) → print the Markdown to stdout (defaults to a 7-day window so every weekday is represented).
 
+## 🎯 Threat-indicator export (`GET /api/iocs`, `--iocs`)
+
+Every other report is a *human narrative*. This one closes the loop **after**
+triage by emitting a clean, deduplicated, **confidence-ranked list of attacker
+IPs** that other tools ingest directly — a firewall blocklist (`ipset` / pf
+table / UniFi firewall group), a SIEM watch rule, or a shared threat-intel feed.
+It folds the window's alerts onto each external (routable) source IP, scores how
+confidently that IP belongs on a blocklist (severity, volume, how often the
+gateway **already blocked** it, breadth of signatures/targets, and any watchlist
+**confirmation**), and renders the result in four interchange formats: **plain**
+(`#`-commented header + one IP per line, import-ready), **csv** (full context,
+CSV-injection-safe), **markdown** (a human review table), and **json** (the
+structured model). Trust rails make the output safe as a blocklist source:
+**safelisted IPs are excluded by default** (and the omission is counted, never
+silent), a **minimum-severity floor** (default `medium`) keeps info/low noise
+out, and **dismissed alerts are ignored**. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/iocs?hours=N&format=json|csv|plain|markdown&minSeverity=medium[&includeSafe=1]` → the export in the requested format (`json` returns the structured model inline; the others download as a file).
+- `node src/index.ts --iocs 168 [--format plain] [--min-severity medium]` (or `npm run iocs`) → print the export to stdout (defaults to a 7-day window and the `plain` blocklist format, ideal for piping into `ipset restore`).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
