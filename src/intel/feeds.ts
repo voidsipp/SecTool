@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { sshExec, sshExecInput, loadSshTarget } from "../ingest/sshPull.ts";
-import { setFeedMatcher } from "./feedAccess.ts";
+import { setFeedMatcher, feedsLoaded } from "./feedAccess.ts";
 import { log } from "../logger.ts";
 
 const DATA_DIR = fileURLToPath(new URL("../../data", import.meta.url));
@@ -191,6 +191,40 @@ async function loadToUdm(entries: string[]): Promise<void> {
   lines.push("swap SECTOOL_FEED_tmp SECTOOL_FEED", "destroy SECTOOL_FEED_tmp", "");
   await sshExec(feedRuleCmds(), { timeoutMs: 15000 });
   await sshExecInput("ipset restore -!", lines.join("\n"), { timeoutMs: 60000 });
+}
+
+export interface FeedSourceStatus {
+  name: string;
+  url: string;
+  /** Indicator count from the most recent successful refresh. */
+  count: number;
+}
+
+export interface FeedStatus {
+  /** True when the in-memory matcher is active this run (feeds fetched). */
+  loaded: boolean;
+  /** ms epoch of the last persisted refresh, or null if never refreshed. */
+  fetchedAt: number | null;
+  /** Total distinct indicators across all feeds. */
+  total: number;
+  /** Per-source breakdown, in declared order. */
+  sources: FeedSourceStatus[];
+}
+
+/**
+ * Read-only snapshot of feed health for the dashboard. Reads the persisted
+ * state file (so counts survive restarts) and reports whether the live matcher
+ * is currently primed. Never touches SSH.
+ */
+export function feedStatus(): FeedStatus {
+  const s = loadState();
+  const perFeed = s?.perFeed ?? {};
+  return {
+    loaded: feedsLoaded(),
+    fetchedAt: s?.fetchedAt ?? null,
+    total: s?.total ?? 0,
+    sources: DEFAULT_FEEDS.map((f) => ({ name: f.name, url: f.url, count: perFeed[f.name] ?? 0 })),
+  };
 }
 
 export interface FeedRefreshResult {

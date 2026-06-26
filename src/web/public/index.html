@@ -209,6 +209,27 @@
   table.trends-tbl tr.medium td.spark .fill { background:var(--medium); }
   table.trends-tbl tr.low td.spark .fill { background:var(--low); }
   .trends-empty { color:var(--muted); font-style:italic; padding:10px 0; }
+  /* --- threat intel --- */
+  .intel-summary { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .intel-card { background:var(--panel2,#140f30); border:1px solid var(--border); border-radius:10px; padding:12px 16px; min-width:120px; }
+  .intel-card .k { font-family:var(--pix); font-size:8px; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .intel-card .v { font-size:24px; font-weight:700; color:#fff; font-family:var(--mono); }
+  .intel-card.bad { border-color:var(--critical); }
+  .intel-card.bad .v { color:var(--critical); }
+  .intel-feeds { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+  .intel-feed { display:flex; flex-direction:column; gap:2px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--panel2,#140f30); }
+  .intel-feed .nm { font-size:13px; color:var(--text); }
+  .intel-feed .ct { font-family:var(--mono); font-size:12px; color:var(--cyan); }
+  .intel-feed.dead { opacity:.5; border-style:dashed; }
+  .dirpill { display:inline-block; font-family:var(--pix); font-size:8px; text-transform:uppercase; padding:2px 6px; border-radius:5px; border:1px solid; }
+  .dirpill.inbound { color:var(--high); border-color:var(--high); }
+  .dirpill.outbound { color:var(--critical); border-color:var(--critical); }
+  .dirpill.both { color:#fff; border-color:#fff; }
+  .dirpill.unknown { color:var(--muted); border-color:var(--muted); }
+  .feedtag { display:inline-block; font-size:11px; padding:1px 6px; margin:1px 3px 1px 0; border-radius:4px; background:rgba(155,89,182,.18); border:1px solid rgba(155,89,182,.5); color:#c9a6e6; }
+  #intelCheckResult .ck { margin-bottom:14px; padding:12px 16px; border-radius:10px; border:1px solid var(--border); background:var(--panel2,#140f30); }
+  #intelCheckResult .ck.listed { border-color:var(--critical); }
+  #intelCheckResult .ck.clean { border-color:var(--low); }
 </style>
 </head>
 <body>
@@ -235,6 +256,7 @@
   <button id="navAsk" class="primary">💬 Ask</button>
   <button id="navWar">🗺️ War Map</button>
   <button id="navTrends">📊 Trends</button>
+  <button id="navIntel">🛡️ Intel</button>
   <button id="navHosts">🖥️ Hosts</button>
   <button id="navDevices">📟 Devices</button>
   <button id="navWatch">👁 Watchlist</button>
@@ -416,6 +438,24 @@
   </div>
   <div class="muted" style="margin-bottom:12px;">Aggregate view of the local stored alert history — totals, severities, top signatures, busiest external attackers and internal targets, plus an hourly volume histogram. No SSH required.</div>
   <div id="trendsBody"><div class="empty">Loading…</div></div>
+</div>
+<div id="intelView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+    <button id="backAlerts9">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">🛡️ Threat Intel <span id="intelMeta" class="muted"></span></h2>
+    <span class="spacer" style="flex:1"></span>
+    <input id="intelCheckIp" placeholder="check an IP, e.g. 45.83.12.9" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; min-width:200px;" />
+    <button id="intelCheckBtn">🔎 Check IP</button>
+    <label class="status">Window
+      <select id="intelHours">
+        <option value="6">6h</option><option value="24" selected>24h</option>
+        <option value="48">48h</option><option value="168">7d</option><option value="720">30d</option>
+      </select>
+    </label>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">Cross-references the loaded public blocklist feeds against your stored alerts and collected NetFlow to surface the known-bad IPs that are <b>actually touching your network</b> — not just the millions sitting in the blocklist. Inbound = a flagged host reached in; outbound = an internal device contacted a flagged host (often the more urgent signal). No SSH required.</div>
+  <div id="intelCheckResult"></div>
+  <div id="intelBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="maptip"></div>
 
@@ -754,7 +794,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -772,7 +812,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -1126,7 +1166,7 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -1150,7 +1190,7 @@ async function agentProcess(internal, external, port){
   } catch(e){ return '<span class="muted">'+esc(e.message)+'</span>'; }
 }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -1226,7 +1266,7 @@ async function clickCountry(code, country){
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none";
   $("#watchView").style.display="block";
   $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1277,9 +1317,9 @@ async function addWatchFromForm(){
     showWatch(); loadStatus();
   } catch(e){ alert(e.message); }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#alertsView").style.display="grid"; }
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none"; $("#alertsView").style.display="grid"; }
 async function showSupp(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none";
   $("#suppView").style.display="block";
   $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1384,7 +1424,7 @@ function triageBadgesHtml(byTri){
   }).join("") || '<span class="trends-empty">No triage activity.</span>';
 }
 async function showTrends(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none"; $("#intelView").style.display="none";
   $("#trendsView").style.display="block";
   $("#trendsBody").innerHTML='<div class="empty">Crunching numbers…</div>';
   try {
@@ -1441,6 +1481,101 @@ async function showTrends(){
 $("#navTrends").onclick = showTrends;
 $("#trendsHours").onchange = showTrends;
 $("#backAlerts7").onclick = showAlerts;
+
+function intelHideOthers(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+}
+function intelDirPill(d){ return `<span class="dirpill ${esc(d)}">${esc(d)}</span>`; }
+function intelMatchRow(m){
+  const feeds = m.feeds.map(f=>`<span class="feedtag">${esc(f)}</span>`).join("");
+  const sev = m.severityMax ? `<span class="pill" style="font-size:9px">${esc(m.severityMax)}</span>` : '<span class="muted">—</span>';
+  return `<tr>
+    <td class="mono" style="color:var(--cyan)">${esc(m.ip)}</td>
+    <td>${intelDirPill(m.direction)}</td>
+    <td>${sev}</td>
+    <td style="text-align:right" class="mono">${m.alertHits||0}</td>
+    <td style="text-align:right" class="mono">${m.flowHits||0}</td>
+    <td style="text-align:right" class="mono">${m.bytes?bytesH(m.bytes):'—'}</td>
+    <td style="text-align:right" class="mono">${m.internalPeers||0}</td>
+    <td class="muted" style="font-size:12px">${m.lastSeen?esc(ago(m.lastSeen)):'—'}</td>
+    <td style="max-width:260px">${feeds}${m.sample?`<div class="muted" style="font-size:11px;margin-top:2px">${esc(m.sample)}</div>`:''}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="peerbtn" data-act="intel-watch" data-ip="${esc(m.ip)}">👁</button>
+      <button class="peerbtn" data-act="intel-block" data-ip="${esc(m.ip)}">🚫</button>
+    </td>
+  </tr>`;
+}
+async function intelCheck(){
+  const ip = $("#intelCheckIp").value.trim();
+  const box = $("#intelCheckResult");
+  if (!ip){ box.innerHTML=""; return; }
+  box.innerHTML='<div class="ck"><span class="spin"></span> Checking '+esc(ip)+'…</div>';
+  try {
+    const j = await api("/api/intel/check?ip="+encodeURIComponent(ip));
+    if (!j.loaded){ box.innerHTML='<div class="ck">Feeds are not loaded yet — try again once the threat-intel refresh completes.</div>'; return; }
+    if (j.listed){
+      box.innerHTML='<div class="ck listed"><b style="color:var(--critical)">⛔ '+esc(j.ip)+'</b> is listed by '+j.feeds.length+' feed'+(j.feeds.length===1?'':'s')+': '+j.feeds.map(f=>`<span class="feedtag">${esc(f)}</span>`).join("")+
+        ' <button class="peerbtn" data-act="intel-watch" data-ip="'+esc(j.ip)+'">👁 Watch</button> <button class="peerbtn" data-act="intel-block" data-ip="'+esc(j.ip)+'">🚫 Block</button></div>';
+    } else {
+      box.innerHTML='<div class="ck clean"><b style="color:var(--low)">✓ '+esc(j.ip)+'</b> is not on any loaded blocklist feed.</div>';
+    }
+    wireIntelActions();
+  } catch(e){ box.innerHTML='<div class="ck">'+esc(e.message)+'</div>'; }
+}
+function wireIntelActions(){
+  document.querySelectorAll("#intelView [data-act=intel-watch]").forEach(b=>b.onclick=async()=>{
+    try { await api("/api/watch",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip:b.dataset.ip,note:"threat-intel feed hit"})}); b.textContent="👁 watched"; b.disabled=true; loadStatus(); }
+    catch(e){ alert(e.message); }
+  });
+  document.querySelectorAll("#intelView [data-act=intel-block]").forEach(b=>b.onclick=async()=>{
+    if (!confirm("Block "+b.dataset.ip+" on the gateway firewall?")) return;
+    try { await api("/api/block",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip:b.dataset.ip,reason:"threat-intel feed hit"})}); b.textContent="🚫 blocked"; b.disabled=true; }
+    catch(e){ alert(e.message); }
+  });
+}
+async function showIntel(){
+  intelHideOthers();
+  $("#intelView").style.display="block";
+  $("#intelBody").innerHTML='<div class="empty"><span class="spin"></span> Cross-referencing feeds against your traffic…</div>';
+  try {
+    const hours = $("#intelHours").value;
+    const j = await api("/api/intel?hours="+hours);
+    const s = j.status;
+    $("#intelMeta").textContent = `(${s.total.toLocaleString()} indicators · ${j.matchedIps} active in ${j.hours}h)`;
+    const refreshed = s.fetchedAt ? ago(s.fetchedAt) : 'never';
+    const loadWarn = s.loaded ? '' : '<div class="muted" style="margin-bottom:12px;color:var(--high)">⚠️ Feeds are not primed in memory yet (no refresh this run) — cross-referencing is paused until the threat-intel refresh completes.</div>';
+    const cards = `
+      <div class="intel-summary">
+        <div class="intel-card"><div class="k">Indicators</div><div class="v">${s.total.toLocaleString()}</div></div>
+        <div class="intel-card ${j.matchedIps?'bad':''}"><div class="k">Active bad IPs</div><div class="v">${j.matchedIps}</div></div>
+        <div class="intel-card"><div class="k">Alert hits</div><div class="v">${j.totalAlertHits}</div></div>
+        <div class="intel-card"><div class="k">Flow hits</div><div class="v">${j.totalFlowHits}</div></div>
+        <div class="intel-card"><div class="k">Last refresh</div><div class="v" style="font-size:15px">${esc(refreshed)}</div></div>
+      </div>`;
+    const feeds = `<div class="intel-feeds">`+s.sources.map(f=>
+      `<div class="intel-feed ${f.count?'':'dead'}" title="${esc(f.url)}"><span class="nm">${esc(f.name)}</span><span class="ct">${f.count?f.count.toLocaleString():'unavailable'}</span></div>`
+    ).join("")+`</div>`;
+    let table;
+    if (!j.matches.length){
+      table = `<div class="empty">No feed-listed IPs have touched your network in the last ${j.hours}h.<br>Scanned ${j.alertsScanned} alerts and ${j.flowsScanned.toLocaleString()} flows.</div>`;
+    } else {
+      table = `<h3 style="font-size:15px;margin:4px 0 8px">🚨 Known-bad IPs seen on your network</h3>
+        <table class="bl"><thead><tr>
+          <th>IP</th><th>Dir</th><th>Sev</th><th style="text-align:right">Alerts</th><th style="text-align:right">Flows</th><th style="text-align:right">Bytes</th><th style="text-align:right">Hosts</th><th>Last</th><th>Feeds</th><th></th>
+        </tr></thead><tbody>`+j.matches.map(intelMatchRow).join("")+`</tbody></table>
+        <div class="muted" style="font-size:12px;margin-top:8px">Scanned ${j.alertsScanned} stored alerts and ${j.flowsScanned.toLocaleString()} flow records. “Hosts” = distinct internal devices that talked to the flagged IP.</div>`;
+    }
+    $("#intelBody").innerHTML = loadWarn + cards + feeds + table;
+    wireIntelActions();
+  } catch(e){
+    $("#intelBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
+  }
+}
+$("#navIntel").onclick = showIntel;
+$("#intelHours").onchange = showIntel;
+$("#intelCheckBtn").onclick = intelCheck;
+$("#intelCheckIp").addEventListener("keydown", e=>{ if(e.key==="Enter") intelCheck(); });
+$("#backAlerts9").onclick = showAlerts;
 $("#navWar").onclick = showWar;
 $("#warWin").onchange = showWar;
 $("#backAlerts4").onclick = showAlerts;

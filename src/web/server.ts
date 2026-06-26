@@ -11,6 +11,8 @@
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
+ *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
+ *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -55,6 +57,7 @@ import { discoverDevices } from "../investigate/discovery.ts";
 import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
+import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -431,6 +434,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const limitRaw = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(50, Math.floor(limitRaw)) : 10;
         return send(res, 200, buildTrends(hours, limit, Date.now()));
+      }
+
+      // --- threat-intel exposure (known-bad IPs touching the network) ---
+      if (method === "GET" && path === "/api/intel") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildIntelReport(hours, Date.now()));
+      }
+      if (method === "GET" && path === "/api/intel/check") {
+        const ip = (url.searchParams.get("ip") ?? "").trim();
+        if (isIP(ip) === 0) return send(res, 400, { error: "Invalid or missing IP." });
+        return send(res, 200, checkIntelIp(ip));
       }
 
       // --- firewall blocklist ---
