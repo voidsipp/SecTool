@@ -17,6 +17,7 @@
  *   node src/index.ts --beacon 168    # offline beaconing / periodicity (C2 cadence) report (Markdown)
  *   node src/index.ts --efficacy 168  # offline IPS enforcement-gap / efficacy report (Markdown)
  *   node src/index.ts --spread 168    # offline spread / fan-out (scanner & spray) report (Markdown)
+ *   node src/index.ts --cooccur 168   # offline signature co-occurrence / attack-chain report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -51,6 +52,7 @@ import { buildKillChain } from "./analytics/killchain.ts";
 import { buildBeacon } from "./analytics/beacon.ts";
 import { buildEfficacy } from "./analytics/efficacy.ts";
 import { buildSpread } from "./analytics/spread.ts";
+import { buildCooccurrence } from "./analytics/cooccurrence.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -526,6 +528,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown spread report to stdout.
       console.log(buildSpread(hours, { limit, minPeers, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const cooccurIdx = argv.findIndex((a) => a === "--cooccur" || a.startsWith("--cooccur="));
+    if (cooccurIdx !== -1) {
+      const inline = argv[cooccurIdx]!.split("=")[1];
+      const next = argv[cooccurIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so multi-stage chains have room to recur across actors.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --cooccur hours: "${raw}". Use e.g. --cooccur 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the signature-pair table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-actors N` to set how many distinct actors flag a pair notable.
+      let minActors = 2;
+      const minActorsIdx = argv.findIndex((a) => a === "--min-actors" || a.startsWith("--min-actors="));
+      if (minActorsIdx !== -1) {
+        const ma = argv[minActorsIdx]!.split("=")[1] ?? argv[minActorsIdx + 1];
+        const n = ma !== undefined ? Number(ma) : NaN;
+        if (Number.isFinite(n) && n > 0) minActors = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown co-occurrence report to stdout.
+      console.log(buildCooccurrence(hours, { limit, minActors, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

@@ -38,6 +38,8 @@
  *   GET  /api/efficacy.md?hours=N   -> the same efficacy report as a downloadable .md file
  *   GET  /api/spread?hours=N        -> spread / fan-out (scanning sources + sprayed targets; model + Markdown)
  *   GET  /api/spread.md?hours=N     -> the same spread report as a downloadable .md file
+ *   GET  /api/cooccur?hours=N       -> signature co-occurrence / attack-chain (paired detections + ordering; model + Markdown)
+ *   GET  /api/cooccur.md?hours=N    -> the same co-occurrence report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -107,6 +109,7 @@ import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
 import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
 import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
 import { buildSpread, spreadFilename } from "../analytics/spread.ts";
+import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -809,6 +812,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${spreadFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- signature co-occurrence / attack-chain (paired detections + ordering) ---
+      if (method === "GET" && path === "/api/cooccur") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minActors = Number(url.searchParams.get("minActors")) || 2;
+        return send(res, 200, buildCooccurrence(hours, { limit, minActors, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/cooccur.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minActors = Number(url.searchParams.get("minActors")) || 2;
+        const now = Date.now();
+        const { markdown } = buildCooccurrence(hours, { limit, minActors, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${cooccurrenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
