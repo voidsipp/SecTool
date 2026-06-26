@@ -18,6 +18,7 @@
  *   node src/index.ts --efficacy 168  # offline IPS enforcement-gap / efficacy report (Markdown)
  *   node src/index.ts --spread 168    # offline spread / fan-out (scanner & spray) report (Markdown)
  *   node src/index.ts --cooccur 168   # offline signature co-occurrence / attack-chain report (Markdown)
+ *   node src/index.ts --surge 168     # offline surge / burst (volume-spike) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -53,6 +54,7 @@ import { buildBeacon } from "./analytics/beacon.ts";
 import { buildEfficacy } from "./analytics/efficacy.ts";
 import { buildSpread } from "./analytics/spread.ts";
 import { buildCooccurrence } from "./analytics/cooccurrence.ts";
+import { buildSurge } from "./analytics/surge.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -561,6 +563,54 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown co-occurrence report to stdout.
       console.log(buildCooccurrence(hours, { limit, minActors, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const surgeIdx = argv.findIndex((a) => a === "--surge" || a.startsWith("--surge="));
+    if (surgeIdx !== -1) {
+      const inline = argv[surgeIdx]!.split("=")[1];
+      const next = argv[surgeIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a quiet baseline is visible and overnight storms surface.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --surge hours: "${raw}". Use e.g. --surge 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the episode table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--bucket-minutes N` to set the time-bucket width.
+      let bucketMinutes = 15;
+      const bucketIdx = argv.findIndex((a) => a === "--bucket-minutes" || a.startsWith("--bucket-minutes="));
+      if (bucketIdx !== -1) {
+        const bm = argv[bucketIdx]!.split("=")[1] ?? argv[bucketIdx + 1];
+        const n = bm !== undefined ? Number(bm) : NaN;
+        if (Number.isFinite(n) && n > 0) bucketMinutes = n;
+      }
+      // Optional `--factor N` (× baseline) and `--min-count N` (absolute floor) for the surge bar.
+      let factor = 3;
+      const factorIdx = argv.findIndex((a) => a === "--factor" || a.startsWith("--factor="));
+      if (factorIdx !== -1) {
+        const f = argv[factorIdx]!.split("=")[1] ?? argv[factorIdx + 1];
+        const n = f !== undefined ? Number(f) : NaN;
+        if (Number.isFinite(n) && n > 0) factor = n;
+      }
+      let minCount = 5;
+      const minCountIdx = argv.findIndex((a) => a === "--min-count" || a.startsWith("--min-count="));
+      if (minCountIdx !== -1) {
+        const mc = argv[minCountIdx]!.split("=")[1] ?? argv[minCountIdx + 1];
+        const n = mc !== undefined ? Number(mc) : NaN;
+        if (Number.isFinite(n) && n > 0) minCount = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown surge report to stdout.
+      console.log(buildSurge(hours, { limit, bucketMinutes, factor, minCount, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
