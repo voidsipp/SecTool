@@ -207,9 +207,20 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
 
   // conntrack -L is preferred; fall back to procfs. grep narrows to lines that
   // mention the host (the parser re-checks exact tuple equality afterwards, so
-  // an over-broad substring match never mis-attributes a connection).
+  // an over-broad match never mis-attributes a connection).
+  //
+  // -wF (word-boundary fixed-string) is important, not just a tidy-up: a plain
+  // substring match for "10.0.0.1" would also match "10.0.0.10", "10.0.0.100",
+  // "110.0.0.1", etc. Those neighbours don't get mis-attributed (the tuple check
+  // drops them), but they would (a) burn the MAX_REMOTE_LINES budget — on a /24
+  // the gateway's own ".1" could see its real connections pushed past the head
+  // cap by hundreds of irrelevant lines — and (b) inflate the line count enough
+  // to trip the "truncated snapshot" caveat for a host that isn't actually busy.
+  // IP octet dots and the conntrack "key=value"/space delimiters are all non-word
+  // characters, so -w anchors the match to a complete address (src=10.0.0.1 ✓,
+  // 10.0.0.10 ✗, 110.0.0.1 ✗) without affecting the IPv6 procfs form.
   const remote =
-    `(conntrack -L 2>/dev/null || cat /proc/net/nf_conntrack 2>/dev/null) | grep -F '${host}' | head -${MAX_REMOTE_LINES} || true`;
+    `(conntrack -L 2>/dev/null || cat /proc/net/nf_conntrack 2>/dev/null) | grep -wF '${host}' | head -${MAX_REMOTE_LINES} || true`;
   let out: string;
   try {
     out = await sshExec(remote, { timeoutMs: 15000 });
