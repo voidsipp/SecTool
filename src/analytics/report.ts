@@ -22,10 +22,18 @@ import { safeStore } from "../store/safelist.ts";
 import { buildTrends, type Trends } from "./trends.ts";
 
 export interface WatchHit {
+  /** The watchlisted IP/CIDR that registered activity. */
   target: string;
+  /** Operator's free-form note for the entry, if any. */
   note?: string;
+  /** Number of distinct alerts in the window that touched this target. */
   alertHits: number;
+  /** Most recent alert time for this target, ms epoch. */
   lastAlertTime?: number;
+  /** Highest severity observed across this target's alerts (e.g. "high"). */
+  worstSeverity?: string;
+  /** The signature (or category) this target triggered most often. */
+  topSignature?: string;
 }
 
 export interface ReportModel {
@@ -98,23 +106,65 @@ function peakBucket(trends: Trends): { startMs: number; count: number } | null {
   return best;
 }
 
+/** Internal accumulator: a WatchHit plus the running stats needed to fill it. */
+interface WatchAccum {
+  hit: WatchHit;
+  worstWeight: number;
+  sigCounts: Map<string, number>;
+}
+
 function collectWatchHits(allAlerts: StoredAlert[], windowStartMs: number): WatchHit[] {
   const entries = watchStore.all();
   if (!entries.length) return [];
-  const byTarget = new Map<string, WatchHit>();
-  for (const e of entries) byTarget.set(e.target, { target: e.target, note: e.note, alertHits: 0 });
+  const byTarget = new Map<string, WatchAccum>();
+  for (const e of entries) {
+    byTarget.set(e.target, {
+      hit: { target: e.target, note: e.note, alertHits: 0 },
+      worstWeight: -1,
+      sigCounts: new Map(),
+    });
+  }
   for (const a of allAlerts) {
     if (a.time < windowStartMs) continue;
+    // One alert counts once per target even if both endpoints match it.
+    const counted = new Set<string>();
     for (const ip of [a.srcIp, a.dstIp]) {
       const m = watchStore.match(ip);
-      if (!m) continue;
-      const hit = byTarget.get(m.target);
-      if (!hit) continue;
-      hit.alertHits++;
-      if (hit.lastAlertTime === undefined || a.time > hit.lastAlertTime) hit.lastAlertTime = a.time;
+      if (!m || counted.has(m.target)) continue;
+      counted.add(m.target);
+      const acc = byTarget.get(m.target);
+      if (!acc) continue;
+      acc.hit.alertHits++;
+      if (acc.hit.lastAlertTime === undefined || a.time > acc.hit.lastAlertTime) acc.hit.lastAlertTime = a.time;
+      const w = SEV_WEIGHT[a.severity] ?? 0;
+      if (w > acc.worstWeight) {
+        acc.worstWeight = w;
+        acc.hit.worstSeverity = a.severity;
+      }
+      const sig = a.signature || a.category || "—";
+      acc.sigCounts.set(sig, (acc.sigCounts.get(sig) ?? 0) + 1);
     }
   }
-  return [...byTarget.values()].filter((h) => h.alertHits > 0).sort((a, b) => b.alertHits - a.alertHits);
+  const hits: WatchHit[] = [];
+  for (const acc of byTarget.values()) {
+    if (acc.hit.alertHits === 0) continue;
+    let topSig: string | undefined;
+    let topN = 0;
+    for (const [sig, n] of acc.sigCounts) {
+      if (n > topN) {
+        topN = n;
+        topSig = sig;
+      }
+    }
+    acc.hit.topSignature = topSig;
+    hits.push(acc.hit);
+  }
+  // Rank by danger first (worst severity), then by volume.
+  return hits.sort((a, b) => {
+    const wa = SEV_WEIGHT[a.worstSeverity ?? ""] ?? 0;
+    const wb = SEV_WEIGHT[b.worstSeverity ?? ""] ?? 0;
+    return wb - wa || b.alertHits - a.alertHits;
+  });
 }
 
 /** Compose the plain-language executive summary from the numbers. */
@@ -170,7 +220,12 @@ function writeExecutiveSummary(trends: Trends, watchHits: WatchHit[], now: numbe
   if (watchHits.length) {
     const total = watchHits.reduce((n, w) => n + w.alertHits, 0);
     parts.push(`${watchHits.length} watchlisted target(s) generated ${total} alert(s) — review the watchlist section.`);
-    highlights.push(`${watchHits.length} watchlist target(s) active this window.`);
+    const worst = watchHits[0];
+    if (worst?.worstSeverity && (SEV_WEIGHT[worst.worstSeverity] ?? 0) >= SEV_WEIGHT.high!) {
+      highlights.push(`Watchlist alert: ${worst.target} reached ${worst.worstSeverity} severity (${worst.alertHits} hit(s)).`);
+    } else {
+      highlights.push(`${watchHits.length} watchlist target(s) active this window.`);
+    }
   }
 
   if (trends.notified > 0) parts.push(`${trends.notified} alert(s) were pushed to Discord.`);
@@ -336,10 +391,12 @@ function renderMarkdown(model: ReportModel): string {
     lines.push("");
     lines.push(
       mdTable(
-        ["Target", "Alerts", "Last seen", "Note"],
+        ["Target", "Alerts", "Worst severity", "Top signature", "Last seen", "Note"],
         model.watchHits.map((w) => [
           cell(w.target),
           String(w.alertHits),
+          cell(w.worstSeverity ?? "—"),
+          cell(w.topSignature ?? "—"),
           w.lastAlertTime ? fmtAgo(w.lastAlertTime, model.generatedAt) : "—",
           cell(w.note ?? ""),
         ]),
