@@ -15,7 +15,7 @@
  */
 import { isIP } from "node:net";
 import type { Config } from "../config.ts";
-import { agentConnections, type AgentMatch } from "../agent/agentClient.ts";
+import { agentConnections, agentHealth, type AgentMatch } from "../agent/agentClient.ts";
 import { enrichIp, type Enrichment } from "./enrich.ts";
 import { protoName } from "./udm.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
@@ -200,7 +200,64 @@ export interface ListenerAudit {
   /** Listeners flagged as a dangerous, network-reachable attack surface. */
   risky?: number;
   listeners?: Listener[];
+  /** Installed agent version, resolved from /health when bind data was missing. */
+  agentVersion?: string;
   note?: string;
+}
+
+// Agents at this version or newer report each socket's bind address (localAddr),
+// letting us classify exposure precisely. Older agents omit it, so every listener
+// falls back to "unknown" exposure and risk classification is degraded.
+const MIN_BIND_ADDR_VERSION = "1.0.2";
+
+/** True when dotted version `a` is strictly older than `b` (e.g. 1.0.1 < 1.0.2). */
+function versionLt(a: string, b: string): boolean {
+  const pa = a.split(".");
+  const pb = b.split(".");
+  for (let i = 0; i < 3; i++) {
+    const x = Number(pa[i] ?? 0) || 0;
+    const y = Number(pb[i] ?? 0) || 0;
+    if (x < y) return true;
+    if (x > y) return false;
+  }
+  return false;
+}
+
+// When no listener reported a bind address, exposure is shown as "unknown" and we
+// can't tell a safe localhost-only service from a network-exposed one. Rather than
+// blindly telling the operator to upgrade, query the agent's /health to name the
+// exact installed version so the note is precise and actionable.
+async function bindExposureNote(
+  cfg: Config,
+  host: string,
+): Promise<{ note: string; agentVersion?: string }> {
+  const h = await agentHealth(cfg, host);
+  const version =
+    h.ok && h.data && typeof (h.data as { version?: unknown }).version === "string"
+      ? (h.data as { version: string }).version
+      : undefined;
+  if (!version) {
+    return {
+      note:
+        `This agent didn't report which interface each port is bound to, so exposure is shown as "unknown". ` +
+        `Update the agent to v${MIN_BIND_ADDR_VERSION}+ (re-run the installer) to map every port to its bind address.`,
+    };
+  }
+  if (versionLt(version, MIN_BIND_ADDR_VERSION)) {
+    return {
+      agentVersion: version,
+      note:
+        `Agent on this host is v${version}, which can't report port bind addresses — exposure is shown as "unknown" ` +
+        `and risk classification can't distinguish localhost-only from network-exposed services. ` +
+        `Update to v${MIN_BIND_ADDR_VERSION}+ (re-run the installer) for accurate results.`,
+    };
+  }
+  // A current-enough agent that still surfaced no bind address (e.g. a platform
+  // whose snapshot omits local addresses): report it without nagging to upgrade.
+  return {
+    agentVersion: version,
+    note: `Agent v${version} didn't report a bind address for any listener, so exposure is shown as "unknown" for this host.`,
+  };
 }
 
 function classifyExposure(localAddr: string | undefined): Listener["exposure"] {
@@ -310,6 +367,16 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
       a.port - b.port ||
       a.proto.localeCompare(b.proto),
   );
+  // Only chase the agent's version when bind data is genuinely missing AND there
+  // is something to report — a host with no listeners needs no upgrade nag.
+  let note: string | undefined;
+  let agentVersion: string | undefined;
+  if (!sawLocalAddr && listeners.length > 0) {
+    const info = await bindExposureNote(cfg, host);
+    note = info.note;
+    agentVersion = info.agentVersion;
+  }
+
   return {
     ok: true,
     host: r.host,
@@ -317,7 +384,8 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     exposed: listeners.filter((l) => l.exposure === "all-interfaces").length,
     risky: listeners.filter((l) => l.risk).length,
     listeners,
-    note: sawLocalAddr ? undefined : "Update the agent (v1.0.2+) to see which interface each port is bound to.",
+    agentVersion,
+    note,
   };
 }
 
