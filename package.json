@@ -37,6 +37,7 @@
     "coverage": "node src/index.ts --coverage 168",
     "direction": "node src/index.ts --direction 168",
     "lifecycle": "node src/index.ts --lifecycle 168",
+    "risk": "node src/index.ts --risk 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"

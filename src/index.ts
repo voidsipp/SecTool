@@ -28,6 +28,7 @@
  *   node src/index.ts --coverage 168  # offline data-coverage / quality (dataset-integrity) report (Markdown)
  *   node src/index.ts --direction 168 # offline traffic-direction / exposure (inbound/outbound/lateral) report (Markdown)
  *   node src/index.ts --lifecycle 168 # offline signature lifecycle / chronic-vs-acute report (Markdown)
+ *   node src/index.ts --risk 168      # offline risk-index / threat-posture (severity-weighted) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -73,6 +74,7 @@ import { buildNetblock } from "./analytics/netblock.ts";
 import { buildCoverage } from "./analytics/coverage.ts";
 import { buildDirection } from "./analytics/direction.ts";
 import { buildLifecycle } from "./analytics/lifecycle.ts";
+import { buildRisk } from "./analytics/risk.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -886,6 +888,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown lifecycle report to stdout.
       console.log(buildLifecycle(hours, { limit, buckets, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const riskIdx = argv.findIndex((a) => a === "--risk" || a.startsWith("--risk="));
+    if (riskIdx !== -1) {
+      const inline = argv[riskIdx]!.split("=")[1];
+      const next = argv[riskIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the posture grade reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --risk hours: "${raw}". Use e.g. --risk 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the source / signature driver tables.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown risk-index report to stdout.
+      console.log(buildRisk(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
