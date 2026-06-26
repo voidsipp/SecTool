@@ -268,7 +268,7 @@
     <input id="devProbe" placeholder="probe extra host(s), e.g. 192.168.0.50" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; min-width:240px;" />
     <button id="devRefresh">↻ Rescan</button>
   </div>
-  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Per device you can inspect <b>connections</b>, its <b>traffic</b> footprint (from gateway flows), <b>listeners</b> (open-port attack surface) and <b>egress</b> to public IPs scored against threat intel.</div>
+  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Per device you can inspect <b>live ports</b> (real-time gateway conntrack — works without an agent), <b>connections</b>, its <b>traffic</b> footprint (from gateway flows), <b>listeners</b> (open-port attack surface) and <b>egress</b> to public IPs scored against threat intel. For a host that isn't running the agent, use <b>📡 Live port activity</b> below.</div>
 
   <div class="section" style="margin-bottom:16px;">
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -288,6 +288,16 @@
       <span id="deployHint" class="muted" style="font-size:11px;"></span>
     </div>
     <div id="discoBody"><div class="empty">Click <b>Scan LAN</b> to enumerate every device on your local network.</div></div>
+  </div>
+
+  <div class="section" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+      <h3 style="margin:0; font-size:15px;">📡 Live port activity</h3>
+      <input id="livePortHost" placeholder="host IP, e.g. 192.168.0.60" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; min-width:220px;" />
+      <button id="livePortBtn">📡 Show ports</button>
+    </div>
+    <div class="muted" style="margin-bottom:8px; font-size:12px;">Real-time outbound/inbound ports for <b>any</b> internal host, read live from the gateway's connection-tracking table — no agent and no NetFlow required. Use this when an alert fires for a host that isn't running the agent (e.g. the source of an outbound-port alert).</div>
+    <div id="livePortBody"><div class="empty">Enter a LAN host IP to see the connections the gateway is routing for it right now.</div></div>
   </div>
 
   <div id="devicesBody"><div class="empty">Loading…</div></div>
@@ -814,11 +824,13 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
           <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}</span></h3>
         <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="devview" data-ip="${esc(a.ip)}">▸ Connections</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="ports">📡 Live ports</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="traffic">🌐 Traffic</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="egress">🚨 Egress</button>
         </div>
         <div class="devconns" id="conns-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="ports-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="traffic-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="listeners-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="egress-${id}" style="display:none; margin-top:10px"></div>
@@ -973,6 +985,7 @@ async function toggleConns(ip,btn){
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 const DEV_TOOLS = {
+  ports:     { label:"📡 Live ports", path:i=>"/api/agents/ports?host="+encodeURIComponent(i), render:renderPorts, loading:"Reading the gateway's live connection table…" },
   traffic:   { label:"🌐 Traffic",   path:i=>"/api/agents/traffic?host="+encodeURIComponent(i)+"&hours=24", render:renderTraffic, loading:"Reading collected flows…" },
   listeners: { label:"🛰️ Listeners", path:i=>"/api/agents/listeners?host="+encodeURIComponent(i), render:renderListeners, loading:"Auditing open ports…" },
   egress:    { label:"🚨 Egress",    path:i=>"/api/agents/egress?host="+encodeURIComponent(i),    render:renderEgress,    loading:"Scoring public peers against threat intel…" },
@@ -988,6 +1001,39 @@ async function toggleTool(ip, tool, btn){
     if (j.ok===false){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"failed")+'</pre>'; return; }
     box.innerHTML = spec.render(j);
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+const WELLKNOWN={20:'ftp-data',21:'ftp',22:'ssh',23:'telnet',25:'smtp',53:'dns',67:'dhcp',68:'dhcp',80:'http',110:'pop3',123:'ntp',135:'msrpc',139:'netbios',143:'imap',161:'snmp',443:'https',445:'smb',465:'smtps',587:'submission',993:'imaps',995:'pop3s',1433:'mssql',1883:'mqtt',3306:'mysql',3389:'rdp',5060:'sip',5432:'postgres',5900:'vnc',6379:'redis',8080:'http-alt',8443:'https-alt',8883:'mqtts',9000:'',27017:'mongodb'};
+function portLabel(p){ const n=WELLKNOWN[p]; return n?(' <span class="muted">'+esc(n)+'</span>'):''; }
+function renderPorts(j){
+  const s=j.summary||{};
+  const grp=g=>`<tr>
+    <td class="mono">${esc(g.proto)} ${g.port}${portLabel(g.port)}</td>
+    <td class="muted">${g.connections}</td>
+    <td class="mono">${g.peers.slice(0,6).map(esc).join(', ')}${g.peers.length>6?' <span class="muted">+'+(g.peers.length-6)+'</span>':''}${g.externalPeers?' <span class="badge" style="background:var(--accent)">'+g.externalPeers+' ext</span>':''}</td>
+    <td class="muted">${(g.states||[]).map(esc).join(', ')}</td>
+    <td class="mono">${g.bytes?bytesH(g.bytes):''}</td></tr>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${s.connections||0} live session(s) · ↑ ${s.outboundConns||0} outbound on ${s.distinctOutboundPorts||0} port(s) · ↓ ${s.inboundConns||0} inbound on ${s.distinctInboundPorts||0} port(s) · ${s.externalPeers||0} external peer(s)${j.capturedAt?' · '+ago(j.capturedAt):''}</div>`;
+  if (!(j.outbound||[]).length && !(j.inbound||[]).length){
+    h+='<div class="empty">'+esc(j.note||'No active connections for this host on the gateway right now.')+'</div>';
+    return h;
+  }
+  if ((j.outbound||[]).length) h+=`<div class="muted" style="margin:6px 0 4px">↑ Outbound — remote service ports this host is reaching</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Proto · Port</th><th>Conns</th><th>Peers</th><th>State</th><th>Bytes</th></tr></thead><tbody>${j.outbound.map(grp).join("")}</tbody></table>`;
+  if ((j.inbound||[]).length) h+=`<div class="muted" style="margin:10px 0 4px">↓ Inbound — local ports peers are connecting to</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Proto · Port</th><th>Conns</th><th>Peers</th><th>State</th><th>Bytes</th></tr></thead><tbody>${j.inbound.map(grp).join("")}</tbody></table>`;
+  if (j.note) h+=`<div class="muted" style="margin-top:8px;font-size:11px">${esc(j.note)}${j.source&&j.source!=='none'?' · source: '+esc(j.source):''}</div>`;
+  return h;
+}
+async function showLivePorts(){
+  const host=($("#livePortHost").value||"").trim();
+  const body=$("#livePortBody");
+  if(!host){ body.innerHTML='<div class="empty">Enter a LAN host IP first.</div>'; return; }
+  body.innerHTML='<div class="empty"><span class="spin"></span> Reading the gateway’s live connection table for '+esc(host)+'…</div>';
+  try {
+    const j = await api("/api/agents/ports?host="+encodeURIComponent(host));
+    if (j.ok===false){ body.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"failed")+'</pre>'; return; }
+    body.innerHTML='<div class="section" style="background:var(--panel2,#140f30)"><h3 style="margin:0 0 8px;font-size:14px"><span class="mono">'+esc(host)+'</span> · live ports</h3>'+renderPorts(j)+'</div>';
+  } catch(e){ body.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 function renderTraffic(j){
   const s=j.summary||{};
@@ -1410,6 +1456,8 @@ $("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(
 $("#discoScan").onclick = scanLan;
 $("#discoDeployAll").onclick = deployAll;
 $("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });
+$("#livePortBtn").onclick = showLivePorts;
+$("#livePortHost").addEventListener("keydown", e=>{ if(e.key==="Enter") showLivePorts(); });
 $("#navWatch").onclick = showWatch;
 $("#watchHours").onchange = showWatch;
 $("#watchAdd").onclick = addWatchFromForm;
