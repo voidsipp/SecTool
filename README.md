@@ -452,6 +452,36 @@ SSH, no Claude, no live gateway query**.
 - `GET /api/killchain.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --killchain 168` (or `npm run killchain`) → print the Markdown to stdout (defaults to a 7-day window so multi-stage progression has room to surface).
 
+## 📡 Beaconing / periodicity report (`GET /api/beacon[.md]`, `--beacon`)
+
+Command-and-control malware almost never streams traffic — it *checks in* on a
+fixed cadence (every 60s, every 5m, every hour) and goes quiet between beats.
+That regular, low-jitter heartbeat is one of the most reliable behavioural tells
+in network defence: humans and legitimate apps are bursty, while a beacon ticks
+like a metronome. No other report surfaces it — [`rhythm`](#) folds history onto
+*hour-of-day* axes (a 5-minute beacon just looks like steady all-day activity),
+and volume-ranked reports bury a low-and-slow beacon under noisy scanners.
+
+This report groups the windowed history into **src→dst conversations**, computes
+the inter-arrival intervals for each, and scores how *regular* they are. A pair
+is flagged **📡 beacon-like** when it repeats enough times, has a sane period
+(~10s–24h), and its intervals cluster tightly around their median. For each
+candidate it reports the estimated **period** (median interval), the **jitter**
+(0% = a perfect metronome), a **0–100 regularity score** that blends low jitter
+with having enough samples to trust it, the worst severity, and the dominant
+signature for context.
+
+Honest about its limits: cadence is measured from stored **IPS-alert**
+timestamps (second-resolution), not every packet — so the true beacon rate may
+be faster than shown, very fast beacons (<~10s) can't be distinguished, and thin
+candidates are discounted rather than crying "C2" on three lucky hits. Pure
+offline math over the local alert history — **no SSH, no Claude, no live gateway
+query**.
+
+- `GET /api/beacon?hours=N[&limit=25][&minHits=4]` → the structured model **plus** rendered Markdown.
+- `GET /api/beacon.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --beacon 168 [--limit 25] [--min-hits 4]` (or `npm run beacon`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow beacon has room to repeat many times).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
