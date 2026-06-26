@@ -273,6 +273,7 @@
   <button id="navWar">🗺️ War Map</button>
   <button id="navTrends">📊 Trends</button>
   <button id="navCampaigns">🎯 Campaigns</button>
+  <button id="navAssets">🖥️ Assets</button>
   <button id="navReport">📄 Report</button>
   <button id="navIntel">🛡️ Intel</button>
   <button id="navSearch">🔎 Search</button>
@@ -480,6 +481,22 @@
   </div>
   <div class="muted" style="margin-bottom:12px;">Stored alerts grouped by the external attacker IP behind them, so one adversary's whole footprint reads as a single incident. Each campaign rolls up its alert volume, worst severity, distinct signatures, the internal hosts it hit, and an active time span, ranked by a composite threat score. Block, watch, or clear an attacker in one click. No SSH required.</div>
   <div id="campBody"><div class="empty">Loading…</div></div>
+</div>
+<div id="assetsView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+    <button id="backAlertsAssets">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">🖥️ Asset Exposure <span id="assetsMeta" class="muted"></span></h2>
+    <span class="spacer" style="flex:1"></span>
+    <label class="status">Window
+      <select id="assetsHours">
+        <option value="24">24h</option>
+        <option value="48">48h</option><option value="168" selected>7d</option><option value="720">30d</option>
+      </select>
+    </label>
+    <button id="assetsDownload" class="primary">⬇ Download .md</button>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">The mirror of Campaigns: stored alerts grouped by the <b>internal host</b> involved, so you can see which of <i>your</i> devices warrant attention. Each host rolls up its alert volume, worst severity, the split between <b>outbound</b> alerts (host was the source — a possible-compromise signal) and <b>inbound</b> alerts (host was targeted/scanned), the external peers it touched, and a composite exposure risk score. Hosts showing severe outbound traffic float to the top. No SSH required.</div>
+  <div id="assetsBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="reportView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
   <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
@@ -987,7 +1004,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -1005,7 +1022,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -1035,7 +1052,7 @@ async function showHosts() {
   } catch(e){ $("#hostsBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showDevices(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
   $("#devicesView").style.display="block";
   $("#devicesBody").innerHTML='<div class="empty">Scanning the LAN for agents…</div>';
   try {
@@ -1438,7 +1455,7 @@ async function resetChat(){
   $("#askInput").focus();
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ setAgentMode(agentMode); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -1462,7 +1479,7 @@ async function agentProcess(internal, external, port){
   } catch(e){ return '<span class="muted">'+esc(e.message)+'</span>'; }
 }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -1538,7 +1555,7 @@ async function clickCountry(code, country){
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#watchView").style.display="block";
   $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1589,9 +1606,9 @@ async function addWatchFromForm(){
     showWatch(); loadStatus();
   } catch(e){ alert(e.message); }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#alertsView").style.display="grid"; }
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none"; $("#alertsView").style.display="grid"; }
 async function showSupp(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#suppView").style.display="block";
   $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1696,7 +1713,7 @@ function triageBadgesHtml(byTri){
   }).join("") || '<span class="trends-empty">No triage activity.</span>';
 }
 async function showTrends(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
   $("#trendsView").style.display="block";
   $("#trendsBody").innerHTML='<div class="empty">Crunching numbers…</div>';
   try {
@@ -1757,7 +1774,7 @@ function codeToFlag(cc){
 }
 function scoreColor(s){ return s>=70?'var(--critical)':s>=45?'var(--high)':s>=25?'var(--medium)':'var(--low)'; }
 async function showCampaigns(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#campaignsView").style.display="block";
   $("#campBody").innerHTML='<div class="empty">Clustering attackers…</div>';
   try {
@@ -1820,6 +1837,87 @@ async function showCampaigns(){
     $("#campBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
   }
 }
+// Asset Exposure: the mirror of Campaigns, grouped by internal host instead of
+// external attacker. Reuses the same score-colour + sev-badge styling.
+const POSTURE_META = {
+  "compromise-suspected": { label:"⚠️ Compromise suspected", color:"var(--critical)" },
+  "targeted":             { label:"🎯 Targeted",             color:"var(--high)" },
+  "noisy":                { label:"📢 Noisy",                color:"var(--medium)" },
+  "calm":                 { label:"· Calm",                  color:"var(--low)" },
+};
+async function showAssets(){
+  hideAllViews();
+  $("#assetsView").style.display="block";
+  $("#assetsBody").innerHTML='<div class="empty">Scoring internal hosts…</div>';
+  try {
+    const hours = $("#assetsHours").value;
+    const j = await api("/api/assets?hours="+hours);
+    $("#assetsMeta").textContent = `(last ${j.hours}h · ${j.assetCount} host${j.assetCount===1?'':'s'} · ${j.consideredAlerts} alert${j.consideredAlerts===1?'':'s'})`;
+    if (!j.assetCount) {
+      $("#assetsBody").innerHTML = '<div class="empty">No internal hosts appeared in any alert in this window.'+(j.externalOnlyAlerts?`<br>${j.externalOnlyAlerts} external-only alert${j.externalOnlyAlerts===1?'':'s'} were skipped.`:'')+'</div>';
+      return;
+    }
+    const sevBadge = (s) => `<span class="sevtag sev-${esc(s)}" style="display:inline-block;padding:2px 7px;border-radius:0;font-family:var(--pix);font-size:7px;color:#04121a;text-transform:uppercase">${esc(s)}</span>`;
+    const hl = j.highlights && j.highlights.length
+      ? `<div class="section" style="margin-bottom:14px"><span class="muted" style="font-family:var(--pix);font-size:7px;text-transform:uppercase">Board summary</span><ul style="margin:6px 0 0;padding-left:18px;font-size:13px">${j.highlights.map(h=>`<li>${esc(h)}</li>`).join("")}</ul></div>`
+      : "";
+    $("#assetsBody").innerHTML = hl + j.assets.map((a,i)=>{
+      const pm = POSTURE_META[a.posture] || POSTURE_META.calm;
+      const stateP = [];
+      if (a.blocked) stateP.push('<span class="pill" style="border-color:var(--critical);color:var(--critical)">blocked</span>');
+      if (a.watched) stateP.push('<span class="pill" style="border-color:var(--cyan);color:var(--cyan)">👁 watched</span>');
+      if (a.safe) stateP.push('<span class="pill" style="border-color:var(--low);color:var(--low)">safe</span>');
+      const sigs = a.signatures.slice(0,6).map(s=>`<span class="pill" title="${esc(s.signature)} · max ${esc(s.severityMax)}" style="margin:0 6px 6px 0;display:inline-block">${esc(s.signature)} <b style="color:var(--text)">×${s.count}</b></span>`).join("")
+        + (a.signatures.length>6?`<span class="muted" style="font-size:11px">+${a.signatures.length-6} more</span>`:"");
+      const peers = a.peers.slice(0,10).map(p=>`<span class="mono pill" title="${p.internal?'internal (lateral)':'external'} · max ${esc(p.severityMax)}${p.blocked?' · blocked':''}" style="margin:0 6px 6px 0;display:inline-block;${p.internal?'':'border-color:var(--high);color:var(--high)'}">${esc(p.ip)} <b style="color:var(--text)">×${p.count}</b></span>`).join("")
+        + (a.peers.length>10?`<span class="muted" style="font-size:11px">+${a.peers.length-10} more</span>`:"");
+      const cats = a.categories.length?`<div class="muted" style="font-size:11px;margin-top:4px">${a.categories.map(esc).join(" · ")}</div>`:"";
+      const spanStr = a.spanMs>0 ? fmtDur(a.spanMs) : "single hit";
+      return `<div class="section" style="border-color:${scoreColor(a.riskScore)}">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <span class="muted" style="font-family:var(--pix);font-size:10px">#${i+1}</span>
+          <span class="mono" style="font-size:15px;color:var(--text)">${esc(a.ip)}</span>
+          <span title="posture" style="font-family:var(--pix);font-size:8px;color:${pm.color};border:2px solid ${pm.color};padding:3px 7px">${esc(pm.label)}</span>
+          <span title="composite exposure risk score" style="font-family:var(--pix);font-size:9px;color:${scoreColor(a.riskScore)};border:2px solid ${scoreColor(a.riskScore)};padding:3px 7px">RISK ${a.riskScore}</span>
+          ${sevBadge(a.severityMax)}
+          <span class="spacer" style="flex:1"></span>
+          ${stateP.join(" ")}
+          <button class="peerbtn" data-act="watch" data-ip="${esc(a.ip)}" style="border-color:var(--cyan);color:var(--cyan)">👁 Watch</button>
+          <button class="peerbtn safe" data-act="safe" data-ip="${esc(a.ip)}">✓ Safe</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">
+          <b style="color:var(--text)">${a.alertCount}</b> alert${a.alertCount===1?'':'s'}
+          · <b style="color:var(--text)">${a.asSrc}→</b> outbound / <b style="color:var(--text)">${a.asDst}←</b> inbound
+          ${a.outboundSevere?`· <b style="color:var(--critical)">${a.outboundSevere} severe outbound</b>`:''}
+          · ${a.blockedCount} blocked · ${a.openCount} open
+          · <b style="color:var(--text)">${a.externalPeerCount}</b> external peer${a.externalPeerCount===1?'':'s'}
+          · active ${esc(spanStr)}
+          · last ${esc(ago(a.lastSeen))}
+        </div>
+        <div style="margin-bottom:6px"><span class="muted" style="font-family:var(--pix);font-size:7px;text-transform:uppercase">Signatures</span><div style="margin-top:5px">${sigs||'<span class="muted">—</span>'}</div>${cats}</div>
+        <div><span class="muted" style="font-family:var(--pix);font-size:7px;text-transform:uppercase">Peers (red = external)</span><div style="margin-top:5px">${peers||'<span class="muted">—</span>'}</div></div>
+      </div>`;
+    }).join("");
+    document.querySelectorAll("#assetsBody .peerbtn").forEach(b=>b.onclick=async()=>{
+      const ip=b.dataset.ip, act=b.dataset.act;
+      try{
+        if(act==="watch"){ await api("/api/watch",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip,note:"asset"})}); }
+        else if(act==="safe"){ await api("/api/safe",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ip})}); }
+        showAssets(); loadStatus();
+      }catch(e){ alert(e.message); }
+    });
+  } catch(e){
+    $("#assetsBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
+  }
+}
+function downloadAssets(){
+  const hours = $("#assetsHours").value;
+  window.open("/api/assets.md?hours="+encodeURIComponent(hours), "_blank");
+}
+$("#navAssets").onclick = showAssets;
+$("#assetsHours").onchange = showAssets;
+$("#assetsDownload").onclick = downloadAssets;
+$("#backAlertsAssets").onclick = showAlerts;
 let lastReportMd = "";
 function reportSummaryCards(t, model){
   return `<div class="trends-summary">
@@ -1856,7 +1954,7 @@ function compareSummaryCards(j){
   </div>`;
 }
 async function showReport(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#reportView").style.display="block";
   $("#reportCompare").textContent = compareMode ? "📄 Incident report" : "⇆ Compare periods";
   if (compareMode) return showCompare();
@@ -1939,7 +2037,7 @@ $("#trendsHours").onchange = showTrends;
 /* ---------------- History search ---------------- */
 let searchHits = [], searchSel = null, searchRan = false;
 function hideAllViews(){
-  ["alertsView","blockedView","hostsView","askView","warView","watchView","suppView","trendsView","campaignsView","reportView","intelView","devicesView","searchView"]
+  ["alertsView","blockedView","hostsView","askView","warView","watchView","suppView","trendsView","campaignsView","assetsView","reportView","intelView","devicesView","searchView"]
     .forEach(id=>{ const el=$("#"+id); if(el) el.style.display="none"; });
 }
 function searchParams(){
@@ -2096,7 +2194,7 @@ $("#campHours").onchange = showCampaigns;
 $("#campGeo").onchange = showCampaigns;
 
 function intelHideOthers(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
 }
 function intelDirPill(d){ return `<span class="dirpill ${esc(d)}">${esc(d)}</span>`; }
 function intelMatchRow(m){
