@@ -417,6 +417,41 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/iocs?hours=N&format=json|csv|plain|markdown&minSeverity=medium[&includeSafe=1]` → the export in the requested format (`json` returns the structured model inline; the others download as a file).
 - `node src/index.ts --iocs 168 [--format plain] [--min-severity medium]` (or `npm run iocs`) → print the export to stdout (defaults to a 7-day window and the `plain` blocklist format, ideal for piping into `ipset restore`).
 
+## ⛓️ Kill-chain / attack-stage report (`GET /api/killchain[.md]`, `--killchain`)
+
+Every other report slices the history by an *entity* (IP, host, attacker,
+signature, watched target) or by the *clock* (rhythm). This one slices it by
+**attack lifecycle stage**, answering the question that decides whether scattered
+alerts are background noise or one unfolding intrusion: *how far along the kill
+chain is what I'm seeing — and is any single internal host progressing through
+it in sequence?* A lone port-scan is routine internet weather; that same
+scanner's target later showing **exploitation** then **command-and-control**
+traffic is a breach in motion — a story no per-entity report tells.
+
+It maps every stored alert to one ordered stage using a heuristic over its
+Suricata **classification / category / signature** text, then produces two
+complementary views:
+
+- **Stage coverage** — Reconnaissance → Delivery/Access → Exploitation →
+  Command & Control → Actions on Objectives — each with alert volume, distinct
+  attackers and internal hosts touched, severity ceiling, blocked-vs-detected
+  disposition, and the defining signatures, plus an at-a-glance ASCII funnel.
+- **Per-host progression** — for every internal host, the *set* of stages it
+  appears in and the **furthest** it reached. A host seen across several
+  successive stages — especially one acting as the **source** of C2 or
+  exfiltration traffic — is flagged **🔴 compromise-suspected**; stage depth is a
+  far sharper compromise signal than raw alert volume.
+
+Unmappable alerts land in an honest **off-chain** bucket (counted, never
+silently dropped), and the output is explicit that stage assignment is a triage
+heuristic — a shared endpoint across stages is a lead to investigate, not proof
+of a completed intrusion. Pure offline math over the local alert history — **no
+SSH, no Claude, no live gateway query**.
+
+- `GET /api/killchain?hours=N[&limit=25]` → the structured model **plus** rendered Markdown.
+- `GET /api/killchain.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --killchain 168` (or `npm run killchain`) → print the Markdown to stdout (defaults to a 7-day window so multi-stage progression has room to surface).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

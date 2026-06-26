@@ -22,6 +22,7 @@
     "rhythm": "node src/index.ts --rhythm 168",
     "backlog": "node src/index.ts --backlog 720",
     "novelty": "node src/index.ts --novelty 168",
+    "killchain": "node src/index.ts --killchain 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
