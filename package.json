@@ -33,6 +33,7 @@
     "notify": "node src/index.ts --notify 168",
     "classify": "node src/index.ts --classify 168",
     "focus": "node src/index.ts --focus 168",
+    "netblocks": "node src/index.ts --netblocks 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"

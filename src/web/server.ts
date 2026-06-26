@@ -52,6 +52,8 @@
  *   GET  /api/classify.md?hours=N   -> the same classification report as a downloadable .md file
  *   GET  /api/focus?hours=N         -> threat-focus / concentration (Pareto/Gini per axis; model + Markdown)
  *   GET  /api/focus.md?hours=N      -> the same threat-focus report as a downloadable .md file
+ *   GET  /api/netblocks?hours=N     -> source-netblock / infrastructure (/24 + /16 CIDR rollup; model + Markdown)
+ *   GET  /api/netblocks.md?hours=N  -> the same source-netblock report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -127,6 +129,7 @@ import { buildEdges, edgesFilename } from "../analytics/edges.ts";
 import { buildNotify, notifyFilename } from "../analytics/notify.ts";
 import { buildClassify, classifyFilename } from "../analytics/classify.ts";
 import { buildFocus, focusFilename } from "../analytics/focus.ts";
+import { buildNetblock, netblockFilename } from "../analytics/netblock.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -984,6 +987,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${focusFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- source-netblock / infrastructure (/24 + /16 CIDR rollup) ---
+      if (method === "GET" && path === "/api/netblocks") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        return send(res, 200, buildNetblock(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/netblocks.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const now = Date.now();
+        const { markdown } = buildNetblock(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${netblockFilename(now)}"`,
         });
         res.end(markdown);
         return;

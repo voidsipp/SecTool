@@ -590,6 +590,44 @@ trips a rule is invisible here. Pure offline math over the local alert history �
 - `GET /api/focus.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --focus 168 [--limit 8]` (or `npm run focus`) → print the Markdown to stdout (defaults to a 7-day window so the shape reflects more than one shift).
 
+## 🧱 Source-netblock / infrastructure report (`GET /api/netblocks[.md]`, `--netblocks`)
+
+Every other source report ranks or scores *individual* IPs, *pairs* of IPs, or
+the *shape* of the IP distribution. None of them looks at the structure one level
+*above* the address: the network block it lives in. That gap is exactly where the
+most common evasion against per-IP defence hides — **rotation**: a botnet, a
+compromised hosting range or a cloud subnet sprays from dozens of neighbouring
+addresses, each tripping just a few alerts so none clears a per-IP threshold,
+while the *block as a whole* is hammering the perimeter. To a per-IP ranking the
+campaign is invisible; rolled up into its `/24` it's a single, obvious, high-leverage row.
+
+This report folds every **external IPv4** source into two CIDR groupings — **`/24`**
+(the tight grouping; almost always one operator / one piece of infrastructure) and
+**`/16`** (the wide grouping, for spotting a broadly hostile provider / region) —
+and ranks the resulting blocks by alert volume. For each block it reports the
+total alerts, the **distinct source IPs** (the rotation/coordination signal),
+distinct targets and signatures, the block's share of external volume, first/last
+seen, a **`⚑ coordinated`** flag (≥3 distinct IPs), and how many of the block's
+IPs are *already* `⛔` blocked / `👁` watched / `✅` safelisted — so the "still on
+the table" quick win is explicit. Coordinated `/24`s also get a member-IP detail
+table so the rotation is visible directly.
+
+The payoff is an action: a coordinated `/24` is a candidate for a **single CIDR
+rule in place of N per-IP blocks** that also pre-empts the next address in the
+range — **unless** the block carries a `✅` safelisted IP, in which case the report
+explicitly warns you to block its IPs individually instead.
+
+Honest about its limits: a `/24` is octet math, not a real allocation boundary
+(which follows BGP/whois) — "coordinated" is a strong hint to *look*, not an
+automatic block, especially for shared-hosting / CDN ranges. Only external IPv4
+sources are aggregated; IPv6 and internal sources are excluded (IPv6 is counted
+and reported separately). Pure offline math over the local alert history — **no
+SSH, no Claude, no live gateway query**.
+
+- `GET /api/netblocks?hours=N[&limit=20]` → the structured model **plus** rendered Markdown (ranked `/24` and `/16` tables plus member-IP detail for coordinated blocks).
+- `GET /api/netblocks.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --netblocks 168 [--limit 20]` (or `npm run netblocks`) → print the Markdown to stdout (defaults to a 7-day window so adjacent-IP rotation across days is visible).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
