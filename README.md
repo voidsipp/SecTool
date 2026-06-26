@@ -482,6 +482,41 @@ query**.
 - `GET /api/beacon.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --beacon 168 [--limit 25] [--min-hits 4]` (or `npm run beacon`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow beacon has room to repeat many times).
 
+## 🕸️ Spread / fan-out report (`GET /api/spread[.md]`, `--spread`)
+
+Most malicious network shapes are defined not by *what* an endpoint says but by
+*how many* other endpoints it says it to. This report surfaces the two topology
+anomalies that dominate real incidents — and that no other report captures:
+
+- **🛰️ Fan-out (a sweeping source).** One source IP reaching *many distinct
+  destinations* — the signature of horizontal scanning, network recon, a worm
+  spreading, or an owned host doing lateral movement. A pure sweep touches each
+  peer once and moves on, so its **hits/peer** ratio sits near 1.
+- **🎯 Fan-in (a sprayed destination).** One destination contacted by *many
+  distinct sources* — the signature of a distributed brute-force, a credential
+  spray, a DDoS, or simply an exposed service everyone is poking.
+
+[`beacon`](#-beaconing--periodicity-report-get-apibeaconmd---beacon) scores a
+*single* src→dst pair for timing and is blind to a source that hits a hundred
+destinations once each; [`watchlist`](#) / [`profile`](#) pivot on an IP you
+*already* named, while this report surfaces the spreaders you didn't know to
+name. Each endpoint is classified **internal vs. external** (RFC1918 / loopback /
+link-local) and its external-peer count is reported, because an internal host
+fanning out to *internal* peers (`int→int`, lateral movement) and one fanning out
+to the *internet* (`int→internet`, exfil / C2 discovery) are very different
+fires — both called out ahead of ordinary external scanners.
+
+Honest about its limits: it reads stored **IPS-alert** topology, not full flow
+data — a peer only counts if the conversation tripped a signature, so the true
+fan-out/fan-in is a lower bound. Breadth ranks attention; it does not by itself
+prove malice (resolvers, update servers and gateways legitimately talk to many
+peers). Pure offline math over the local alert history — **no SSH, no Claude, no
+live gateway query**.
+
+- `GET /api/spread?hours=N[&limit=25][&minPeers=8]` → the structured model **plus** rendered Markdown (two ranked tables: fan-out sources and fan-in destinations).
+- `GET /api/spread.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --spread 168 [--limit 25] [--min-peers 8]` (or `npm run spread`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow sweep has room to touch many peers).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

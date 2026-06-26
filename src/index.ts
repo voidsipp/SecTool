@@ -16,6 +16,7 @@
  *   node src/index.ts --killchain 168 # offline kill-chain / attack-stage report (Markdown)
  *   node src/index.ts --beacon 168    # offline beaconing / periodicity (C2 cadence) report (Markdown)
  *   node src/index.ts --efficacy 168  # offline IPS enforcement-gap / efficacy report (Markdown)
+ *   node src/index.ts --spread 168    # offline spread / fan-out (scanner & spray) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,7 @@ import { buildNovelty } from "./analytics/novelty.ts";
 import { buildKillChain } from "./analytics/killchain.ts";
 import { buildBeacon } from "./analytics/beacon.ts";
 import { buildEfficacy } from "./analytics/efficacy.ts";
+import { buildSpread } from "./analytics/spread.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -491,6 +493,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown efficacy report to stdout.
       console.log(buildEfficacy(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const spreadIdx = argv.findIndex((a) => a === "--spread" || a.startsWith("--spread="));
+    if (spreadIdx !== -1) {
+      const inline = argv[spreadIdx]!.split("=")[1];
+      const next = argv[spreadIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a low-and-slow sweep has room to touch many peers.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --spread hours: "${raw}". Use e.g. --spread 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each fan-out / fan-in table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-peers N` to set how many distinct peers flag a spreader.
+      let minPeers = 8;
+      const minPeersIdx = argv.findIndex((a) => a === "--min-peers" || a.startsWith("--min-peers="));
+      if (minPeersIdx !== -1) {
+        const mp = argv[minPeersIdx]!.split("=")[1] ?? argv[minPeersIdx + 1];
+        const n = mp !== undefined ? Number(mp) : NaN;
+        if (Number.isFinite(n) && n > 0) minPeers = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown spread report to stdout.
+      console.log(buildSpread(hours, { limit, minPeers, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
