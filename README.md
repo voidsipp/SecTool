@@ -328,6 +328,29 @@ In the dashboard it lives at the top of the **🔕 Suppressions** tab as a
 **Tuning recommendations** panel — each suggested rule has a one-click **Create
 rule** button that wires straight into the existing suppression engine.
 
+## 👁️ Watchlist activity (`GET /api/watchlist-activity[.md]`, `--watchlist`)
+
+The watchlist is your curated set of IPs / CIDR ranges to keep an eye on — a
+known C2 block, a vendor pen-test, a noisy ASN. It takes no action and changes no
+scoring; it is purely **observational**. This report answers the question the
+watchlist exists to answer: *"of everything I'm watching, what has actually been
+active — and what has gone quiet?"* It clusters the stored alert history around
+each watchlist entry and, per entry, rolls up total **hits** + a normalized
+**alerts/day** rate, the **direction split** (alerts where the watched address
+reached toward us vs. where one of **our** hosts reached it), which concrete
+addresses inside a **CIDR** entry actually lit up, the **internal hosts** it
+touched, the signatures/categories it tripped, blocked-vs-detected dispositions,
+and open triage items. Each entry is labelled **🔴 active**, **🟡 quiet**, or
+**⚪ dormant** — and crucially it **also lists dormant entries** (a watched C2
+going silent is itself a finding, invisible to every other report). Because the
+watchlist is observational, **dismissed** alerts are kept: acknowledging an alert
+as noise doesn't mean the target was inactive. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/watchlist-activity?hours=N` → the structured model **plus** rendered Markdown.
+- `GET /api/watchlist-activity.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --watchlist 24` (or `npm run watchlist`) → print the Markdown to stdout.
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

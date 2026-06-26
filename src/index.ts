@@ -9,6 +9,7 @@
  *   node src/index.ts --profile <ip>  # offline single-IP profile report (Markdown)
  *   node src/index.ts --assets 24     # offline internal-asset exposure scoreboard (Markdown)
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
+ *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -34,6 +35,7 @@ import { buildComparison } from "./analytics/compare.ts";
 import { buildProfile } from "./analytics/profile.ts";
 import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
+import { buildWatchlist } from "./analytics/watchlist.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -306,6 +308,22 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown tuning report to stdout.
       console.log(buildTuning(hours, 40, Date.now()).markdown);
+      return;
+    }
+    const watchlistIdx = argv.findIndex((a) => a === "--watchlist" || a.startsWith("--watchlist="));
+    if (watchlistIdx !== -1) {
+      const inline = argv[watchlistIdx]!.split("=")[1];
+      const next = argv[watchlistIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --watchlist hours: "${raw}". Use e.g. --watchlist 24`);
+        process.exit(2);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown watchlist activity report to stdout.
+      console.log(buildWatchlist(hours, 100, Date.now()).markdown);
       return;
     }
     if (args.has("--web")) {
