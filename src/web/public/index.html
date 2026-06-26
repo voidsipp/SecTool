@@ -1012,7 +1012,7 @@ function wireActions(id, a, triage) {
     }
     if (j.firewallBlocks) {
       const fb = j.firewallBlocks.events.map(e=>`${fmt(e.time)}  [${e.severity||'-'}]  ${e.key||''}  ${e.src||'?'} → ${e.dst||'?'}`).join("\n");
-      html += `<div class="muted" style="margin-top:10px">🛡️ Firewall blocks involving this host (±${j.firewallBlocks.windowHours}h): ${j.firewallBlocks.count}</div><pre>${esc(fb||"(none — this host was not blocked by a firewall/IPS rule in the window)")}</pre>`;
+      html += `<div class="muted" style="margin-top:10px">🛡️ Firewall blocks involving this host (±${j.firewallBlocks.windowHours}h): ${j.firewallBlocks.count}</div><pre>${esc(fb||"(none — this host was not blocked by a firewall/IPS rule in the window)")}</pre>${j.firewallBlocks.note?`<div class="muted">${esc(j.firewallBlocks.note)}</div>`:""}`;
     }
     if (j.connections && j.connections.lines.length) {
       html += `<div class="muted" style="margin-top:10px">Active connections (${esc(j.connections.ip)}): ${j.connections.count}</div><pre>${esc(j.connections.lines.join("\n"))}</pre>`;

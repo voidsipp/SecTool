@@ -365,6 +365,105 @@ export interface FirewallBlocksResult {
   windowHours: number;
   count: number;
   events: EventRow[];
+  /**
+   * Human-readable triage line for the block snapshot. When there are no blocks
+   * it says so (this host wasn't dropped by a firewall/IPS rule in the window);
+   * when blocks *are* present it summarizes them — block count, distinct peers,
+   * in/out balance relative to the host, the rule-verb and severity mix, and —
+   * the sharpest signal — how the blocks sit in *time* relative to the alert
+   * (nearest block, and how many fell before vs after it). That tells the
+   * operator whether the gateway was actively dropping this threat *around* the
+   * alert (corroborating a live event) or only well outside the window (stale /
+   * unrelated), without scanning the raw event rows.
+   */
+  note?: string;
+}
+
+/** Phrase a signed millisecond offset from the alert time in compact, human terms. */
+function relativeToAlert(deltaMs: number): string {
+  if (deltaMs === 0) return "at the alert time";
+  const abs = Math.abs(deltaMs);
+  const dir = deltaMs < 0 ? "before" : "after";
+  if (abs < 60_000) return `just ${dir} the alert`;
+  const mins = Math.round(abs / 60_000);
+  if (mins < 90) return `${mins}m ${dir} the alert`;
+  const hrs = abs / 3_600_000;
+  return `${hrs < 10 ? hrs.toFixed(1) : Math.round(hrs)}h ${dir} the alert`;
+}
+
+/**
+ * Summarize firewall/IPS block events into a one-line triage note for `hosts`.
+ * Each event carries src/dst/key/severity/time; we attribute direction relative
+ * to the host(s), tally the distinct peers blocked, fold the rule key down to its
+ * block verb (BLOCK/DROP/DENY) plus the severity mix, and — most usefully —
+ * locate the blocks in time around `timeMs` (the alert). Returns undefined when
+ * there are no events so the caller can fall back to its generic phrasing.
+ */
+function summarizeFirewallBlocks(
+  events: EventRow[],
+  hosts: Set<string>,
+  timeMs: number,
+): string | undefined {
+  if (events.length === 0) return undefined;
+
+  let inbound = 0;
+  let outbound = 0;
+  let before = 0;
+  let after = 0;
+  let nearest: number | undefined;
+  const peers = new Set<string>();
+  const verbCounts = new Map<string, number>();
+  const sevCounts = new Map<string, number>();
+
+  for (const e of events) {
+    const srcLocal = e.src !== undefined && hosts.has(e.src);
+    const dstLocal = e.dst !== undefined && hosts.has(e.dst);
+    if (srcLocal && !dstLocal) {
+      outbound++;
+      if (e.dst) peers.add(e.dst);
+    } else if (dstLocal && !srcLocal) {
+      inbound++;
+      if (e.src) peers.add(e.src);
+    } else {
+      // Both/neither are our host(s) — still credit the far side as a peer.
+      const peer = srcLocal ? e.dst : e.src;
+      if (peer) peers.add(peer);
+    }
+
+    // Collapse the rule key to its block verb so TRAFFIC_BLOCKED, FW_DROP, etc.
+    // group together; keep the raw key only when no verb is recognizable.
+    const verb = /BLOCK|DROP|DENY/i.exec(e.key ?? "")?.[0]?.toUpperCase() ?? e.key;
+    if (verb) verbCounts.set(verb, (verbCounts.get(verb) ?? 0) + 1);
+
+    if (e.severity) sevCounts.set(e.severity, (sevCounts.get(e.severity) ?? 0) + 1);
+
+    if (typeof e.time === "number") {
+      const delta = e.time - timeMs;
+      if (delta < 0) before++;
+      else after++;
+      if (nearest === undefined || Math.abs(delta) < Math.abs(nearest)) nearest = delta;
+    }
+  }
+
+  const verbMix = [...verbCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([verb, count]) => `${verb}×${count}`);
+  const sevMix = [...sevCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([sev, count]) => `${sev}×${count}`);
+
+  const peerWord = peers.size === 1 ? "peer" : "peers";
+  let note = `${events.length} firewall block${events.length === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
+  if (outbound || inbound) note += ` (${outbound} out / ${inbound} in)`;
+  if (verbMix.length) note += `; ${verbMix.join(", ")}`;
+  if (sevMix.length) note += `; severity ${sevMix.join(", ")}`;
+  if (nearest !== undefined) {
+    note += `; nearest ${relativeToAlert(nearest)}`;
+    if (before && after) note += ` (${before} before / ${after} after)`;
+  }
+  return note + ".";
 }
 
 /**
@@ -399,7 +498,15 @@ export async function firewallBlocks(
   } catch {
     /* ignore */
   }
-  return { windowHours: win, count: events.length, events };
+  return {
+    windowHours: win,
+    count: events.length,
+    events,
+    note:
+      events.length === 0
+        ? `No firewall/IPS blocks involving ${valid.join(", ") || "this host"} in the ±${win}h window.`
+        : summarizeFirewallBlocks(events, new Set(valid), timeMs),
+  };
 }
 
 export interface FlowRow {
