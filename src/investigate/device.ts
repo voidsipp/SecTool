@@ -410,9 +410,20 @@ export interface ListenerAudit {
    */
   corroborated?: number;
   /**
+   * Number of network-reachable sensitive services the gateway's NetFlow proves
+   * were reached from a *public* peer (each such listener has
+   * `observedInbound.external === true`). This is the hardest internet-exposure
+   * signal the audit can produce — a sensitive service with a recorded public
+   * connection — so it leads the `note`. Present (and > 0) only when at least one
+   * fired; a subset of `risky`.
+   */
+  internetExposed?: number;
+  /**
    * Human-readable caveats about this audit, joined into one string. Leads with
-   * a summary of any network-reachable sensitive services found (so the operator
-   * sees what to lock down without scanning the list), and/or notes that the
+   * any sensitive services NetFlow proves were reached from a public peer (the
+   * hardest internet-exposure signal; see `internetExposed`), then a summary of
+   * all network-reachable sensitive services found (so the operator sees what to
+   * lock down without scanning the list), and/or notes that the
    * agent couldn't report bind addresses — in which case exposure is "unknown".
    * When bind data is missing, the note also reports what the gateway's NetFlow
    * could (or couldn't) corroborate about those ports' reachability, so an
@@ -686,6 +697,12 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   // Lead with the actionable takeaway: name the dangerous, network-reachable
   // services so they can't be lost among a long listener list.
   const risky = listeners.filter((l) => l.risk);
+  // The sharpest subset: sensitive services the gateway's NetFlow proves were
+  // reached from a *public* peer (not just bound to a network interface). That is
+  // concrete evidence of internet exposure — the listener-audit equivalent of the
+  // egress audit's bypassed-blocklist hit — so it must lead the note, ahead of the
+  // broader "network-reachable" set, and it's also exported structurally.
+  const internetExposed = risky.filter((l) => l.observedInbound?.external);
   if (risky.length > 0) {
     const names = [
       ...new Set(risky.map((l) => RISKY_SERVICES[l.port]?.name ?? `port ${l.port}`)),
@@ -693,6 +710,15 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     notes.unshift(
       `${risky.length} network-reachable sensitive service(s) detected (${names.join(", ")}) — ` +
         `review whether each should be exposed off-host.`,
+    );
+  }
+  if (internetExposed.length > 0) {
+    const exposedNames = [
+      ...new Set(internetExposed.map((l) => RISKY_SERVICES[l.port]?.name ?? `port ${l.port}`)),
+    ];
+    notes.unshift(
+      `${internetExposed.length} sensitive service(s) confirmed reached from a public peer ` +
+        `in gateway NetFlow (${exposedNames.join(", ")}) — treat as internet-exposed and lock down immediately.`,
     );
   }
 
@@ -705,6 +731,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     listeners,
     agentVersion,
     corroborated: corroborated > 0 ? corroborated : undefined,
+    internetExposed: internetExposed.length > 0 ? internetExposed.length : undefined,
     note: notes.length > 0 ? notes.join(" ") : undefined,
   };
 }
