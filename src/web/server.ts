@@ -28,6 +28,8 @@
  *   GET  /api/rhythm.md?hours=N&tz=M -> the same rhythm report as a downloadable .md file
  *   GET  /api/backlog?hours=N       -> triage SLA backlog (open/overdue queue + throughput; model + Markdown)
  *   GET  /api/backlog.md?hours=N    -> the same backlog report as a downloadable .md file
+ *   GET  /api/novelty?hours=N       -> first-seen / novelty report (new src/dst/signatures; model + Markdown)
+ *   GET  /api/novelty.md?hours=N    -> the same novelty report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -92,6 +94,7 @@ import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
 import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
 import { buildBacklog, backlogFilename } from "../analytics/backlog.ts";
+import { buildNovelty, noveltyFilename } from "../analytics/novelty.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -690,6 +693,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${backlogFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- first-seen / novelty (what is genuinely NEW vs all retained history) ---
+      if (method === "GET" && path === "/api/novelty") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        return send(res, 200, buildNovelty(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/novelty.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const now = Date.now();
+        const { markdown } = buildNovelty(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${noveltyFilename(now)}"`,
         });
         res.end(markdown);
         return;
