@@ -205,6 +205,14 @@ export interface Listener {
   risk: boolean;
   /** Human-readable reasons the listener was flagged (empty when not risky). */
   riskReasons: string[];
+  /**
+   * Set only when the agent couldn't report this port's bind address (so
+   * `exposure` is "unknown") but the gateway's collected NetFlow shows the port
+   * accepted at least one off-host connection — hard proof it's network-reachable
+   * regardless of the missing bind data. `external` is true when one of those
+   * peers was a public IP; `peers` is the distinct off-host source count.
+   */
+  observedInbound?: { external: boolean; peers: number };
 }
 
 export interface ListenerAudit {
@@ -219,12 +227,21 @@ export interface ListenerAudit {
   /** Installed agent version, resolved from /health when bind data was missing. */
   agentVersion?: string;
   /**
+   * Number of listeners whose exposure was unknown (no bind address) but which
+   * collected NetFlow proves are network-reachable, by showing an off-host peer
+   * connecting into the port. Present (and > 0) only when that corroboration
+   * fired; see each listener's `observedInbound`.
+   */
+  corroborated?: number;
+  /**
    * Human-readable caveats about this audit, joined into one string. Leads with
    * a summary of any network-reachable sensitive services found (so the operator
    * sees what to lock down without scanning the list), and/or notes that the
-   * agent couldn't report bind addresses — in which case exposure is "unknown"
-   * and risk classification is degraded (see `agentVersion`). Undefined when
-   * there is nothing to flag.
+   * agent couldn't report bind addresses — in which case exposure is "unknown".
+   * When bind data is missing, the note also reports what the gateway's NetFlow
+   * could (or couldn't) corroborate about those ports' reachability, so an
+   * "unknown" exposure still yields an actionable takeaway (see `agentVersion`
+   * and `corroborated`). Undefined when there is nothing to flag.
    */
   note?: string;
 }
@@ -300,6 +317,50 @@ function classifyExposure(localAddr: string | undefined): Listener["exposure"] {
   return "specific";
 }
 
+/**
+ * Traffic-based fallback for when the agent can't report bind addresses. The
+ * gateway's collected NetFlow records connections crossing it, so any flow *into*
+ * host:port is proof the port accepted an off-host connection — loopback traffic
+ * never reaches the gateway. That lets us recover exposure the agent couldn't
+ * surface. We only ever read this as positive evidence: NetFlow is packet-sampled
+ * and blind to intra-subnet L2 traffic, so the *absence* of a flow never proves a
+ * port is private. Returns the set of reachable ports keyed by port number, plus
+ * whether a flow store was even available to consult.
+ */
+function flowExposureEvidence(
+  host: string,
+  hours = 24,
+): { storeActive: boolean; reachablePorts: Map<number, { external: boolean; peers: number }> } {
+  const reachablePorts = new Map<number, { external: boolean; peers: number }>();
+  const store = getActiveFlowStore();
+  if (!store) return { storeActive: false, reachablePorts };
+
+  const target = normalizeIp(host);
+  const now = Date.now();
+  const since = now - Math.min(Math.max(1, Math.floor(hours) || 24), 168) * 3_600_000;
+  const flows = store.query([host], since, now, 200_000);
+
+  // Collect the distinct off-host source IPs seen reaching each local port.
+  const peersByPort = new Map<number, Set<string>>();
+  for (const f of flows) {
+    if (!f.dstPort || normalizeIp(f.dstIp ?? "") !== target) continue; // inbound to this host's port
+    const peer = normalizeIp(f.srcIp ?? "");
+    if (!peer || peer === target) continue; // ignore self / unlabelled flows
+    let set = peersByPort.get(f.dstPort);
+    if (!set) {
+      set = new Set();
+      peersByPort.set(f.dstPort, set);
+    }
+    set.add(peer);
+  }
+
+  for (const [port, peers] of peersByPort) {
+    const external = [...peers].some((p) => isIP(p) !== 0 && !isPrivateIp(p));
+    reachablePorts.set(port, { external, peers: peers.size });
+  }
+  return { storeActive: true, reachablePorts };
+}
+
 // Well-known services that should rarely — if ever — be reachable from the
 // network. Exposing any of these off-host is a classic lateral-movement,
 // credential-theft or data-exfiltration foothold, so we surface them as the
@@ -346,8 +407,14 @@ function classifyListenerRisk(l: Listener): string[] {
   if (l.exposure === "localhost") return [];
   const svc = RISKY_SERVICES[l.port];
   if (!svc) return [];
-  const where =
-    l.exposure === "all-interfaces"
+  // Prefer NetFlow-corroborated wording: when the bind address was missing but
+  // observed traffic proves the port is reachable, say so concretely instead of
+  // hedging with "possibly".
+  const where = l.observedInbound
+    ? l.observedInbound.external
+      ? "confirmed reachable from a public peer (seen in gateway NetFlow)"
+      : "confirmed reachable off-host (seen in gateway NetFlow)"
+    : l.exposure === "all-interfaces"
       ? "exposed on all interfaces"
       : l.exposure === "specific"
         ? "bound to a network interface"
@@ -387,6 +454,24 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   const listeners = [...byKey.values()].sort(
     (a, b) => a.port - b.port || a.proto.localeCompare(b.proto),
   );
+  // When the agent couldn't report any bind address, recover what exposure we
+  // can from observed traffic: a recorded inbound flow to host:port proves the
+  // port is network-reachable. Do this before risk classification so risky
+  // services inherit the corroborated, evidence-based wording.
+  let corroborated = 0;
+  let corroboratedExternal = 0;
+  let flowStoreActive = false;
+  if (!sawLocalAddr && listeners.length > 0) {
+    const evidence = flowExposureEvidence(host);
+    flowStoreActive = evidence.storeActive;
+    for (const l of listeners) {
+      const hit = evidence.reachablePorts.get(l.port);
+      if (!hit) continue;
+      l.observedInbound = hit;
+      corroborated++;
+      if (hit.external) corroboratedExternal++;
+    }
+  }
   // Flag dangerous, network-reachable services now that each listener's
   // exposure is final, then surface them first so they can't be missed.
   for (const l of listeners) {
@@ -406,8 +491,21 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   let agentVersion: string | undefined;
   if (!sawLocalAddr && listeners.length > 0) {
     const info = await bindExposureNote(cfg, host);
-    notes.push(info.note);
     agentVersion = info.agentVersion;
+    // Turn the "exposure is unknown" dead-end into an actionable takeaway by
+    // reporting what the gateway's NetFlow could corroborate about these ports.
+    let note = info.note;
+    if (corroborated > 0) {
+      note +=
+        ` However, the gateway's NetFlow recorded off-host connections to ${corroborated} of these port(s)` +
+        (corroboratedExternal > 0 ? `, ${corroboratedExternal} from a public peer,` : "") +
+        ` confirming they are network-reachable regardless — see the flagged listeners.`;
+    } else if (flowStoreActive) {
+      note +=
+        ` Collected NetFlow shows no off-host connections to these ports, but flow data is` +
+        ` packet-sampled and blind to intra-subnet traffic, so that is not proof they are private.`;
+    }
+    notes.push(note);
   }
   // Lead with the actionable takeaway: name the dangerous, network-reachable
   // services so they can't be lost among a long listener list.
@@ -430,6 +528,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     risky: risky.length,
     listeners,
     agentVersion,
+    corroborated: corroborated > 0 ? corroborated : undefined,
     note: notes.length > 0 ? notes.join(" ") : undefined,
   };
 }

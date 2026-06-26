@@ -1292,10 +1292,17 @@ function renderTraffic(j){
 function renderListeners(j){
   if (!(j.listeners||[]).length) return '<div class="empty">No listening sockets reported by the agent.</div>';
   const EXP={'all-interfaces':['ALL IFACES','var(--critical,#ff5c7c)'],'localhost':['LOCALHOST','var(--muted)'],'specific':['BOUND','var(--accent)'],'unknown':['?','var(--muted)']};
-  const row=l=>{ const e=EXP[l.exposure]||EXP.unknown; return `<tr style="${l.risk?'background:rgba(255,92,124,.08)':''}" title="${esc((l.riskReasons||[]).join('; '))}">
+  const row=l=>{ const e=EXP[l.exposure]||EXP.unknown;
+    // When the agent couldn't report a bind address but NetFlow proved the port
+    // is reachable off-host, show that recovered evidence instead of a bare "?".
+    const oi=l.observedInbound;
+    const expBadge=oi
+      ? `<span class="badge" style="background:${oi.external?'var(--critical,#ff5c7c)':'var(--high,#ff9e3d)'}" title="No bind address from agent; gateway NetFlow saw ${oi.peers} off-host peer(s) — ${oi.external?'including a public IP':'LAN only'}">${oi.external?'NET (PUBLIC)':'NET (LAN)'}</span>`
+      : `<span class="badge" style="background:${e[1]}">${e[0]}</span>`;
+    return `<tr style="${l.risk?'background:rgba(255,92,124,.08)':''}" title="${esc((l.riskReasons||[]).join('; '))}">
     <td class="mono">${l.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${esc(l.proto)} ${l.port}</td>
     <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
-    <td><span class="badge" style="background:${e[1]}">${e[0]}</span></td>
+    <td>${expBadge}</td>
     <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td></tr>`; };
   let h=`<div class="muted" style="margin-bottom:8px">${j.count} listening service(s)${j.risky?` · <span style="color:var(--critical,#ff5c7c)">${j.risky} risky</span>`:''}${j.exposed?` · <span style="color:var(--critical,#ff5c7c)">${j.exposed} on all interfaces</span>`:''}</div>`;
   h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Port</th><th>Process</th><th>Exposure</th><th>Binary</th></tr></thead><tbody>${j.listeners.map(row).join("")}</tbody></table>`;
