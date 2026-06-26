@@ -933,6 +933,71 @@ export interface SurroundingResult {
   dns: DnsResult | null;
   firewallBlocks: FirewallBlocksResult | null;
   flows: FlowsResult;
+  /**
+   * Top-level triage line for the investigation overview. `surrounding` joins the
+   * window's logged alert events with the live per-host snapshots (connections,
+   * DNS, firewall blocks, flows), each of which carries its own note — but the
+   * composite had none, forcing the operator to open every sub-view to learn
+   * whether it held anything. This rolls the picture into one line: the
+   * logged-event tail (count, severity mix, and how the nearest event sits in
+   * time relative to the alert) plus a compact "live snapshot" of which sub-views
+   * actually have content, so the operator knows where to look first.
+   */
+  note?: string;
+}
+
+/**
+ * Compose the top-level triage note for a `surrounding` snapshot from the
+ * window's logged events and the already-collected per-host sub-snapshots.
+ * Summarizes the event tail (count, severity mix, nearest-to-alert timing) and
+ * appends a compact pointer at which live snapshots hold content. The collector
+ * caveat is preserved so "flow collector off" reads distinctly from a host with
+ * zero flows.
+ */
+function summarizeSurrounding(
+  events: EventRow[],
+  timeMs: number,
+  windowMinutes: number,
+  conn: ConnectionsResult | null,
+  dns: DnsResult | null,
+  blocks: FirewallBlocksResult | null,
+  flows: FlowsResult,
+): string {
+  const clauses: string[] = [];
+
+  if (events.length === 0) {
+    clauses.push(`No other logged events in the ±${windowMinutes}m window`);
+  } else {
+    const sevCounts = new Map<string, number>();
+    let nearest: number | undefined;
+    for (const e of events) {
+      const sev = (e.severity ?? "").toString().trim().toLowerCase() || "unknown";
+      sevCounts.set(sev, (sevCounts.get(sev) ?? 0) + 1);
+      if (typeof e.time === "number") {
+        const delta = e.time - timeMs;
+        if (nearest === undefined || Math.abs(delta) < Math.abs(nearest)) nearest = delta;
+      }
+    }
+    const sevMix = [...sevCounts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([sev, count]) => `${sev}×${count}`);
+    let clause = `${events.length} logged event${events.length === 1 ? "" : "s"} in the ±${windowMinutes}m window (${sevMix.join(", ")})`;
+    if (nearest !== undefined) clause += `; nearest ${relativeToAlert(nearest)}`;
+    clauses.push(clause);
+  }
+
+  // Point at which live per-host snapshots actually hold content, so the operator
+  // knows which sub-view to open first. Omit a sub-view entirely when it failed
+  // to collect (null), but keep the flow collector's off-state explicit.
+  const snapshot: string[] = [];
+  if (conn) snapshot.push(`${conn.count} active session${conn.count === 1 ? "" : "s"}`);
+  if (blocks) snapshot.push(`${blocks.count} firewall block${blocks.count === 1 ? "" : "s"}`);
+  if (!flows.available) snapshot.push("flow collector off");
+  else snapshot.push(`${flows.count} flow${flows.count === 1 ? "" : "s"}`);
+  if (dns) snapshot.push(`${dns.total} DNS quer${dns.total === 1 ? "y" : "ies"}`);
+  if (snapshot.length) clauses.push(`live snapshot: ${snapshot.join(", ")}`);
+
+  return clauses.join(". ") + ".";
 }
 
 /**
@@ -974,12 +1039,14 @@ export async function surrounding(
     firewallBlocks(ips, timeMs, 24).catch(() => null),
   ]);
 
+  const flows = flowsAround(timeMs, ips, win);
   return {
     windowMinutes: win,
     events,
     connections: conn,
     dns,
     firewallBlocks: blocks,
-    flows: flowsAround(timeMs, ips, win),
+    flows,
+    note: summarizeSurrounding(events, timeMs, win, conn, dns, blocks, flows),
   };
 }
