@@ -139,6 +139,15 @@ export interface Config {
     maxHosts: number;
     subnets: string[];
   };
+  deploy: {
+    enabled: boolean;
+    sshUser: string;
+    sshPort: number;
+    identityFile?: string;
+    serverIp?: string;
+    concurrency: number;
+    timeoutMs: number;
+  };
 }
 
 class ConfigError extends Error {}
@@ -339,6 +348,20 @@ export function loadConfig(): Config {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+    },
+    deploy: {
+      // Pushing software onto other machines is sensitive — opt-in only.
+      enabled: bool("DEPLOY_ENABLED", false),
+      sshUser: str("DEPLOY_SSH_USER", "root"),
+      sshPort: int("DEPLOY_SSH_PORT", 22),
+      // Defaults to the same key SecTool uses for the UDM (set up via --setup-ssh)
+      // if present; falls back to the agent's SSH default key/agent otherwise.
+      identityFile: optStr("DEPLOY_SSH_KEY"),
+      // The IP/host the *target* device uses to reach SecTool's agent dist server.
+      // Auto-detected from local interfaces (same-subnet preferred) when unset.
+      serverIp: optStr("DEPLOY_SERVER_IP"),
+      concurrency: int("DEPLOY_CONCURRENCY", 4),
+      timeoutMs: int("DEPLOY_TIMEOUT_MS", 120000),
     },
   };
 }
