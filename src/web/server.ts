@@ -46,6 +46,8 @@
  *   GET  /api/persist.md?hours=N    -> the same persistence report as a downloadable .md file
  *   GET  /api/edges?hours=N         -> attack-edge / lateral-movement (directed src→dst pairs; model + Markdown)
  *   GET  /api/edges.md?hours=N      -> the same attack-edge report as a downloadable .md file
+ *   GET  /api/notify?hours=N        -> notification audit / alert-fatigue (delivery coverage + signal gaps; model + Markdown)
+ *   GET  /api/notify.md?hours=N     -> the same notification-audit report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -118,6 +120,7 @@ import { buildSpread, spreadFilename } from "../analytics/spread.ts";
 import { buildSurge, surgeFilename } from "../analytics/surge.ts";
 import { buildPersistence, persistenceFilename } from "../analytics/persistence.ts";
 import { buildEdges, edgesFilename } from "../analytics/edges.ts";
+import { buildNotify, notifyFilename } from "../analytics/notify.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -915,6 +918,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${edgesFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- notification audit / alert-fatigue (delivery coverage + signal gaps) ---
+      if (method === "GET" && path === "/api/notify") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildNotify(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/notify.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildNotify(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${notifyFilename(now)}"`,
         });
         res.end(markdown);
         return;
