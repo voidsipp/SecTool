@@ -185,6 +185,10 @@ export interface Listener {
   pids: number[];
   path: string;
   exposure: "all-interfaces" | "localhost" | "specific" | "unknown";
+  /** True when this is a known-sensitive service reachable off-host. */
+  risk: boolean;
+  /** Human-readable reasons the listener was flagged (empty when not risky). */
+  riskReasons: string[];
 }
 
 export interface ListenerAudit {
@@ -193,6 +197,8 @@ export interface ListenerAudit {
   error?: string;
   count?: number;
   exposed?: number;
+  /** Listeners flagged as a dangerous, network-reachable attack surface. */
+  risky?: number;
   listeners?: Listener[];
   note?: string;
 }
@@ -203,6 +209,61 @@ function classifyExposure(localAddr: string | undefined): Listener["exposure"] {
   if (WILDCARD.has(a)) return "all-interfaces";
   if (a.startsWith("127.") || a === "::1" || a === "[::1]") return "localhost";
   return "specific";
+}
+
+// Well-known services that should rarely — if ever — be reachable from the
+// network. Exposing any of these off-host is a classic lateral-movement,
+// credential-theft or data-exfiltration foothold, so we surface them as the
+// listener equivalent of the egress audit's threat-intel "risk" flag. Keyed by
+// port; the reason fragment is shown verbatim to the operator.
+const RISKY_SERVICES: Record<number, { name: string; why: string }> = {
+  21: { name: "FTP", why: "plaintext file transfer" },
+  23: { name: "Telnet", why: "plaintext remote shell" },
+  69: { name: "TFTP", why: "unauthenticated file transfer" },
+  111: { name: "rpcbind", why: "RPC portmapper" },
+  135: { name: "MSRPC", why: "Windows RPC endpoint mapper" },
+  139: { name: "NetBIOS", why: "legacy SMB session service" },
+  161: { name: "SNMP", why: "device management, weak community strings" },
+  389: { name: "LDAP", why: "directory service, often unencrypted" },
+  445: { name: "SMB", why: "file sharing, ransomware vector" },
+  512: { name: "rexec", why: "plaintext remote execution" },
+  513: { name: "rlogin", why: "plaintext remote login" },
+  514: { name: "rsh", why: "plaintext remote shell" },
+  873: { name: "rsync", why: "unauthenticated file sync" },
+  1433: { name: "MSSQL", why: "database, should not face the network" },
+  1521: { name: "Oracle DB", why: "database, should not face the network" },
+  2049: { name: "NFS", why: "network file share" },
+  2375: { name: "Docker API", why: "unauthenticated container root" },
+  2376: { name: "Docker API", why: "container control plane" },
+  2379: { name: "etcd", why: "cluster key/value store" },
+  3306: { name: "MySQL", why: "database, should not face the network" },
+  3389: { name: "RDP", why: "remote desktop, brute-force target" },
+  5432: { name: "PostgreSQL", why: "database, should not face the network" },
+  5900: { name: "VNC", why: "remote desktop, often weak auth" },
+  5984: { name: "CouchDB", why: "database, default-open in old versions" },
+  5985: { name: "WinRM", why: "Windows remote management" },
+  5986: { name: "WinRM", why: "Windows remote management" },
+  6379: { name: "Redis", why: "database, no auth by default" },
+  6443: { name: "Kubernetes API", why: "cluster control plane" },
+  9200: { name: "Elasticsearch", why: "search index, default-open" },
+  10250: { name: "kubelet", why: "node API, can exec into pods" },
+  11211: { name: "memcached", why: "cache, no auth, DDoS amplifier" },
+  27017: { name: "MongoDB", why: "database, default-open in old versions" },
+};
+
+// A listener is risky when a sensitive service is bound somewhere reachable from
+// off the host. Localhost-only bindings are safe regardless of the service.
+function classifyListenerRisk(l: Listener): string[] {
+  if (l.exposure === "localhost") return [];
+  const svc = RISKY_SERVICES[l.port];
+  if (!svc) return [];
+  const where =
+    l.exposure === "all-interfaces"
+      ? "exposed on all interfaces"
+      : l.exposure === "specific"
+        ? "bound to a network interface"
+        : "possibly network-exposed (agent can't confirm the bind address)";
+  return [`${svc.name} (${svc.why}) ${where}`];
 }
 
 export async function listenerAudit(cfg: Config, host: string): Promise<ListenerAudit> {
@@ -224,7 +285,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     const key = `${c.proto}|${c.localPort}|${proc}`;
     let l = byKey.get(key);
     if (!l) {
-      l = { proto: c.proto || "?", port: c.localPort, process: proc, pids: [], path: c.path || "", exposure: classifyExposure(c.localAddr) };
+      l = { proto: c.proto || "?", port: c.localPort, process: proc, pids: [], path: c.path || "", exposure: classifyExposure(c.localAddr), risk: false, riskReasons: [] };
       byKey.set(key, l);
     }
     if (c.pid && !l.pids.includes(c.pid)) l.pids.push(c.pid);
@@ -237,11 +298,24 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   const listeners = [...byKey.values()].sort(
     (a, b) => a.port - b.port || a.proto.localeCompare(b.proto),
   );
+  // Flag dangerous, network-reachable services now that each listener's
+  // exposure is final, then surface them first so they can't be missed.
+  for (const l of listeners) {
+    l.riskReasons = classifyListenerRisk(l);
+    l.risk = l.riskReasons.length > 0;
+  }
+  listeners.sort(
+    (a, b) =>
+      Number(b.risk) - Number(a.risk) ||
+      a.port - b.port ||
+      a.proto.localeCompare(b.proto),
+  );
   return {
     ok: true,
     host: r.host,
     count: listeners.length,
     exposed: listeners.filter((l) => l.exposure === "all-interfaces").length,
+    risky: listeners.filter((l) => l.risk).length,
     listeners,
     note: sawLocalAddr ? undefined : "Update the agent (v1.0.2+) to see which interface each port is bound to.",
   };
