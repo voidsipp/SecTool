@@ -756,7 +756,74 @@ export interface RelatedActivityResult {
   flows: FlowRow[];
   events: EventRow[];
   dataRange: { earliest: number | null; latest: number | null };
+  /**
+   * Human-readable triage line for the related-activity snapshot. This view is
+   * unique in joining collected flows with logged alert/block events for one IP
+   * over a potentially long window, so the note reports both: the flow shape —
+   * flow count, distinct peers, the bytes moved each way (the sharpest
+   * exfiltration signal in flow data) and the heaviest correspondents by volume
+   * (likely exfil destinations) — and the logged-event tail (count and severity
+   * mix). The collector-state caveats are preserved, so "no flows" still reads
+   * as collector-off vs forward-only-collection rather than vanishing, and any
+   * logged events are summarized even when no flows were captured.
+   */
   note?: string;
+}
+
+/**
+ * Compose the human-readable triage note for a related-activity snapshot from
+ * the already-aggregated flow tallies and the logged events. Reports the flow
+ * shape (count, distinct peers, bytes each way, heaviest peers by volume) and
+ * the logged-event tail (count + severity mix), while preserving the collector
+ * caveats so the operator can tell "collector off" / "nothing collected yet"
+ * apart from a genuinely quiet host. `peers` is expected pre-sorted by bytes
+ * descending (as produced by `relatedActivity`).
+ */
+function summarizeRelatedActivity(
+  storeRunning: boolean,
+  totalFlows: number,
+  bytesOut: number,
+  bytesIn: number,
+  distinctPeers: number,
+  peers: Array<{ peer: string; bytes: number }>,
+  events: EventRow[],
+): string {
+  const clauses: string[] = [];
+
+  if (!storeRunning) {
+    clauses.push("Flow collector is not running — only logged events are shown");
+  } else if (totalFlows === 0) {
+    clauses.push(
+      "No collected flows to/from this IP yet (collection is forward-only; expand the window or wait for traffic)",
+    );
+  } else {
+    const peerWord = distinctPeers === 1 ? "peer" : "peers";
+    let flowClause = `${totalFlows} flow${totalFlows === 1 ? "" : "s"} across ${distinctPeers} ${peerWord}`;
+    if (bytesOut || bytesIn) flowClause += `; ${humanBytes(bytesOut)} out / ${humanBytes(bytesIn)} in`;
+    // Name the heaviest correspondents by bytes — "who is this host talking to
+    // most", and the most likely exfiltration destinations. `peers` is already
+    // sorted by bytes descending; skip zero-byte peers so the list stays signal.
+    const topPeers = peers
+      .filter((p) => p.bytes > 0)
+      .slice(0, 3)
+      .map((p) => `${p.peer} (${humanBytes(p.bytes)})`);
+    if (topPeers.length) flowClause += `; heaviest ${topPeers.join(", ")}`;
+    clauses.push(flowClause);
+  }
+
+  if (events.length > 0) {
+    const sevCounts = new Map<string, number>();
+    for (const e of events) {
+      const sev = (e.severity ?? "").toString().trim().toLowerCase() || "unknown";
+      sevCounts.set(sev, (sevCounts.get(sev) ?? 0) + 1);
+    }
+    const sevMix = [...sevCounts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([sev, count]) => `${sev}×${count}`);
+    clauses.push(`${events.length} logged event${events.length === 1 ? "" : "s"} (${sevMix.join(", ")})`);
+  }
+
+  return clauses.join(". ") + ".";
 }
 
 /**
@@ -855,11 +922,7 @@ export async function relatedActivity(
     flows,
     events,
     dataRange,
-    note: !store
-      ? "Flow collector is not running — only logged events are shown."
-      : raw.length === 0
-        ? "No collected flows to/from this IP yet (collection is forward-only; expand the window or wait for traffic)."
-        : undefined,
+    note: summarizeRelatedActivity(!!store, raw.length, bytesOut, bytesIn, peerMap.size, peers, events),
   };
 }
 
