@@ -13,6 +13,7 @@
  *   node src/index.ts --rhythm 168    # offline temporal activity rhythm report (Markdown)
  *   node src/index.ts --backlog 720   # offline triage SLA backlog report (Markdown)
  *   node src/index.ts --novelty 168   # offline first-seen / novelty report (Markdown)
+ *   node src/index.ts --killchain 168 # offline kill-chain / attack-stage report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,7 @@ import { buildWatchlist } from "./analytics/watchlist.ts";
 import { buildRhythm } from "./analytics/rhythm.ts";
 import { buildBacklog } from "./analytics/backlog.ts";
 import { buildNovelty } from "./analytics/novelty.ts";
+import { buildKillChain } from "./analytics/killchain.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -402,6 +404,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown novelty report to stdout.
       console.log(buildNovelty(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const killchainIdx = argv.findIndex((a) => a === "--killchain" || a.startsWith("--killchain="));
+    if (killchainIdx !== -1) {
+      const inline = argv[killchainIdx]!.split("=")[1];
+      const next = argv[killchainIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so multi-stage progression has room to show up.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --killchain hours: "${raw}". Use e.g. --killchain 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-host progression table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown kill-chain report to stdout.
+      console.log(buildKillChain(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
