@@ -76,6 +76,15 @@ export interface TrafficPeer {
   watched?: boolean;
   /** The watchlist entry's free-form note, when the peer is watched and one exists. */
   watchNote?: string;
+  /**
+   * Destination ports this host reached this (external) peer on that are
+   * suspicious as outbound targets — remote-control backdoors, botnet C2, or
+   * services that should never traverse the WAN. The no-agent mirror of
+   * `egressAudit`'s check: a host beaconing to one of these on a public IP is a
+   * compromise signal even at trivial volume. Only set for external peers, and
+   * only when one matched. See `SUSPICIOUS_EGRESS_PORTS`.
+   */
+  suspiciousPorts?: number[];
 }
 
 export interface TrafficPort {
@@ -108,6 +117,12 @@ export interface TrafficProfile {
     blockedPeers: number;
     /** Peers whose IP matches the watchlist (see `flagged`). */
     watchedPeers: number;
+    /**
+     * External peers this host reached on a suspicious outbound destination port
+     * (backdoor/C2/should-not-traverse-WAN) — see `flagged` and each peer's
+     * `suspiciousPorts`.
+     */
+    suspiciousEgressPeers: number;
   };
   topPeers?: TrafficPeer[];
   topPorts?: TrafficPort[];
@@ -159,6 +174,15 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
       bytesOut += bytes;
       p.bytesOut += bytes;
       if (f.dstPort && !p.ports.includes(f.dstPort) && p.ports.length < 8) p.ports.push(f.dstPort);
+      // Flag suspicious *outbound* destination ports on external peers — the
+      // no-agent mirror of egressAudit's SUSPICIOUS_EGRESS_PORTS check. A host
+      // beaconing to a backdoor/C2 port on a public IP is a compromise signal
+      // even at trivial volume, and this NetFlow view is the only host-level
+      // signal available when the endpoint agent is offline. Pure local lookup.
+      if (p.external && f.dstPort && SUSPICIOUS_EGRESS_PORTS[f.dstPort]) {
+        if (!p.suspiciousPorts) p.suspiciousPorts = [];
+        if (!p.suspiciousPorts.includes(f.dstPort)) p.suspiciousPorts.push(f.dstPort);
+      }
       // The remote service contacted — most telling for "what is this host reaching".
       if (f.dstPort) {
         const key = `${f.proto ?? "?"}:${f.dstPort}`;
@@ -182,6 +206,7 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
   // explicitly watching. We tag each peer and tally the matches.
   let blockedPeers = 0;
   let watchedPeers = 0;
+  let suspiciousEgressPeers = 0;
   for (const p of peers.values()) {
     if (blockStore.has(p.ip)) {
       p.blocked = true;
@@ -193,6 +218,10 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
       if (w.note) p.watchNote = w.note;
       watchedPeers++;
     }
+    if (p.suspiciousPorts?.length) {
+      p.suspiciousPorts.sort((a, b) => a - b);
+      suspiciousEgressPeers++;
+    }
   }
 
   const topPeers = [...peers.values()]
@@ -200,9 +229,10 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
     .slice(0, 15);
   topPeers.forEach((p) => p.ports.sort((a, b) => a - b));
   // Flagged peers get their own list (ranked by volume) so a blocked/watched peer
-  // is never hidden below the 15-peer byte cut above.
+  // — or one reached on a suspicious outbound port — is never hidden below the
+  // 15-peer byte cut above (a low-volume C2 beacon is exactly what to surface).
   const flagged = [...peers.values()]
-    .filter((p) => p.blocked || p.watched)
+    .filter((p) => p.blocked || p.watched || (p.suspiciousPorts?.length ?? 0) > 0)
     .sort((a, b) => b.bytesIn + b.bytesOut - (a.bytesIn + a.bytesOut))
     .slice(0, 20);
   flagged.forEach((p) => p.ports.sort((a, b) => a - b));
@@ -225,6 +255,21 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
   }
 
   const notes: string[] = [];
+  // Lead with the strongest compromise signal: an internal host reaching a public
+  // IP on a backdoor/C2/should-not-traverse-WAN port. Name the actual ports so the
+  // takeaway is actionable without scanning the flagged list.
+  if (suspiciousEgressPeers > 0) {
+    const susPorts = [
+      ...new Set(
+        [...peers.values()].flatMap((p) => p.suspiciousPorts ?? []),
+      ),
+    ].sort((a, b) => a - b);
+    notes.push(
+      `${suspiciousEgressPeers} external peer(s) were reached on suspicious outbound port(s) ` +
+        `(${susPorts.join(", ")}) — remote-control backdoors, botnet C2, or services that should ` +
+        `never traverse the WAN; a classic compromised-host signal even at low volume. Review the flagged peers.`,
+    );
+  }
   if (blockedPeers > 0) {
     notes.push(
       `${blockedPeers} peer(s) on the firewall blocklist are still exchanging traffic with this host — ` +
@@ -247,6 +292,7 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
       externalPeers: [...peers.values()].filter((p) => p.external).length,
       blockedPeers,
       watchedPeers,
+      suspiciousEgressPeers,
     },
     topPeers,
     topPorts,
