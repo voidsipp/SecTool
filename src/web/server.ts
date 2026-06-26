@@ -15,6 +15,7 @@
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH)
  *   POST /api/discovery/deploy-all  -> push the agent to every SSH-eligible discovered host
  *   GET  /api/agents/traffic?host=  -> a device's flow footprint (peers/ports/alerts)
+ *   GET  /api/agents/ports?host=    -> a device's live port activity (gateway conntrack)
  *   GET  /api/agents/listeners?host=-> a device's listening sockets + owning process
  *   GET  /api/agents/egress?host=   -> a device's public peers + threat-intel reputation
  *
@@ -49,6 +50,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
+import { livePortActivity } from "../investigate/liveports.ts";
 import { discoverDevices } from "../investigate/discovery.ts";
 import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
@@ -242,6 +244,14 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const host = url.searchParams.get("host") ?? "";
         const hours = Number(url.searchParams.get("hours")) || 24;
         const r = trafficProfile(host, hours);
+        return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- device investigation: real-time port activity from the gateway's
+      //     conntrack table (agent-independent; works for any LAN host) ---
+      if (method === "GET" && path === "/api/agents/ports") {
+        const host = url.searchParams.get("host") ?? "";
+        const r = await livePortActivity(host);
         return send(res, r.ok ? 200 : 502, r);
       }
 
