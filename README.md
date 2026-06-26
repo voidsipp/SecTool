@@ -277,6 +277,30 @@ This complements **🔎 Search** (lists the matching alert *rows* — no roll-up
 scoring), **🎯 Campaigns** (clusters *all* attackers, not one entity), and the
 snapshot **Report** (a whole-window view, not scoped to one address).
 
+## 🖥️ Asset exposure scoreboard (`GET /api/assets[.md]`, `--assets`)
+
+The exact mirror of **🎯 Campaigns**: where Campaigns groups alerts by the
+*external attacker* to answer *"who is attacking me?"*, the asset scoreboard
+groups the **same** alert history by the **internal host** to answer the inverse —
+*"which of **my** devices should I worry about?"* For every internal host it rolls
+up its alert volume and worst severity, then makes the security-critical split
+between **outbound** alerts (the host was the **source** — a strong *possible
+compromise / beaconing* signal) and **inbound** alerts (the host was the
+**destination** — it was scanned or targeted), the external peers it touched,
+the signatures it tripped, blocked-vs-detected dispositions, open triage items,
+and a composite **0-100 exposure risk score** that weights outbound activity
+hardest. Each host gets a one-word **posture** — *compromise-suspected*,
+*targeted*, *noisy*, or *calm* — and hosts showing severe outbound traffic float
+to the top. Pure offline math over the local alert history — **no SSH, no Claude,
+no live gateway query**.
+
+- `GET /api/assets?hours=N` → the structured model **plus** rendered Markdown.
+- `GET /api/assets.md?hours=N` → the same scoreboard as a downloadable `.md` file.
+- `node src/index.ts --assets 24` (or `npm run assets`) → print the Markdown to stdout.
+
+In the dashboard it lives under the **🖥️ Assets** tab, with one-click **Watch** /
+**Safe** actions per host.
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

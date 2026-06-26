@@ -16,6 +16,7 @@
     "digest": "node src/index.ts --digest 24",
     "compare": "node src/index.ts --compare 24",
     "profile": "node src/index.ts --profile",
+    "assets": "node src/index.ts --assets 24",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
   },

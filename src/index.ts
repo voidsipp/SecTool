@@ -7,6 +7,7 @@
  *   node src/index.ts --print-config  # print the resolved config (redacted)
  *   node src/index.ts --compare 24    # offline period-over-period comparison (Markdown)
  *   node src/index.ts --profile <ip>  # offline single-IP profile report (Markdown)
+ *   node src/index.ts --assets 24     # offline internal-asset exposure scoreboard (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -30,6 +31,7 @@ import { startAgentDistServer } from "./agent/distServer.ts";
 import { runDigest } from "./digest/digest.ts";
 import { buildComparison } from "./analytics/compare.ts";
 import { buildProfile } from "./analytics/profile.ts";
+import { buildAssets } from "./analytics/assets.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -270,6 +272,22 @@ async function main(): Promise<void> {
         process.exit(2);
       }
       console.log(model.markdown);
+      return;
+    }
+    const assetsIdx = argv.findIndex((a) => a === "--assets" || a.startsWith("--assets="));
+    if (assetsIdx !== -1) {
+      const inline = argv[assetsIdx]!.split("=")[1];
+      const next = argv[assetsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --assets hours: "${raw}". Use e.g. --assets 24`);
+        process.exit(2);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown scoreboard to stdout.
+      console.log(buildAssets(hours, 50, Date.now()).markdown);
       return;
     }
     if (args.has("--web")) {
