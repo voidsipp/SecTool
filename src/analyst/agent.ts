@@ -428,6 +428,45 @@ export interface AgentResult {
   toolsUsed: string[];
   actions: AgentAction[];
   dryRun: boolean;
+  /**
+   * True when the model's first draft answer described/promised an action but
+   * called no action tool, so it was nudged to actually act (or retract the
+   * claim) before this result was finalized. Surfaced for transparency/debugging.
+   */
+  nudged: boolean;
+}
+
+/**
+ * Phrases that indicate the model *thinks* it performed or is about to perform a
+ * mutating operation: a forward-looking promise ("I'll block…", "let me create…")
+ * or a claimed completion ("done", "I've muted…", "the IP is now blocked").
+ */
+const ACTION_INTENT_RE =
+  /\b(i'?ll|i will|i'?m going to|i am going to|let me|i'?m about to|i'?ll go ahead|i'?ve|i have|i just|i shall|going to|now|has been|have been|done)\b/i;
+
+/** A mutating verb tied to one of SecTool's action tools. */
+const ACTION_VERB_RE =
+  /\b(creat(?:e|es|ed|ing)?|add(?:s|ed|ing)?|block(?:s|ed|ing)?|unblock(?:s|ed|ing)?|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|suppress(?:es|ed|ing|ion)?|mut(?:e|es|ed|ing)|safelist(?:ed|ing)?|watchlist(?:ed|ing)?|dismiss(?:es|ed|ing)?|restor(?:e|es|ed|ing)|set(?:s|ting)?|mark(?:s|ed|ing)?|triag(?:e|ed|ing))\b/i;
+
+/**
+ * Honest refusals / no-ops ("I will NOT block…", "no changes were made", "I did
+ * not act"). When the model openly says it is *not* acting it is telling the
+ * truth, so we must not nudge it into taking an action it deliberately declined.
+ */
+const NO_ACTION_RE =
+  /\b(will not|won'?t|cannot|can'?t|did not|didn'?t|do not|don'?t|not going to|decided not to|chose not|refrain|no action|no change|nothing (?:to|was|has)|did nothing|deliberately|already (?:exists|present|blocked|safelisted|suppressed|on the))\b/i;
+
+/**
+ * Detect the "promised-but-never-did-it" failure mode: the model produced a final
+ * answer that claims/promises a mutating action, yet no action tool actually ran
+ * (so `actions` is empty). Honest refusals and read-only answers are excluded.
+ */
+function claimsUnexecutedAction(answer: string, actions: AgentAction[]): boolean {
+  if (actions.length > 0) return false;
+  const a = answer.trim();
+  if (!a) return false;
+  if (NO_ACTION_RE.test(a)) return false;
+  return ACTION_INTENT_RE.test(a) && ACTION_VERB_RE.test(a);
 }
 
 /**
@@ -443,14 +482,34 @@ export async function runAgent(cfg: Config, instruction: string, opts: { dryRun?
   const system = dryRun
     ? SYSTEM + "\n\nDRY-RUN MODE: the operator is previewing. Decide and call the action tools exactly as you would for real; the system will simulate them and report what WOULD change. Do not refuse just because it's a dry-run."
     : SYSTEM;
+
+  let nudged = false;
+  // Guard against the "said it would do it but never called a tool" failure mode:
+  // if the model's final answer claims/promises a mutating action yet no action
+  // tool actually ran, push it to either perform the action now or honestly
+  // retract the claim. Bounded to a single nudge so the loop always terminates.
+  const onFinal = (answer: string): string | null => {
+    if (!claimsUnexecutedAction(answer, actions)) return null;
+    nudged = true;
+    const what = dryRun ? "simulated — nothing was previewed" : "performed — nothing was changed";
+    return (
+      `Your answer describes an action, but you did not call any action tool, so it was NOT ${what}. ` +
+      `If you intend to carry out what you described, call the appropriate action tool(s) now (e.g. ` +
+      `create_suppression, block_ip, add_safelist, add_watchlist, set_triage_status, dismiss_alert, …). ` +
+      `If you did not actually mean to make a change — because the request was informational, the desired ` +
+      `state already holds, or you deliberately declined — then reply with your final answer and do NOT ` +
+      `state or imply that any change was made.`
+    );
+  };
+
   const { answer, toolsUsed } = await summarizer.toolLoop(
     system,
     instruction,
     TOOLS,
     makeExecutor(cfg, dryRun, actions),
-    { maxTokens: 1800, maxRounds: 8 },
+    { maxTokens: 1800, maxRounds: 8, onFinal, maxNudges: 1 },
   );
-  return { answer, toolsUsed, actions, dryRun };
+  return { answer, toolsUsed, actions, dryRun, nudged };
 }
 
 export { ACTION_TOOL_NAMES };

@@ -323,6 +323,13 @@ applying anything. Firewall blocks still pass the same `blockGuard` allowlist th
 protects private/internal/gateway/safelisted IPs. Send `{"instruction": "...",
 "dryRun": true|false}` to the endpoint.
 
+To close the LLM **"said it would act but never called a tool"** gap, the agent
+self-checks its draft answer: if it claims or promises a change yet ran no action
+tool (empty audit list), it is re-prompted once to either actually invoke the
+tool(s) or honestly state that nothing was changed — so the reply can never
+describe an action that didn't happen. The response includes a `nudged` flag when
+this self-correction fired.
+
 ## 🍯 Deception / honeypots (`HONEYPOT_ENABLED`)
 
 Opens decoy services on ports nothing legitimate should touch. **Any** connection

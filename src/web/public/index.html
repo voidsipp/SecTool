@@ -1390,7 +1390,10 @@ async function sendAsk(){
     if(act){
       const dryRun = $("#agentDryRun").checked;
       j = await api("/api/agent/act",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:q,dryRun})});
-      thinking.querySelector("div").innerHTML = md(j.answer) + renderActions(j.actions);
+      const nudgeNote = j.nudged
+        ? `<div class="muted" style="margin-top:8px;font-size:11px">↻ the agent initially answered without acting and was re-prompted to ${(j.actions&&j.actions.length)?"carry out the change":"confirm it made no change"}.</div>`
+        : "";
+      thinking.querySelector("div").innerHTML = md(j.answer) + renderActions(j.actions) + nudgeNote;
     } else {
       j = await api("/api/ask",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question:q})});
       thinking.querySelector("div").innerHTML = md(j.answer) + (j.toolsUsed&&j.toolsUsed.length?`<div class="muted" style="margin-top:8px;font-size:11px">queried: ${esc([...new Set(j.toolsUsed)].join(", "))}</div>`:"");

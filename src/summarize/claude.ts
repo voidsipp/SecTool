@@ -171,19 +171,34 @@ export class Summarizer {
   /**
    * Agentic tool-use loop: Claude answers `userText` by calling the provided
    * tools (executed by `exec`) until it produces a final text answer.
+   *
+   * `opts.onFinal` lets the caller validate a would-be final answer before it is
+   * returned. It is invoked with the drafted answer and the tools used so far;
+   * returning a non-empty string injects that string as a follow-up user message
+   * and continues the loop (e.g. to force an action the model *said* it would take
+   * but never actually called a tool for). It fires at most `opts.maxNudges` times
+   * (default 0 — disabled, preserving the original single-shot behavior) so a model
+   * that keeps producing prose can never loop forever.
    */
   async toolLoop(
     systemText: string,
     userText: string,
     tools: AnalystTool[],
     exec: ToolExecutor,
-    opts: { maxTokens?: number; maxRounds?: number } = {},
+    opts: {
+      maxTokens?: number;
+      maxRounds?: number;
+      onFinal?: (answer: string, toolsUsed: string[]) => string | null | undefined;
+      maxNudges?: number;
+    } = {},
   ): Promise<{ answer: string; toolsUsed: string[] }> {
     const system = this.#useOauth
       ? [{ type: "text", text: CLAUDE_CODE_IDENTITY }, { type: "text", text: systemText }]
       : [{ type: "text", text: systemText }];
     const messages: Array<{ role: string; content: unknown }> = [{ role: "user", content: userText }];
     const toolsUsed: string[] = [];
+    const maxNudges = opts.maxNudges ?? 0;
+    let nudges = 0;
 
     for (let round = 0; round < (opts.maxRounds ?? 6); round++) {
       const data = await this.#request(
@@ -194,6 +209,14 @@ export class Summarizer {
       const toolUses = content.filter((b) => b.type === "tool_use");
       if (data.stop_reason !== "tool_use" || toolUses.length === 0) {
         const answer = content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+        if (opts.onFinal && nudges < maxNudges) {
+          const nudge = opts.onFinal(answer, toolsUsed);
+          if (nudge) {
+            nudges++;
+            messages.push({ role: "user", content: nudge });
+            continue;
+          }
+        }
         return { answer: answer || "(no answer produced)", toolsUsed };
       }
       const results = [];
