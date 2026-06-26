@@ -306,6 +306,15 @@ me most this week and are they dangerous?"*, *"Has any internal host talked to a
 VPS abroad?"*, *"Show DNS lookups containing telemetry."* Needs no extra config —
 uses your existing Claude auth. (A Discord bot can call the same endpoint.)
 
+**Conversational memory.** Both Ask and Act keep the **last few turns** of each
+chat session, so follow-ups stay in context (*"…and block that IP"*, *"now suppress
+it"*) instead of starting cold every request. Pass a stable `sessionId` with each
+request (the dashboard generates one per tab); the server retains a rolling window
+of recent messages — in-process only, never written to disk — and forgets a session
+after it goes idle. The dashboard's **↺ New chat** button clears it (`POST
+/api/chat/reset`). Tune with `CONVO_MEMORY_ENABLED`, `CONVO_MEMORY_MAX` (default 10
+messages) and `CONVO_MEMORY_TTL_MIN`.
+
 ## 🤖 Automation agent (dashboard "Act", `POST /api/agent/act`)
 
 The same chat surface has an **🤖 Act** mode backed by an *action-capable* agent
@@ -470,6 +479,9 @@ All keys live in `.env`; see **`.env.example`** for the annotated list. Highligh
 | `CORRELATION_WINDOW_SEC` | `180` | Time window for related-log gathering. |
 | `ALERT_PATTERN` | — | Optional regex an event must match to be an alert. |
 | `DISCOVERY_ENABLED` | `true` | Active LAN device sweep (Devices → 🔍 Scan LAN). |
+| `CONVO_MEMORY_ENABLED` | `true` | Ask/Act remember recent chat turns; `false` → cold every request. |
+| `CONVO_MEMORY_MAX` | `10` | Messages (user+assistant turns) retained per chat session. |
+| `CONVO_MEMORY_TTL_MIN` | `120` | Forget an idle chat session after this many minutes. |
 | `DISCOVERY_MAX_HOSTS` | `1024` | Hard cap on hosts probed per sweep. |
 | `DISCOVERY_SUBNETS` | — | Override auto-detected subnet(s), e.g. `192.168.1.0/24`. |
 | `DEPLOY_ENABLED` | `false` | Agent push-deploy to discovered hosts (Devices → ⬇ Push). |

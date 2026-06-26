@@ -33,6 +33,7 @@ import { triageStore, isTriageStatus, TRIAGE_STATUSES, type TriageStatus } from 
 import { dismissStore } from "../store/dismissed.ts";
 import { blockIp, unblockIp, blockGuard, listBlocks } from "../respond/blocker.ts";
 import { SEVERITY_ORDER, type Severity } from "../types.ts";
+import { loadHistory, recordExchange, type MemoryOpts } from "./memory.ts";
 
 const SYSTEM = `You are the automation agent embedded in "SecTool", a network-security monitoring app for a home/small-office network behind a UniFi UDM Pro.
 Unlike the read-only "Ask" analyst, you can TAKE ACTIONS on the operator's behalf by calling the mutating tools below. Use them to fulfil the operator's instruction precisely.
@@ -474,11 +475,16 @@ function claimsUnexecutedAction(answer: string, actions: AgentAction[]): boolean
  * is true, no store or firewall is modified — the returned `actions` describe what
  * would have happened.
  */
-export async function runAgent(cfg: Config, instruction: string, opts: { dryRun?: boolean } = {}): Promise<AgentResult> {
+export async function runAgent(
+  cfg: Config,
+  instruction: string,
+  opts: { dryRun?: boolean } & MemoryOpts = {},
+): Promise<AgentResult> {
   const dryRun = !!opts.dryRun;
   const actions: AgentAction[] = [];
   const summarizer = new Summarizer(cfg);
   await summarizer.preflight();
+  const history = loadHistory(cfg, opts.sessionId);
   const system = dryRun
     ? SYSTEM + "\n\nDRY-RUN MODE: the operator is previewing. Decide and call the action tools exactly as you would for real; the system will simulate them and report what WOULD change. Do not refuse just because it's a dry-run."
     : SYSTEM;
@@ -507,8 +513,11 @@ export async function runAgent(cfg: Config, instruction: string, opts: { dryRun?
     instruction,
     TOOLS,
     makeExecutor(cfg, dryRun, actions),
-    { maxTokens: 1800, maxRounds: 8, onFinal, maxNudges: 1 },
+    { maxTokens: 1800, maxRounds: 8, onFinal, maxNudges: 1, history },
   );
+  // Persist this turn so follow-ups keep context. Tag dry-run answers so the
+  // model doesn't later believe a previewed change was actually applied.
+  recordExchange(cfg, opts.sessionId, instruction, dryRun ? `[dry-run preview] ${answer}` : answer);
   return { answer, toolsUsed, actions, dryRun, nudged };
 }
 

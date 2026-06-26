@@ -172,6 +172,11 @@ export class Summarizer {
    * Agentic tool-use loop: Claude answers `userText` by calling the provided
    * tools (executed by `exec`) until it produces a final text answer.
    *
+   * `opts.history` seeds the conversation with prior turns (oldest→newest) so the
+   * model can resolve follow-up references. It must start with a `user` message
+   * and strictly alternate user/assistant (the conversation store guarantees
+   * this); it is prepended ahead of the new `userText` turn.
+   *
    * `opts.onFinal` lets the caller validate a would-be final answer before it is
    * returned. It is invoked with the drafted answer and the tools used so far;
    * returning a non-empty string injects that string as a follow-up user message
@@ -190,12 +195,16 @@ export class Summarizer {
       maxRounds?: number;
       onFinal?: (answer: string, toolsUsed: string[]) => string | null | undefined;
       maxNudges?: number;
+      history?: Array<{ role: "user" | "assistant"; content: string }>;
     } = {},
   ): Promise<{ answer: string; toolsUsed: string[] }> {
     const system = this.#useOauth
       ? [{ type: "text", text: CLAUDE_CODE_IDENTITY }, { type: "text", text: systemText }]
       : [{ type: "text", text: systemText }];
-    const messages: Array<{ role: string; content: unknown }> = [{ role: "user", content: userText }];
+    const messages: Array<{ role: string; content: unknown }> = [
+      ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+      { role: "user", content: userText },
+    ];
     const toolsUsed: string[] = [];
     const maxNudges = opts.maxNudges ?? 0;
     let nudges = 0;
