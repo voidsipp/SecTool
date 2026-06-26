@@ -351,6 +351,29 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/watchlist-activity.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --watchlist 24` (or `npm run watchlist`) → print the Markdown to stdout.
 
+## 🕒 Activity rhythm (`GET /api/rhythm[.md]`, `--rhythm`)
+
+Every other report slices the history by an *entity* (IP, host, attacker,
+signature, watched target); this one slices it by the **clock**. It answers the
+question a SOC asks when it plans coverage and hunts for automation: *when am I
+actually under attack?* It folds the stored alert history onto two time axes —
+**hour-of-day** (0–23) and **day-of-week** (Mon–Sun) — and crosses them into a
+**7×24 ASCII heat-map** that reads at a glance. From that it derives the findings
+an analyst acts on: the **peak hour** and **peak day**, how **concentrated**
+activity is in that single hour (a tight clock concentration is a fingerprint of
+an automated scanner or fixed-interval C2 **beacon** rather than organic
+traffic), a **business-hours vs off-hours** split (Mon–Fri 09:00–17:00 by
+default) — and crucially how many **medium-or-worse** detections fired
+**off-hours**, when the console is least likely to be watched (an off-hours
+critical is materially more dangerous than the same alert at 2 p.m.). Times are
+bucketed in **UTC** by default to match every other report; pass a timezone
+offset to read the rhythm in local time. Pure offline math over the local alert
+history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/rhythm?hours=N&tz=M` → the structured model **plus** rendered Markdown (`tz` = UTC offset in minutes, e.g. `-300` for US Eastern Standard; omit for UTC).
+- `GET /api/rhythm.md?hours=N&tz=M` → the same report as a downloadable `.md` file.
+- `node src/index.ts --rhythm 168 [--tz -300]` (or `npm run rhythm`) → print the Markdown to stdout (defaults to a 7-day window so every weekday is represented).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
