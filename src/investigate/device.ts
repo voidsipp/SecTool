@@ -680,7 +680,23 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   }
 
   const distinctRemote = byIp.size;
-  const top = [...byIp.values()].sort((a, b) => b.conns - a.conns).slice(0, MAX_ENRICH);
+  const all = [...byIp.values()];
+
+  // Operator-flagged peers (firewall blocklist or watchlist) are enriched and
+  // surfaced regardless of connection volume. A low-traffic beacon to a watched
+  // or blocked address is precisely the egress that must never be lost to the
+  // busiest-N enrichment cut — yet block/watch membership is a pure local join
+  // (no agent/API call), so always including these peers costs nothing extra and
+  // keeps `watchedCount`/`blocked` accurate across the whole peer set rather than
+  // just the top slice. The remaining bounded enrichment budget then goes to the
+  // busiest peers that aren't already flagged.
+  const isFlagged = (a: Agg): boolean => blockStore.has(a.ip) || watchStore.match(a.ip) !== undefined;
+  const flaggedAggs = all.filter(isFlagged);
+  const busiest = all
+    .filter((a) => !isFlagged(a))
+    .sort((a, b) => b.conns - a.conns)
+    .slice(0, Math.max(0, MAX_ENRICH - flaggedAggs.length));
+  const top = [...flaggedAggs, ...busiest];
 
   const peers: EgressPeer[] = await Promise.all(
     top.map(async (a): Promise<EgressPeer> => {
@@ -754,8 +770,11 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
         `you flagged for close monitoring; review the flagged peers.`,
     );
   }
-  if (distinctRemote > MAX_ENRICH) {
-    notes.push(`Showing the ${MAX_ENRICH} busiest of ${distinctRemote} external peers.`);
+  if (distinctRemote > peers.length) {
+    notes.push(
+      `Audited ${peers.length} of ${distinctRemote} external peers (every block/watch-listed peer ` +
+        `plus the busiest of the rest); lower-volume unflagged peers were not enriched.`,
+    );
   }
   if (degraded.length > 0) {
     notes.push(
