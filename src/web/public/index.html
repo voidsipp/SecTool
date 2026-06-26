@@ -1269,8 +1269,8 @@ async function showLivePorts(){
 }
 function renderTraffic(j){
   const s=j.summary||{};
-  const peerTags=p=>`${p.blocked?'<span class="badge" style="background:var(--critical,#ff5c7c)" title="On the firewall blocklist — still seen exchanging traffic">BLOCKED</span> ':''}${p.watched?`<span class="badge" style="background:var(--accent)" title="${esc('On the watchlist'+(p.watchNote?': '+p.watchNote:''))}">WATCH</span> `:''}`;
-  const peer=p=>`<tr style="${p.blocked?'background:rgba(255,92,124,.08)':''}">
+  const peerTags=p=>`${p.blocked?'<span class="badge" style="background:var(--critical,#ff5c7c)" title="On the firewall blocklist — still seen exchanging traffic">BLOCKED</span> ':''}${p.watched?`<span class="badge" style="background:var(--accent)" title="${esc('On the watchlist'+(p.watchNote?': '+p.watchNote:''))}">WATCH</span> `:''}${(p.suspiciousPorts||[]).length?`<span class="badge" style="background:var(--critical,#ff5c7c)" title="${esc('Reached on suspicious outbound port(s) '+p.suspiciousPorts.join(', ')+' — backdoor/C2/should-not-traverse-WAN')}">SUS :${p.suspiciousPorts.join('/')}</span> `:''}`;
+  const peer=p=>`<tr style="${(p.blocked||(p.suspiciousPorts||[]).length)?'background:rgba(255,92,124,.08)':''}">
     <td class="mono">${peerTags(p)}${esc(p.ip)}${p.external?'':' <span class="muted">(local)</span>'}</td>
     <td class="mono">${(p.protos||[]).join('/')||''}</td>
     <td class="mono">${(p.ports||[]).slice(0,6).join(', ')||''}</td>
@@ -1282,7 +1282,7 @@ function renderTraffic(j){
   const alert=a=>`<tr><td class="muted">${fmt(a.time)}</td><td>${esc(a.severity)}</td><td class="muted">${a.direction}</td><td class="mono">${esc(a.signature)}</td></tr>`;
   let h=`<div class="muted" style="margin-bottom:8px">${s.flows||0} flows over ${j.hours}h · ${s.peers||0} peers (${s.externalPeers||0} external) · ↑${bytesH(s.bytesOut)} ↓${bytesH(s.bytesIn)}</div>`;
   if (j.note) h+=`<div class="section" style="background:rgba(255,92,124,.1);border-left:3px solid var(--critical,#ff5c7c);padding:8px 10px;margin:0 0 10px;font-size:12px">⚠ ${esc(j.note)}</div>`;
-  if ((j.flagged||[]).length) h+=`<div class="muted" style="margin:6px 0 4px">Flagged peers (blocklist / watchlist)</div>
+  if ((j.flagged||[]).length) h+=`<div class="muted" style="margin:6px 0 4px">Flagged peers (blocklist / watchlist / suspicious egress port)</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Peer</th><th>Proto</th><th>Ports</th><th>Out</th><th>In</th><th>Flows</th><th>Last</th></tr></thead><tbody>${j.flagged.map(peer).join("")}</tbody></table>`;
   if (!(j.topPeers||[]).length){ return h+'<div class="empty">No flows recorded for this host in the window.</div>'; }
   h+=`<div class="muted" style="margin:6px 0 4px">Top peers</div>
