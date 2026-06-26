@@ -277,6 +277,13 @@
       <button id="discoScan">🔍 Scan LAN</button>
     </div>
     <div class="muted" style="margin-bottom:8px; font-size:12px;">Active sweep of this host's directly-connected private subnet(s): a TCP-connect ping finds live hosts (even agent-less ones), the ARP cache attaches MAC + vendor, and NetFlow fills in devices that are quiet right now. Only RFC1918 ranges are ever scanned.</div>
+    <div id="deployBar" style="display:none; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel2,#140f30);">
+      <span style="font-size:12px;">⬇ <b>Push agent</b></span>
+      <input id="discoUser" placeholder="ssh user (root)" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:120px;" />
+      <input id="discoPass" type="password" placeholder="ssh password (optional, needs sshpass)" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:230px;" />
+      <button id="discoDeployAll" title="Install the SecTool agent on every SSH-reachable device that isn't already running it">⬇ Push to all eligible <span id="discoEligible" class="muted" style="font-weight:400"></span></button>
+      <span id="deployHint" class="muted" style="font-size:11px;"></span>
+    </div>
     <div id="discoBody"><div class="empty">Click <b>Scan LAN</b> to enumerate every device on your local network.</div></div>
   </div>
 
@@ -827,8 +834,19 @@ async function scanLan(){
     const j = await api("/api/discovery"+(subnet?("?subnet="+encodeURIComponent(subnet)):""));
     if (j.ok===false){ body.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"discovery failed")+'</pre>'; return; }
     $("#discoCount").textContent="("+j.alive+" alive · "+j.total+" known · "+(j.durationMs/1000).toFixed(1)+"s)";
+    updateDeployBar(j);
     const SRC={scan:['#3ad29f','SCAN'],arp:['var(--accent)','ARP'],flow:['#46d6ff','FLOW'],self:['var(--muted)','THIS HOST']};
     const badge=s=>{ const m=SRC[s]||['var(--muted)',s.toUpperCase()]; return `<span class="badge" style="background:${m[0]};font-size:9px">${m[1]}</span>`; };
+    const depCell=d=>{
+      const id=esc(d.ip).replace(/\./g,'-');
+      if (d.hasAgentPort) return `<td id="dep-${id}"><span class="badge" style="background:var(--good,#3ad29f);font-size:9px">✓ AGENT</span></td>`;
+      if (d.deploy&&d.deploy.eligible){
+        if (j.deployEnabled) return `<td id="dep-${id}"><button class="depbtn" data-ip="${esc(d.ip)}" style="font-size:11px;padding:3px 8px">⬇ Push</button></td>`;
+        return `<td id="dep-${id}"><span class="muted" title="Set DEPLOY_ENABLED=true to enable">eligible</span></td>`;
+      }
+      const reason=d.deploy?d.deploy.reason:'';
+      return `<td id="dep-${id}"><span class="muted" title="${esc(reason)}">—</span></td>`;
+    };
     const row=d=>`<tr style="${d.isSelf?'opacity:.7':''}">
       <td><span class="badge" style="background:${d.alive?'var(--good,#3ad29f)':'var(--muted)'}">${d.alive?'●':'○'}</span></td>
       <td class="mono">${esc(d.ip)}</td>
@@ -837,20 +855,87 @@ async function scanLan(){
       <td>${esc(d.vendor||'')}</td>
       <td class="mono">${(d.openPorts||[]).slice(0,8).join(', ')}${d.hasAgentPort?' <span class="badge" style="background:var(--accent)">AGENT</span>':''}</td>
       <td class="muted">${d.lastFlow?ago(d.lastFlow):''}</td>
-      <td>${(d.sources||[]).map(badge).join(' ')}</td></tr>`;
+      <td>${(d.sources||[]).map(badge).join(' ')}</td>
+      ${depCell(d)}</tr>`;
     let h='';
     if (j.truncated) h+=`<div class="muted" style="margin-bottom:6px;color:var(--accent)">⚠ Candidate list capped — raise <code>DISCOVERY_MAX_HOSTS</code> to scan a wider range.</div>`;
-    h+=`<div class="muted" style="margin-bottom:6px">Subnets: <span class="mono">${(j.subnets||[]).map(esc).join(', ')||'—'}</span> · ${j.scanned} hosts probed</div>`;
+    h+=`<div class="muted" style="margin-bottom:6px">Subnets: <span class="mono">${(j.subnets||[]).map(esc).join(', ')||'—'}</span> · ${j.scanned} hosts probed${typeof j.deployable==='number'?' · '+j.deployable+' agent-deployable':''}</div>`;
     if (!(j.devices||[]).length){ body.innerHTML=h+'<div class="empty">No devices found.</div>'; return; }
     h+=`<input class="devfilter" placeholder="filter by ip / host / vendor / mac…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;color:var(--muted)"><th></th><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th><th>Open ports</th><th>Last flow</th><th>Via</th></tr></thead>
+        <thead><tr style="text-align:left;color:var(--muted)"><th></th><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th><th>Open ports</th><th>Last flow</th><th>Via</th><th>Agent</th></tr></thead>
         <tbody>${j.devices.map(row).join("")}</tbody></table>`;
     body.innerHTML=h;
+    body.querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
     const filter=body.querySelector(".devfilter");
     if(filter) filter.oninput=()=>{ const q=filter.value.toLowerCase(); body.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
   } catch(e){ body.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
   finally { btn.disabled=false; btn.textContent=label; }
+}
+function updateDeployBar(j){
+  const bar=$("#deployBar"); if(!bar) return;
+  bar.style.display="flex";
+  const n=typeof j.deployable==='number'?j.deployable:0;
+  $("#discoEligible").textContent=n?("("+n+")"):"";
+  const all=$("#discoDeployAll");
+  if (!j.deployEnabled){
+    all.disabled=true; all.title="Set DEPLOY_ENABLED=true and restart SecTool to enable agent push-deploy.";
+    $("#deployHint").textContent="push-deploy disabled (DEPLOY_ENABLED=false)";
+  } else {
+    all.disabled=(n===0); all.title="Install the SecTool agent on every SSH-reachable device that isn't already running it";
+    $("#deployHint").textContent=n?(n+" SSH-reachable host"+(n===1?"":"s")+" without the agent"):"no eligible hosts (need SSH open + agent not installed)";
+  }
+}
+function deployOpts(){
+  const u=($("#discoUser").value||"").trim(), p=$("#discoPass").value||"";
+  const o={}; if(u) o.user=u; if(p) o.password=p; return o;
+}
+// Deploy endpoints return a structured body even on failure (HTTP 502), so read
+// the JSON regardless of status instead of throwing like api() does.
+async function apiBody(path, payload){
+  const r=await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+  return await r.json().catch(()=>({ok:false,error:"bad response"}));
+}
+function deployStepsHtml(r){
+  const steps=(r.steps||[]).map(s=>`<div class="muted" style="font-size:11px">${s.ok?'✓':'✗'} ${esc(s.name)}${s.detail?': '+esc(s.detail):''}</div>`).join("");
+  const out=r.output?`<pre style="max-height:160px;overflow:auto;font-size:11px;margin:6px 0 0;white-space:pre-wrap">${esc(r.output)}</pre>`:"";
+  return steps+out;
+}
+async function deployOne(ip,btn){
+  const cell=$("#dep-"+ip.replace(/\./g,'-'));
+  btn.disabled=true; const label=btn.textContent; btn.textContent="⏳…";
+  try {
+    const r=await apiBody("/api/discovery/deploy",Object.assign({host:ip},deployOpts()));
+    if (r.ok){
+      cell.innerHTML=`<span class="badge" style="background:var(--good,#3ad29f);font-size:9px" title="${esc((r.steps||[]).map(s=>s.name+': '+(s.detail||'')).join(' · '))}">✓ v${esc(r.agentVersion||'?')}</span>`;
+    } else {
+      cell.innerHTML=`<span class="badge" style="background:var(--critical);font-size:9px" title="${esc(r.error||'failed')}">✗ failed</span> <button class="depbtn" data-ip="${esc(ip)}" style="font-size:11px;padding:3px 8px">↻</button>`;
+      cell.querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
+      const body=$("#discoBody"); const det=document.createElement("div");
+      det.style.cssText="margin:6px 0;padding:8px 10px;border:1px solid var(--critical);border-radius:8px";
+      det.innerHTML=`<div style="color:var(--critical);font-size:12px">⬇ ${esc(ip)}: ${esc(r.error||'deploy failed')}</div>`+deployStepsHtml(r);
+      body.insertBefore(det,body.firstChild);
+    }
+  } catch(e){ btn.disabled=false; btn.textContent=label; alert("Deploy error: "+e.message); }
+}
+async function deployAll(){
+  const btn=$("#discoDeployAll"); if(btn.disabled) return;
+  if(!confirm("Push the SecTool agent to every SSH-reachable device that isn't already running it?")) return;
+  btn.disabled=true; const label=btn.innerHTML; btn.textContent="⏳ Deploying…";
+  const subnet=($("#discoSubnet").value||"").trim();
+  try {
+    const r=await apiBody("/api/discovery/deploy-all",Object.assign({subnet},deployOpts()));
+    const body=$("#discoBody"); const box=document.createElement("div");
+    box.style.cssText="margin:0 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2,#140f30)";
+    if (r.ok===false){ box.innerHTML=`<div style="color:var(--critical)">${esc(r.error||'deploy-all failed')}</div>`; }
+    else {
+      const lines=(r.results||[]).map(x=>`<div style="font-size:12px" class="${x.ok?'':'muted'}">${x.ok?'✓':'✗'} <span class="mono">${esc(x.host)}</span> — ${x.ok?('agent v'+esc(x.agentVersion||'?')):esc(x.error||'failed')}</div>`).join("");
+      const skip=(r.skipped||[]).length?`<div class="muted" style="font-size:11px;margin-top:6px">Skipped (manual install): ${(r.skipped||[]).map(s=>esc(s.ip)).join(', ')}</div>`:"";
+      box.innerHTML=`<div style="font-weight:600;margin-bottom:6px">⬇ Pushed agent to ${r.succeeded}/${r.attempted} eligible host(s)</div>${lines}${skip}`;
+    }
+    body.insertBefore(box,body.firstChild);
+  } catch(e){ alert("Deploy-all error: "+e.message); }
+  finally { btn.disabled=false; btn.innerHTML=label; await scanLan(); }
 }
 async function toggleConns(ip,btn){
   const box = $("#conns-"+ip.replace(/\./g,'-'));
@@ -1316,6 +1401,7 @@ $("#devRefresh").onclick = showDevices;
 $("#backAlerts8").onclick = showAlerts;
 $("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(); });
 $("#discoScan").onclick = scanLan;
+$("#discoDeployAll").onclick = deployAll;
 $("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });
 $("#navWatch").onclick = showWatch;
 $("#watchHours").onchange = showWatch;

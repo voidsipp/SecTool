@@ -12,6 +12,8 @@
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
+ *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH)
+ *   POST /api/discovery/deploy-all  -> push the agent to every SSH-eligible discovered host
  *   GET  /api/agents/traffic?host=  -> a device's flow footprint (peers/ports/alerts)
  *   GET  /api/agents/listeners?host=-> a device's listening sockets + owning process
  *   GET  /api/agents/egress?host=   -> a device's public peers + threat-intel reputation
@@ -48,6 +50,7 @@ import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
 import { discoverDevices } from "../investigate/discovery.ts";
+import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
 
@@ -163,6 +166,38 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           ? subnetParam.split(",").map((s) => s.trim()).filter(Boolean)
           : undefined;
         const r = await discoverDevices(cfg, subnets ? { subnets } : {});
+        // Annotate each device with whether the agent can be auto-pushed to it.
+        if (r.ok) {
+          for (const d of r.devices) d.deploy = assessDeploy(cfg, d);
+        }
+        const deployable = r.ok ? r.devices.filter((d) => d.deploy?.eligible).length : 0;
+        return send(res, r.ok ? 200 : 502, { ...r, deployEnabled: cfg.deploy.enabled, deployable });
+      }
+
+      // --- push the endpoint agent onto a discovered host (over SSH) ---
+      if (method === "POST" && path === "/api/discovery/deploy") {
+        const body = await readJson(req);
+        const host = String(body["host"] ?? "").trim();
+        if (isIP(host) === 0) return send(res, 400, { error: "Invalid or missing host IP." });
+        const r = await deployAgent(cfg, host, {
+          user: typeof body["user"] === "string" && body["user"] ? String(body["user"]) : undefined,
+          port: Number(body["port"]) || undefined,
+          password: typeof body["password"] === "string" && body["password"] ? String(body["password"]) : undefined,
+          force: body["force"] === true,
+        });
+        return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- push the agent to every eligible discovered host at once ---
+      if (method === "POST" && path === "/api/discovery/deploy-all") {
+        const body = await readJson(req);
+        const subnetRaw = String(body["subnet"] ?? "").trim();
+        const r = await deployToAllEligible(cfg, {
+          subnets: subnetRaw ? subnetRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+          user: typeof body["user"] === "string" && body["user"] ? String(body["user"]) : undefined,
+          port: Number(body["port"]) || undefined,
+          password: typeof body["password"] === "string" && body["password"] ? String(body["password"]) : undefined,
+        });
         return send(res, r.ok ? 200 : 502, r);
       }
 

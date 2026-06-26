@@ -36,6 +36,35 @@ for a restart. The last heartbeat's outcome is reported under `update` in
 `upToDate`, `ageMs` since the last check, and `checks` performed — so the SecTool
 dashboard can flag agents that are stale or failing their checks.
 
+## Auto-push from discovery (no touching the device)
+
+The Devices page's **LAN auto-discovery** flags every host that *supports* an
+unattended install — one that exposes SSH and isn't already running the agent —
+and lets you push the agent to it with one click (or **Push to all eligible** to
+fan out across the whole subnet). SecTool simply SSHes in and runs the same
+`install.sh` one-liner above, then polls the device's `/health` to confirm the
+agent came up. Hosts without SSH (e.g. a stock Windows box) are listed as
+*manual install* instead, since there's no unattended transport to use.
+
+Push-deploy is **opt-in** because it installs software on other machines:
+
+| Var | Default | Meaning |
+|---|---|---|
+| `DEPLOY_ENABLED` | `false` | Master switch for agent push-deploy. |
+| `DEPLOY_SSH_USER` | `root` | SSH user to log in as on target devices. |
+| `DEPLOY_SSH_PORT` | `22` | SSH port to connect to. |
+| `DEPLOY_SSH_KEY` | *(SecTool's UDM key, else ssh-agent)* | Private key for non-interactive auth. |
+| `DEPLOY_SERVER_IP` | *(auto, same-subnet)* | The LAN IP devices use to reach the dist server. |
+| `DEPLOY_CONCURRENCY` | `4` | Max simultaneous installs during *Push to all*. |
+| `DEPLOY_TIMEOUT_MS` | `120000` | Per-host install timeout. |
+
+Auth is **key-based** by default (fully unattended) — re-using the SSH key SecTool
+already set up for UDM pulls (`--setup-ssh`) when present, or your ssh-agent's
+default keys. A password can be supplied per-request in the UI, but it only works
+if `sshpass` is installed on the SecTool host; otherwise use key auth.
+Requires `AGENT_ENABLED=true` (so the installer/updater server is running) and
+`AGENT_TOKEN` set (so the deployed agent's API is authenticated).
+
 ## Manual run
 
 ```bash
