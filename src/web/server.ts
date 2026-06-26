@@ -11,6 +11,8 @@
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
+ *   GET  /api/report?hours=N        -> offline incident report (model + Markdown)
+ *   GET  /api/report.md?hours=N     -> the same report as a downloadable .md file
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -55,6 +57,7 @@ import { discoverDevices } from "../investigate/discovery.ts";
 import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
+import { buildReport, reportFilename } from "../analytics/report.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -431,6 +434,25 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const limitRaw = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(50, Math.floor(limitRaw)) : 10;
         return send(res, 200, buildTrends(hours, limit, Date.now()));
+      }
+
+      // --- offline incident report (structured model + Markdown) ---
+      if (method === "GET" && path === "/api/report") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildReport(hours, Date.now()));
+      }
+      // --- downloadable Markdown report ---
+      if (method === "GET" && path === "/api/report.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const now = Date.now();
+        const { markdown } = buildReport(hours, now);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${reportFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
       }
 
       // --- firewall blocklist ---
