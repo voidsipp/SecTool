@@ -66,6 +66,8 @@
  *   GET  /api/insight.md?hours=N    -> the same AI analyst-insight digest as a downloadable .md file
  *   GET  /api/escalation?hours=N    -> severity-escalation / trajectory report (per-source rising-vs-falling severity; model + Markdown)
  *   GET  /api/escalation.md?hours=N -> the same severity-escalation report as a downloadable .md file
+ *   GET  /api/targets?hours=N       -> target / victim-exposure report (ranks YOUR assets by attack pressure + attacker diversity; model + Markdown)
+ *   GET  /api/targets.md?hours=N    -> the same target-exposure report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -148,6 +150,7 @@ import { buildLifecycle, lifecycleFilename } from "../analytics/lifecycle.ts";
 import { buildRisk, riskFilename } from "../analytics/risk.ts";
 import { buildInsight, insightFilename } from "../analytics/insight.ts";
 import { buildEscalation, escalationFilename } from "../analytics/escalation.ts";
+import { buildTargets, targetsFilename } from "../analytics/targets.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1151,6 +1154,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${escalationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- target / victim-exposure (rank YOUR assets by attack pressure) ---
+      if (method === "GET" && path === "/api/targets") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildTargets(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/targets.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildTargets(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${targetsFilename(now)}"`,
         });
         res.end(markdown);
         return;

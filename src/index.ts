@@ -31,6 +31,7 @@
  *   node src/index.ts --risk 168      # offline risk-index / threat-posture (severity-weighted) report (Markdown)
  *   node src/index.ts --insight 168   # offline AI analyst-insight digest (summary coverage / re-grading / actions) (Markdown)
  *   node src/index.ts --escalation 168 # offline severity-escalation / trajectory (rising-vs-falling) report (Markdown)
+ *   node src/index.ts --targets 168   # offline target / victim-exposure (which of your assets is hit hardest) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -79,6 +80,7 @@ import { buildLifecycle } from "./analytics/lifecycle.ts";
 import { buildRisk } from "./analytics/risk.ts";
 import { buildInsight } from "./analytics/insight.ts";
 import { buildEscalation } from "./analytics/escalation.ts";
+import { buildTargets } from "./analytics/targets.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -975,6 +977,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown severity-escalation report to stdout.
       console.log(buildEscalation(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const targetsIdx = argv.findIndex((a) => a === "--targets" || a.startsWith("--targets="));
+    if (targetsIdx !== -1) {
+      const inline = argv[targetsIdx]!.split("=")[1];
+      const next = argv[targetsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a target's siege reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --targets hours: "${raw}". Use e.g. --targets 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the internal / external target tables.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown target / victim-exposure report to stdout.
+      console.log(buildTargets(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

@@ -40,6 +40,7 @@
     "risk": "node src/index.ts --risk 168",
     "insight": "node src/index.ts --insight 168",
     "escalation": "node src/index.ts --escalation 168",
+    "targets": "node src/index.ts --targets 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
