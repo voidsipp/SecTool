@@ -254,6 +254,29 @@ history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/compare.md?hours=N` → the same comparison as a downloadable `.md` file.
 - `node src/index.ts --compare 24` (or `npm run compare`) → print the Markdown to stdout.
 
+## 👤 Entity profile (`GET /api/profile[.md]`, `--profile`)
+
+Where Trends aggregates *everything* and **🎯 Campaigns** clusters *all* attackers,
+the entity profile answers the question you ask mid-investigation: *tell me
+everything about **this one** address.* Given a single IP it rolls up — from the
+local alert history — every alert that IP appears in (as source **or**
+destination) and derives: whether it's an **internal host or external peer**,
+first/last seen and active span, a volume **timeline sparkline**, severity /
+disposition / triage breakdowns, the **signatures / categories** it triggered,
+every **counterpart endpoint** it talked to (split internal/external), its
+current **operator state** (blocked / watched / safe, with the watch note), the
+most severe individual detections, and a composite **0-100 risk score** plus a
+plain-language narrative. Like the report and comparison, it is pure offline math
+over the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/profile?ip=<addr>&hours=N` → the structured model **plus** rendered Markdown (`hours` optional; omit for the entire stored history).
+- `GET /api/profile.md?ip=<addr>&hours=N` → the same profile as a downloadable `.md` file.
+- `node src/index.ts --profile <ip> [hours]` (or `npm run profile -- <ip>`) → print the Markdown to stdout.
+
+This complements **🔎 Search** (lists the matching alert *rows* — no roll-up or
+scoring), **🎯 Campaigns** (clusters *all* attackers, not one entity), and the
+snapshot **Report** (a whole-window view, not scoped to one address).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
