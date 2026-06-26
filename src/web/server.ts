@@ -62,6 +62,8 @@
  *   GET  /api/lifecycle.md?hours=N  -> the same signature-lifecycle report as a downloadable .md file
  *   GET  /api/risk?hours=N          -> risk-index / threat-posture (severity-weighted magnitude + grade + driver attribution; model + Markdown)
  *   GET  /api/risk.md?hours=N       -> the same risk-index report as a downloadable .md file
+ *   GET  /api/insight?hours=N       -> AI analyst-insight digest (summary coverage · rule-vs-Claude re-grading · recommended-action roll-up; model + Markdown)
+ *   GET  /api/insight.md?hours=N    -> the same AI analyst-insight digest as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -142,6 +144,7 @@ import { buildCoverage, coverageFilename } from "../analytics/coverage.ts";
 import { buildDirection, directionFilename } from "../analytics/direction.ts";
 import { buildLifecycle, lifecycleFilename } from "../analytics/lifecycle.ts";
 import { buildRisk, riskFilename } from "../analytics/risk.ts";
+import { buildInsight, insightFilename } from "../analytics/insight.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1103,6 +1106,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${riskFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- AI analyst-insight digest (summary coverage / re-grading / actions) ---
+      if (method === "GET" && path === "/api/insight") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildInsight(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/insight.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildInsight(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${insightFilename(now)}"`,
         });
         res.end(markdown);
         return;

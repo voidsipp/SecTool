@@ -768,6 +768,44 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/lifecycle.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --lifecycle 168 [--limit 25] [--buckets N]` (or `npm run lifecycle`) → print the Markdown to stdout (defaults to a 7-day window so chronic vs acute shape reflects more than one shift).
 
+## 🧠 AI analyst-insight digest (`GET /api/insight[.md]`, `--insight`)
+
+Every other offline report mines the **raw IPS telemetry**. This one mines the one
+field SecTool spends real money to produce: the **Claude summary** stored on each
+processed alert (`StoredAlert.summary`). Until now that analysis evaporated into the
+dashboard one alert at a time and was never rolled up. The digest audits the AI
+analysis layer in aggregate and answers three questions the raw reports cannot:
+
+1. **Is the AI actually covering the stream?** It splits the window into *AI-backed*
+   summaries, non-AI *heuristic fallback* summaries (taken when Claude is
+   unreachable / rate-limited / disabled), and *un-analysed* alerts. A high fallback
+   or un-analysed share means the dashboard's "AI analysis" is mostly heuristics —
+   worth knowing before you trust the verdicts below it.
+2. **Where does Claude disagree with the rule?** For every AI-backed alert it
+   compares the rule's severity against Claude's re-assessed severity and buckets it
+   as **downgraded** (a false-positive / over-noisy-rule signal), **agreed**, or
+   **upgraded** (an under-graded rule worth escalating). It then ranks the signatures
+   Claude most often downgrades (your *tuning backlog*) and most often upgrades (your
+   *escalation backlog*) — the sharpest, most actionable thing the AI layer produces,
+   previously invisible.
+3. **What is Claude telling you to do?** It normalises and tallies every
+   `recommendedActions` entry across the window, so the most-repeated remediation
+   rises to the top with the count of distinct alerts and signatures it was advised
+   for — a ready-made, frequency-ranked work list. Summaries are also attributed to
+   the **model** that produced them, so a silent model swap or a flood of fallbacks
+   is visible.
+
+Honest caveats are baked into the output: it audits Claude's *opinions*, not ground
+truth (a downgrade is a lead to review, not proof a rule over-fired); re-grading is
+computed over AI-backed summaries only (heuristic fallbacks copy the rule severity
+and would always read as "agreed"); and alerts processed before summarisation was
+enabled show as un-analysed and are excluded from the divergence math. Pure offline
+math over the local alert history — **no SSH, no Claude call, no live gateway query**.
+
+- `GET /api/insight?hours=N[&limit=15]` → the structured model **plus** rendered Markdown (coverage · re-grading · FP/escalation candidates · action roll-up · model attribution).
+- `GET /api/insight.md?hours=N` → the same digest as a downloadable `.md` file.
+- `node src/index.ts --insight 168 [--limit 15]` (or `npm run insight`) → print the Markdown to stdout (defaults to a 7-day window so coverage and re-grading reflect more than one shift).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
