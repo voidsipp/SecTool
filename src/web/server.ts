@@ -12,6 +12,8 @@
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
  *   GET  /api/campaigns?hours=N     -> cluster stored alerts by external attacker IP
+ *   GET  /api/report?hours=N        -> offline incident report (model + Markdown)
+ *   GET  /api/report.md?hours=N     -> the same report as a downloadable .md file
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -58,6 +60,7 @@ import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
 import { buildCampaigns, type Campaign } from "../analytics/campaigns.ts";
 import { geolocate } from "../investigate/geo.ts";
+import { buildReport, reportFilename } from "../analytics/report.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -459,6 +462,25 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           }
         }
         return send(res, 200, report);
+      }
+
+      // --- offline incident report (structured model + Markdown) ---
+      if (method === "GET" && path === "/api/report") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildReport(hours, Date.now()));
+      }
+      // --- downloadable Markdown report ---
+      if (method === "GET" && path === "/api/report.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const now = Date.now();
+        const { markdown } = buildReport(hours, now);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${reportFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
       }
 
       // --- firewall blocklist ---

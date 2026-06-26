@@ -209,6 +209,18 @@
   table.trends-tbl tr.medium td.spark .fill { background:var(--medium); }
   table.trends-tbl tr.low td.spark .fill { background:var(--low); }
   .trends-empty { color:var(--muted); font-style:italic; padding:10px 0; }
+  .posture-banner { display:flex; align-items:center; gap:14px; padding:14px 16px; margin-bottom:16px; border:2px solid var(--border); border-radius:0; background:rgba(20,15,48,.7); }
+  .posture-badge { font-family:var(--pix); font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:8px 12px; border:2px solid currentColor; white-space:nowrap; }
+  .posture-badge.calm,.posture-badge.quiet { color:var(--low); }
+  .posture-badge.low { color:var(--cyan); }
+  .posture-badge.active { color:var(--medium); }
+  .posture-badge.elevated { color:var(--high); }
+  .posture-badge.critical { color:var(--critical); }
+  .exec-summary { font-size:15px; line-height:1.5; color:#dfe9ff; }
+  .report-highlights { list-style:none; margin:6px 0 0; padding:0; }
+  .report-highlights li { font-size:13px; color:var(--muted); padding:2px 0 2px 16px; position:relative; }
+  .report-highlights li:before { content:"▸"; position:absolute; left:0; color:var(--accent); }
+  pre.report-md { max-height:520px; font-size:13px; color:#cfe6ff; }
 </style>
 </head>
 <body>
@@ -236,6 +248,7 @@
   <button id="navWar">🗺️ War Map</button>
   <button id="navTrends">📊 Trends</button>
   <button id="navCampaigns">🎯 Campaigns</button>
+  <button id="navReport">📄 Report</button>
   <button id="navHosts">🖥️ Hosts</button>
   <button id="navDevices">📟 Devices</button>
   <button id="navWatch">👁 Watchlist</button>
@@ -433,6 +446,23 @@
   </div>
   <div class="muted" style="margin-bottom:12px;">Stored alerts grouped by the external attacker IP behind them, so one adversary's whole footprint reads as a single incident. Each campaign rolls up its alert volume, worst severity, distinct signatures, the internal hosts it hit, and an active time span, ranked by a composite threat score. Block, watch, or clear an attacker in one click. No SSH required.</div>
   <div id="campBody"><div class="empty">Loading…</div></div>
+</div>
+<div id="reportView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+    <button id="backAlerts10">← Alerts</button>
+    <h2 style="margin:0; font-size:18px;">📄 Incident Report <span id="reportMeta" class="muted"></span></h2>
+    <span class="spacer" style="flex:1"></span>
+    <label class="status">Window
+      <select id="reportHours">
+        <option value="6">6h</option><option value="24" selected>24h</option>
+        <option value="48">48h</option><option value="168">7d</option><option value="720">30d</option>
+      </select>
+    </label>
+    <button id="reportCopy">⧉ Copy Markdown</button>
+    <button id="reportDownload" class="primary">⬇ Download .md</button>
+  </div>
+  <div class="muted" style="margin-bottom:12px;">A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.</div>
+  <div id="reportBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="maptip"></div>
 
@@ -771,7 +801,7 @@ function fmtDur(ms) {
   const h=Math.floor(m/60); if(h<24) return h+"h "+(m%60)+"m"; const d=Math.floor(h/24); return d+"d "+(h%24)+"h";
 }
 async function showBlocked() {
-  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#blockedView").style.display="block";
+  $("#alertsView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none"; $("#blockedView").style.display="block";
   $("#blockedBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/blocklist");
@@ -789,7 +819,7 @@ async function showBlocked() {
   } catch(e){ $("#blockedBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showHosts() {
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#hostsView").style.display="block";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none"; $("#hostsView").style.display="block";
   $("#hostsBody").innerHTML='<div class="empty">Loading…</div>';
   try {
     const j = await api("/api/hosts");
@@ -819,7 +849,7 @@ async function showHosts() {
   } catch(e){ $("#hostsBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function showDevices(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none";
   $("#devicesView").style.display="block";
   $("#devicesBody").innerHTML='<div class="empty">Scanning the LAN for agents…</div>';
   try {
@@ -1143,7 +1173,7 @@ async function sendAsk(){
   asking=false; $("#chat").scrollTop=$("#chat").scrollHeight;
 }
 function showAsk(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none";
   $("#askView").style.display="flex";
   if(!$("#chat").dataset.init){ renderSuggestions(); $("#chat").dataset.init="1"; }
   $("#askInput").focus();
@@ -1167,7 +1197,7 @@ async function agentProcess(internal, external, port){
   } catch(e){ return '<span class="muted">'+esc(e.message)+'</span>'; }
 }
 async function showWar(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none";
   $("#warView").style.display="block";
   $("#warMap").innerHTML='<div class="empty">Geolocating traffic… (first load can take a few seconds)</div>';
   try {
@@ -1243,7 +1273,7 @@ async function clickCountry(code, country){
   } catch(e){ d.innerHTML='<div class="section"><pre>'+esc(e.message)+'</pre></div>'; }
 }
 async function showWatch(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none";
   $("#watchView").style.display="block";
   $("#watchBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1294,9 +1324,9 @@ async function addWatchFromForm(){
     showWatch(); loadStatus();
   } catch(e){ alert(e.message); }
 }
-function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#alertsView").style.display="grid"; }
+function showAlerts() { $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none"; $("#alertsView").style.display="grid"; }
 async function showSupp(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none";
   $("#suppView").style.display="block";
   $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
   try {
@@ -1401,7 +1431,7 @@ function triageBadgesHtml(byTri){
   }).join("") || '<span class="trends-empty">No triage activity.</span>';
 }
 async function showTrends(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#devicesView").style.display="none"; $("#campaignsView").style.display="none"; $("#reportView").style.display="none";
   $("#trendsView").style.display="block";
   $("#trendsBody").innerHTML='<div class="empty">Crunching numbers…</div>';
   try {
@@ -1462,7 +1492,7 @@ function codeToFlag(cc){
 }
 function scoreColor(s){ return s>=70?'var(--critical)':s>=45?'var(--high)':s>=25?'var(--medium)':'var(--low)'; }
 async function showCampaigns(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#reportView").style.display="none"; $("#devicesView").style.display="none";
   $("#campaignsView").style.display="block";
   $("#campBody").innerHTML='<div class="empty">Clustering attackers…</div>';
   try {
@@ -1525,6 +1555,61 @@ async function showCampaigns(){
     $("#campBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
   }
 }
+let lastReportMd = "";
+function reportSummaryCards(t, model){
+  return `<div class="trends-summary">
+    <div class="kv"><div class="k">Total alerts</div><div class="v big">${t.total}</div></div>
+    <div class="kv crit"><div class="k">Notified</div><div class="v">${t.notified}</div></div>
+    <div class="kv high"><div class="k">Summarized</div><div class="v">${t.withSummary}</div></div>
+    <div class="kv low"><div class="k">Dismissed</div><div class="v">${t.dismissed}</div></div>
+    <div class="kv"><div class="k">Suppressions</div><div class="v">${model.activeSuppressions}</div></div>
+    <div class="kv"><div class="k">Watchlist active</div><div class="v">${model.watchHits.length}</div></div>
+  </div>`;
+}
+async function showReport(){
+  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#devicesView").style.display="none";
+  $("#reportView").style.display="block";
+  $("#reportBody").innerHTML='<div class="empty">Building report…</div>';
+  try {
+    const hours = $("#reportHours").value;
+    const j = await api("/api/report?hours="+hours);
+    lastReportMd = j.markdown || "";
+    $("#reportMeta").textContent = `(last ${j.hours}h · ${j.trends.total} alerts)`;
+    const t = j.trends;
+    const postureLabel = (j.posture && j.posture.label) || "—";
+    const banner = `<div class="posture-banner">
+        <div class="posture-badge ${esc(postureLabel.toLowerCase())}">${esc(postureLabel)}</div>
+        <div>
+          <div class="exec-summary">${esc(j.executiveSummary)}</div>
+          ${j.highlights && j.highlights.length ? `<ul class="report-highlights">${j.highlights.map(h=>`<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+        </div>
+      </div>`;
+    const cards = reportSummaryCards(t, j);
+    const preview = `<div class="section"><h3>📝 Report preview (Markdown)</h3>
+        <div class="muted" style="margin-bottom:8px;font-size:12px;">This is the exact document the Copy / Download buttons produce.</div>
+        <pre class="report-md">${esc(lastReportMd)}</pre></div>`;
+    $("#reportBody").innerHTML = banner + cards + preview;
+  } catch(e){
+    $("#reportBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
+  }
+}
+async function copyReport(){
+  if (!lastReportMd) return;
+  try {
+    await navigator.clipboard.writeText(lastReportMd);
+    const b = $("#reportCopy"); const old = b.textContent; b.textContent = "✓ Copied";
+    setTimeout(()=>{ b.textContent = old; }, 1500);
+  } catch(e){ alert("Clipboard blocked — use Download .md instead."); }
+}
+function downloadReport(){
+  const hours = $("#reportHours").value;
+  window.open("/api/report.md?hours="+encodeURIComponent(hours), "_blank");
+}
+$("#navReport").onclick = showReport;
+$("#reportHours").onchange = showReport;
+$("#reportCopy").onclick = copyReport;
+$("#reportDownload").onclick = downloadReport;
+$("#backAlerts10").onclick = showAlerts;
 $("#navTrends").onclick = showTrends;
 $("#trendsHours").onchange = showTrends;
 $("#backAlerts7").onclick = showAlerts;

@@ -207,6 +207,23 @@ in-service daily at `DIGEST_HOUR`, or on demand:
 node src/index.ts --digest 24    # or: npm run digest
 ```
 
+## 📄 Offline incident report (`GET /api/report[.md]`)
+
+The dashboard's **📄 Report** tab generates a shareable, SOC-style security
+report for a chosen window (6h → 30d) straight from the **local** alert history —
+**no SSH, no Claude, no live gateway query**, so it is safe to generate at any
+time. It rolls up an auto-written executive summary and posture rating, key
+metrics, the severity & disposition breakdown, triage workflow status, an ASCII
+volume sparkline, top signatures / sources / destinations / categories,
+watchlist activity, and the active suppression rules.
+
+- `GET /api/report?hours=N` → the structured model **plus** the rendered Markdown.
+- `GET /api/report.md?hours=N` → the same report as a downloadable `.md` file.
+
+Use **⧉ Copy Markdown** to paste it into a ticket/chat, or **⬇ Download .md** to
+keep a dated record. This complements the interactive **📊 Trends** view (not
+exportable) and the Claude-written Discord **digest** (needs SSH + Claude).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
