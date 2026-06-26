@@ -605,6 +605,16 @@ export interface FlowsResult {
   windowMinutes: number;
   count: number;
   flows: FlowRow[];
+  /**
+   * Human-readable triage line for the flow snapshot. When the collector is off
+   * or no flows matched it says so (collection is forward-only and 1:512 sampled,
+   * so older or low-volume traffic may be absent); when flows *are* present it
+   * summarizes them — flow count, distinct peers, in/out balance relative to the
+   * host, the bytes moved each way (the sharpest exfiltration signal in flow
+   * data), the protocol mix, the busiest destination ports, and how many flows
+   * the gateway marked blocked — so the operator gets the shape of the host's
+   * traffic without scanning the raw flow rows.
+   */
   note?: string;
 }
 
@@ -612,6 +622,93 @@ const PROTO_NAMES: Record<number, string> = { 1: "ICMP", 6: "TCP", 17: "UDP", 47
 
 export function protoName(p: number | undefined): string {
   return p === undefined ? "?" : (PROTO_NAMES[p] ?? String(p));
+}
+
+/** Render a byte count in compact human terms (B / KB / MB / GB / TB, base 1024). */
+function humanBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n) || 0)} B`;
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
+/**
+ * Summarize collected NetFlow/IPFIX flows into a one-line triage note for
+ * `hosts`. Each flow carries src/dst IP+port, an L4 proto number, byte/packet
+ * counts and a blocked flag; we attribute direction relative to the host(s),
+ * tally the distinct peers and the bytes moved each way (the sharpest
+ * exfiltration signal in flow data), the protocol mix, the busiest destination
+ * ports, and how many flows the gateway marked blocked. Returns undefined when
+ * nothing is parseable so the caller can fall back to its generic phrasing.
+ */
+function summarizeFlows(flows: FlowRow[], hosts: Set<string>): string | undefined {
+  let parsed = 0;
+  let inbound = 0;
+  let outbound = 0;
+  let bytesIn = 0;
+  let bytesOut = 0;
+  let blocked = 0;
+  const peers = new Set<string>();
+  const protoCounts = new Map<string, number>();
+  const portCounts = new Map<number, number>();
+
+  for (const f of flows) {
+    const src = f.srcIp;
+    const dst = f.dstIp;
+    if (!src || !dst) continue;
+    parsed++;
+
+    const bytes = f.bytes ?? 0;
+    const srcLocal = hosts.has(src);
+    const dstLocal = hosts.has(dst);
+    if (srcLocal && !dstLocal) {
+      outbound++;
+      bytesOut += bytes;
+      peers.add(dst);
+    } else if (dstLocal && !srcLocal) {
+      inbound++;
+      bytesIn += bytes;
+      peers.add(src);
+    } else {
+      // Both/neither are our host(s) — still credit the far side as a peer.
+      peers.add(srcLocal ? dst : src);
+    }
+
+    const proto = protoName(f.proto);
+    if (proto !== "?") protoCounts.set(proto, (protoCounts.get(proto) ?? 0) + 1);
+
+    // The destination port is the service/well-known port being contacted.
+    if (f.dstPort !== undefined) {
+      portCounts.set(f.dstPort, (portCounts.get(f.dstPort) ?? 0) + 1);
+    }
+
+    if (f.blocked) blocked++;
+  }
+
+  if (parsed === 0) return undefined;
+
+  const protoMix = [...protoCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([proto, count]) => `${proto}×${count}`);
+  const topPorts = [...portCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, 4)
+    .map(([port, count]) => `${port}×${count}`);
+
+  const peerWord = peers.size === 1 ? "peer" : "peers";
+  let note = `${parsed} flow${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
+  if (outbound || inbound) note += ` (${outbound} out / ${inbound} in)`;
+  if (bytesOut || bytesIn) note += `; ${humanBytes(bytesOut)} out / ${humanBytes(bytesIn)} in`;
+  if (protoMix.length) note += `; ${protoMix.join(", ")}`;
+  if (topPorts.length) note += `; busiest dports ${topPorts.join(", ")}`;
+  if (blocked) note += `; ${blocked} blocked`;
+  return note + ".";
 }
 
 /** Collected NetFlow/IPFIX flows involving the host(s) within ±windowMinutes. */
@@ -623,7 +720,8 @@ export function flowsAround(timeMs: number, ips: string[], windowMinutes: number
   }
   const lo = timeMs - win * 60_000;
   const hi = timeMs + win * 60_000;
-  const raw = store.query(ips.filter((ip) => isIP(ip) > 0), lo, hi, 500);
+  const validIps = ips.filter((ip) => isIP(ip) > 0);
+  const raw = store.query(validIps, lo, hi, 500);
   const flows: FlowRow[] = raw.map((f: Flow) => ({
     start: f.start ?? f.receivedAt,
     end: f.end ?? f.receivedAt,
@@ -644,7 +742,7 @@ export function flowsAround(timeMs: number, ips: string[], windowMinutes: number
     note:
       flows.length === 0
         ? "No collected flows for this host in the window (flows are collected going forward; older events predate collection, and 1:512 sampling means low-volume hosts may not appear)."
-        : undefined,
+        : summarizeFlows(flows, new Set(validIps)),
   };
 }
 
