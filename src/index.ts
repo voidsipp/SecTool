@@ -5,6 +5,8 @@
  *   node src/index.ts                 # run the service
  *   node src/index.ts --self-test     # push a synthetic alert end-to-end
  *   node src/index.ts --print-config  # print the resolved config (redacted)
+ *   node src/index.ts --compare 24    # offline period-over-period comparison (Markdown)
+ *   node src/index.ts --profile <ip>  # offline single-IP profile report (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -27,6 +29,7 @@ import { startBaselineMonitor } from "./anomaly/baseline.ts";
 import { startAgentDistServer } from "./agent/distServer.ts";
 import { runDigest } from "./digest/digest.ts";
 import { buildComparison } from "./analytics/compare.ts";
+import { buildProfile } from "./analytics/profile.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -236,6 +239,37 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: just print the Markdown comparison to stdout.
       console.log(buildComparison(hours, 12, Date.now()).markdown);
+      return;
+    }
+    const profileIdx = argv.findIndex((a) => a === "--profile" || a.startsWith("--profile="));
+    if (profileIdx !== -1) {
+      const inline = argv[profileIdx]!.split("=")[1];
+      const next = argv[profileIdx + 1];
+      const ip = (inline ?? (next && !next.startsWith("--") ? next : undefined) ?? "").trim();
+      if (!ip) {
+        log.error("Usage: --profile <ip> [hours]   (hours optional; default = entire history)");
+        process.exit(2);
+      }
+      // Optional trailing hours: either a numeric positional after the IP (when
+      // the IP came from the next token) or a `--hours N` flag.
+      let hours = 0;
+      const hoursFlagIdx = argv.findIndex((a) => a === "--hours" || a.startsWith("--hours="));
+      if (hoursFlagIdx !== -1) {
+        const hi = argv[hoursFlagIdx]!.split("=")[1] ?? argv[hoursFlagIdx + 1];
+        hours = hi ? Number(hi) || 0 : 0;
+      } else if (!inline) {
+        const after = argv[profileIdx + 2];
+        if (after && !after.startsWith("--") && Number.isFinite(Number(after))) hours = Number(after);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown profile to stdout.
+      const model = buildProfile(ip, hours, Date.now());
+      if (!model.valid) {
+        log.error(`Invalid IP: "${ip}". Use e.g. --profile 185.220.101.7`);
+        process.exit(2);
+      }
+      console.log(model.markdown);
       return;
     }
     if (args.has("--web")) {
