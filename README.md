@@ -517,6 +517,45 @@ live gateway query**.
 - `GET /api/spread.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --spread 168 [--limit 25] [--min-peers 8]` (or `npm run spread`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow sweep has room to touch many peers).
 
+## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
+
+Steady background noise is one thing; a sudden **storm** of alerts is another — and
+the storms are exactly the events worth a human's attention: a horizontal scan
+lighting up a signature hundreds of times in a couple of minutes, a brute-force
+hammering a service, a worm or compromised host suddenly going loud, or a misfiring
+rule flooding the console. This report compresses a long, flat timeline into the
+few *moments that were not normal* and names the driver of each, so the morning
+question changes from "scroll 2,000 alerts" to "three storms happened overnight;
+here is what drove each."
+
+The method is deliberately robust:
+
+1. Slice the window into fixed-width **buckets** (default 15 min, auto-widened so a
+   long window never produces an unbounded number of bins).
+2. Establish a **baseline** as the *median* bucket count — median, not mean,
+   because the very spikes being hunted would inflate a mean and hide themselves. A
+   bucket is a surge only when it clears both an absolute floor (`minCount`, so a
+   near-empty window can't manufacture a "spike" out of two alerts) and a relative
+   bar (`factor` × baseline).
+3. **Merge adjacent surge buckets into episodes** — a storm spanning four
+   consecutive buckets is one incident, not four — and attribute each episode to
+   its dominant **signature**, **source**, **category**, peak **severity** and
+   **block share**, with a *shape* hint (`single src` scanner / `spray` distributed
+   brute-force / `internal` lateral-movement).
+
+Unlike [`trends`](#) (a flat histogram that never flags a spike or computes a
+baseline), [`rhythm`](#-activity-rhythm-report) (which folds the timeline onto
+hour-of-day aggregates, destroying the absolute timeline a burst lives on), and
+[`beacon`](#-beaconing--periodicity-report-get-apibeaconmd---beacon) (which scores
+*regular* cadence — the opposite of a one-off burst), this report is the only one
+that detects **volume-over-time spikes** and explains them. A compact unicode
+sparkline of the whole window's volume tops the output. Pure offline math over the
+local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/surge?hours=N[&limit=25][&bucketMinutes=15][&factor=3][&minCount=5]` → the structured model **plus** rendered Markdown (sparkline + ranked episode table).
+- `GET /api/surge.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --surge 168 [--limit 25] [--bucket-minutes 15] [--factor 3] [--min-count 5]` (or `npm run surge`) → print the Markdown to stdout (defaults to a 7-day window so a quiet baseline is visible and overnight storms surface).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

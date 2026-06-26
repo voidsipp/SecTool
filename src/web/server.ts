@@ -40,6 +40,8 @@
  *   GET  /api/spread.md?hours=N     -> the same spread report as a downloadable .md file
  *   GET  /api/cooccur?hours=N       -> signature co-occurrence / attack-chain (paired detections + ordering; model + Markdown)
  *   GET  /api/cooccur.md?hours=N    -> the same co-occurrence report as a downloadable .md file
+ *   GET  /api/surge?hours=N         -> surge / burst (volume spikes above baseline + drivers; model + Markdown)
+ *   GET  /api/surge.md?hours=N      -> the same surge report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -109,6 +111,7 @@ import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
 import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
 import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
 import { buildSpread, spreadFilename } from "../analytics/spread.ts";
+import { buildSurge, surgeFilename } from "../analytics/surge.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -834,6 +837,32 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cooccurrenceFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- surge / burst (volume spikes above a robust baseline + their drivers) ---
+      if (method === "GET" && path === "/api/surge") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const bucketMinutes = Number(url.searchParams.get("bucketMinutes")) || 15;
+        const factor = Number(url.searchParams.get("factor")) || 3;
+        const minCount = Number(url.searchParams.get("minCount")) || 5;
+        return send(res, 200, buildSurge(hours, { limit, bucketMinutes, factor, minCount, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/surge.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const bucketMinutes = Number(url.searchParams.get("bucketMinutes")) || 15;
+        const factor = Number(url.searchParams.get("factor")) || 3;
+        const minCount = Number(url.searchParams.get("minCount")) || 5;
+        const now = Date.now();
+        const { markdown } = buildSurge(hours, { limit, bucketMinutes, factor, minCount, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${surgeFilename(now)}"`,
         });
         res.end(markdown);
         return;
