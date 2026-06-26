@@ -29,7 +29,8 @@ export interface CaptureResult {
   lines: string[];
   /**
    * Human-readable triage line for the capture. For the failure cases this
-   * explains why nothing was captured (tcpdump missing, host quiet); when
+   * explains why nothing was captured (tcpdump missing or unprivileged, an
+   * interface error, or a genuinely quiet host); when
    * packets *were* seen it summarizes the live conversation — distinct peers,
    * in/out direction balance, and the busiest service ports — so the operator
    * gets the shape of the traffic without scanning the raw tcpdump dump.
@@ -113,6 +114,51 @@ function summarizeCapture(lines: string[], hosts: Set<string>): string | undefin
   return note + ".";
 }
 
+/**
+ * Classify why a tcpdump capture yielded no usable packet lines by reading the
+ * raw remote output (stderr is folded in via `2>&1`). Returns an actionable
+ * triage note for a recognized failure mode, or undefined when the run looks
+ * healthy — letting the caller distinguish "the tool failed" from "the host was
+ * simply quiet", which the old `not found` substring test silently conflated.
+ */
+function classifyCaptureFailure(out: string): string | undefined {
+  // Missing binary — phrased differently per shell: busybox/ash on the UDM says
+  // `sh: tcpdump: not found`, fuller distros `tcpdump: command not found`. Anchor
+  // on the command name immediately before the message so tcpdump's own output —
+  // which can legitimately contain a bare "not found" (e.g. a reverse-DNS "host
+  // not found" line) — isn't misread as the binary being absent.
+  if (/tcpdump:?\s*(?:command )?not found/i.test(out)) {
+    return "tcpdump is not installed on the UDM — use the conntrack/NetFlow views for this host instead.";
+  }
+
+  // tcpdump ran but printed a diagnostic instead of packets. Its error lines are
+  // `tcpdump:`-prefixed; the only benign such lines are the `listening on …`
+  // startup banner and `reading from …`, so anything else is a real failure
+  // worth surfacing verbatim rather than reporting a misleading "host was quiet".
+  // (These lines are stripped from `lines` before the empty-capture check, so
+  // without this they'd vanish into the generic no-packets note.)
+  const errLine = out
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(
+      (l) =>
+        /^tcpdump:\s*\S/i.test(l) &&
+        !/^tcpdump:\s*(?:listening on|reading from|verbose output)/i.test(l),
+    );
+  if (errLine) {
+    const detail = errLine.replace(/^tcpdump:\s*/i, "").replace(/\s+/g, " ").trim();
+    if (/permission|not permitted|privile/i.test(detail)) {
+      return `tcpdump could not capture (insufficient privileges on the UDM): ${detail}`;
+    }
+    if (/no suitable device|SIOC|no such device|bad interface|that device/i.test(detail)) {
+      return `tcpdump could not open a capture interface on the UDM: ${detail}`;
+    }
+    return `tcpdump failed on the UDM: ${detail}`;
+  }
+
+  return undefined;
+}
+
 /** Live tcpdump of current traffic to/from the given host(s). */
 export async function capture(ips: string[], seconds: number): Promise<CaptureResult> {
   const valid = [...new Set(ips.filter((ip) => ip && isIP(ip) > 0))];
@@ -127,11 +173,11 @@ export async function capture(ips: string[], seconds: number): Promise<CaptureRe
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l && !/^tcpdump:|listening on|packets (captured|received|dropped)|^\d+ packets/i.test(l));
-  const noTcpdump = /command not found|not found/i.test(out);
 
   let note: string | undefined;
-  if (noTcpdump) {
-    note = "tcpdump not available on the UDM.";
+  const failure = classifyCaptureFailure(out);
+  if (failure) {
+    note = failure;
   } else if (lines.length === 0) {
     note = `No packets involving ${valid.join(", ")} during the ${sec}s window (the threat may be historical / not currently active).`;
   } else {
