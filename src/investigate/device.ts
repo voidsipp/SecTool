@@ -903,10 +903,10 @@ export interface EgressAudit {
   peers?: EgressPeer[];
   /**
    * Human-readable caveats over this audit, leading with the strongest signals:
-   * firewall-blocklist egress (a bypassed block), then suspicious outbound ports,
-   * then watchlist matches (naming the operator's own notes for *why* each address
-   * is watched), then result truncation and/or degraded enrichment. Undefined when
-   * there is nothing to flag.
+   * firewall-blocklist egress (a bypassed block), then suspicious outbound ports
+   * (naming the actual destination port numbers), then watchlist matches (naming
+   * the operator's own notes for *why* each address is watched), then result
+   * truncation and/or degraded enrichment. Undefined when there is nothing to flag.
    */
   note?: string;
   /**
@@ -1094,10 +1094,17 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     );
   }
   if (suspiciousPortCount > 0) {
+    // Name the actual destination ports (mirroring trafficProfile's egress note)
+    // so the takeaway is actionable without scanning the flagged-peer list — the
+    // operator can recognise the protocol straight away. Distinct and ordered so
+    // the same port reached by several peers is listed once.
+    const susPorts = [...new Set(peers.flatMap((p) => p.suspiciousPorts))].sort(
+      (a, b) => a - b,
+    );
     notes.push(
-      `${suspiciousPortCount} audited peer(s) are being contacted on suspicious destination ports ` +
-        `(remote-control backdoors, botnet C2, or services that should never traverse the WAN) — ` +
-        `a classic compromised-host signal; review the flagged peers.`,
+      `${suspiciousPortCount} audited peer(s) are being contacted on suspicious destination port(s) ` +
+        `(${susPorts.join(", ")}) — remote-control backdoors, botnet C2, or services that should never ` +
+        `traverse the WAN; a classic compromised-host signal. Review the flagged peers.`,
     );
   }
   if (watchedCount > 0) {
