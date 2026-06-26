@@ -316,6 +316,21 @@ collected flows — **outbound to known-bad** (feed-listed) IPs, **beaconing**
 unusual number of externals). Open it from the **🖥️ Hosts** button. Forward-only
 and 1:512-sampled, so bad-outbound is the highest-confidence signal.
 
+## Attack campaigns (Campaigns page, `GET /api/campaigns`)
+
+Clusters the stored alert history by the **external attacker IP** behind each
+alert, so a single adversary's whole footprint reads as one incident instead of
+dozens of scattered rows. Open it from the **🎯 Campaigns** button. Each campaign
+rolls up its alert volume, worst severity, distinct signatures, every internal
+host it touched, blocked-vs-detected counts, and its active time span — ranked by
+a composite **threat score** (severity + volume + signature/target breadth, with
+a bonus for short intense bursts and a discount when the gateway already blocked
+everything). Attackers are tagged as already **blocked / watched / safe**, and
+you can **block**, **watch**, or mark **safe** in one click. Optional geo
+enrichment (`?geo=1`, on by default in the UI) labels each attacker with its
+country/flag via ip-api. Pure in-memory math over `data/alerts.json` — no SSH
+required, same data source as the Trends report.
+
 ## IP enrichment & per-IP activity (investigation panel)
 
 - **🌍 Enrich IP** — looks up the alert's external IP against **ip-api.com**
