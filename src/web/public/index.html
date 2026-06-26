@@ -279,9 +279,12 @@
     <div class="muted" style="margin-bottom:8px; font-size:12px;">Active sweep of this host's directly-connected private subnet(s): a TCP-connect ping finds live hosts (even agent-less ones), the ARP cache attaches MAC + vendor, and NetFlow fills in devices that are quiet right now. Only RFC1918 ranges are ever scanned.</div>
     <div id="deployBar" style="display:none; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel2,#140f30);">
       <span style="font-size:12px;">⬇ <b>Push agent</b></span>
-      <input id="discoUser" placeholder="ssh user (root)" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:120px;" />
-      <input id="discoPass" type="password" placeholder="ssh password (optional, needs sshpass)" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:230px;" />
-      <button id="discoDeployAll" title="Install the SecTool agent on every SSH-reachable device that isn't already running it">⬇ Push to all eligible <span id="discoEligible" class="muted" style="font-weight:400"></span></button>
+      <input id="discoUser" placeholder="ssh user (root)" title="SSH login for Linux/macOS hosts" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:120px;" />
+      <input id="discoPass" type="password" placeholder="ssh password (optional, needs sshpass)" title="SSH password — only used if sshpass is installed; otherwise key auth" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:200px;" />
+      <span class="muted" style="font-size:11px;">·</span>
+      <input id="discoWinUser" placeholder="win admin (Administrator)" title="WinRM admin login for SSH-less Windows hosts" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:150px;" />
+      <input id="discoWinPass" type="password" placeholder="win password (for WinRM)" title="WinRM admin password — required to deploy to Windows hosts without SSH" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:180px;" />
+      <button id="discoDeployAll" title="Install the SecTool agent on every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it">⬇ Push to all eligible <span id="discoEligible" class="muted" style="font-weight:400"></span></button>
       <span id="deployHint" class="muted" style="font-size:11px;"></span>
     </div>
     <div id="discoBody"><div class="empty">Click <b>Scan LAN</b> to enumerate every device on your local network.</div></div>
@@ -841,8 +844,10 @@ async function scanLan(){
       const id=esc(d.ip).replace(/\./g,'-');
       if (d.hasAgentPort) return `<td id="dep-${id}"><span class="badge" style="background:var(--good,#3ad29f);font-size:9px">✓ AGENT</span></td>`;
       if (d.deploy&&d.deploy.eligible){
-        if (j.deployEnabled) return `<td id="dep-${id}"><button class="depbtn" data-ip="${esc(d.ip)}" style="font-size:11px;padding:3px 8px">⬇ Push</button></td>`;
-        return `<td id="dep-${id}"><span class="muted" title="Set DEPLOY_ENABLED=true to enable">eligible</span></td>`;
+        const m=d.deploy.method||'ssh';
+        const label=m==='winrm'?'⬇ Push (WinRM)':'⬇ Push';
+        if (j.deployEnabled) return `<td id="dep-${id}"><button class="depbtn" data-ip="${esc(d.ip)}" data-method="${esc(m)}" title="${esc(d.deploy.reason||'')}" style="font-size:11px;padding:3px 8px">${label}</button></td>`;
+        return `<td id="dep-${id}"><span class="muted" title="Set DEPLOY_ENABLED=true to enable">eligible (${esc(m)})</span></td>`;
       }
       const reason=d.deploy?d.deploy.reason:'';
       return `<td id="dep-${id}"><span class="muted" title="${esc(reason)}">—</span></td>`;
@@ -882,13 +887,14 @@ function updateDeployBar(j){
     all.disabled=true; all.title="Set DEPLOY_ENABLED=true and restart SecTool to enable agent push-deploy.";
     $("#deployHint").textContent="push-deploy disabled (DEPLOY_ENABLED=false)";
   } else {
-    all.disabled=(n===0); all.title="Install the SecTool agent on every SSH-reachable device that isn't already running it";
-    $("#deployHint").textContent=n?(n+" SSH-reachable host"+(n===1?"":"s")+" without the agent"):"no eligible hosts (need SSH open + agent not installed)";
+    all.disabled=(n===0); all.title="Install the SecTool agent on every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it";
+    $("#deployHint").textContent=n?(n+" reachable host"+(n===1?"":"s")+" without the agent (SSH / WinRM)"):"no eligible hosts (need SSH or WinRM open + agent not installed)";
   }
 }
 function deployOpts(){
   const u=($("#discoUser").value||"").trim(), p=$("#discoPass").value||"";
-  const o={}; if(u) o.user=u; if(p) o.password=p; return o;
+  const wu=($("#discoWinUser").value||"").trim(), wp=$("#discoWinPass").value||"";
+  const o={}; if(u) o.user=u; if(p) o.password=p; if(wu) o.winUser=wu; if(wp) o.winPassword=wp; return o;
 }
 // Deploy endpoints return a structured body even on failure (HTTP 502), so read
 // the JSON regardless of status instead of throwing like api() does.
@@ -903,13 +909,14 @@ function deployStepsHtml(r){
 }
 async function deployOne(ip,btn){
   const cell=$("#dep-"+ip.replace(/\./g,'-'));
+  const method=btn.dataset.method||'ssh';
   btn.disabled=true; const label=btn.textContent; btn.textContent="⏳…";
   try {
-    const r=await apiBody("/api/discovery/deploy",Object.assign({host:ip},deployOpts()));
+    const r=await apiBody("/api/discovery/deploy",Object.assign({host:ip,method},deployOpts()));
     if (r.ok){
-      cell.innerHTML=`<span class="badge" style="background:var(--good,#3ad29f);font-size:9px" title="${esc((r.steps||[]).map(s=>s.name+': '+(s.detail||'')).join(' · '))}">✓ v${esc(r.agentVersion||'?')}</span>`;
+      cell.innerHTML=`<span class="badge" style="background:var(--good,#3ad29f);font-size:9px" title="${esc((r.method||method)+' · '+(r.steps||[]).map(s=>s.name+': '+(s.detail||'')).join(' · '))}">✓ v${esc(r.agentVersion||'?')}</span>`;
     } else {
-      cell.innerHTML=`<span class="badge" style="background:var(--critical);font-size:9px" title="${esc(r.error||'failed')}">✗ failed</span> <button class="depbtn" data-ip="${esc(ip)}" style="font-size:11px;padding:3px 8px">↻</button>`;
+      cell.innerHTML=`<span class="badge" style="background:var(--critical);font-size:9px" title="${esc(r.error||'failed')}">✗ failed</span> <button class="depbtn" data-ip="${esc(ip)}" data-method="${esc(method)}" style="font-size:11px;padding:3px 8px">↻</button>`;
       cell.querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
       const body=$("#discoBody"); const det=document.createElement("div");
       det.style.cssText="margin:6px 0;padding:8px 10px;border:1px solid var(--critical);border-radius:8px";
@@ -920,7 +927,7 @@ async function deployOne(ip,btn){
 }
 async function deployAll(){
   const btn=$("#discoDeployAll"); if(btn.disabled) return;
-  if(!confirm("Push the SecTool agent to every SSH-reachable device that isn't already running it?")) return;
+  if(!confirm("Push the SecTool agent to every reachable device (SSH, or WinRM for SSH-less Windows hosts) that isn't already running it?")) return;
   btn.disabled=true; const label=btn.innerHTML; btn.textContent="⏳ Deploying…";
   const subnet=($("#discoSubnet").value||"").trim();
   try {
@@ -929,7 +936,7 @@ async function deployAll(){
     box.style.cssText="margin:0 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2,#140f30)";
     if (r.ok===false){ box.innerHTML=`<div style="color:var(--critical)">${esc(r.error||'deploy-all failed')}</div>`; }
     else {
-      const lines=(r.results||[]).map(x=>`<div style="font-size:12px" class="${x.ok?'':'muted'}">${x.ok?'✓':'✗'} <span class="mono">${esc(x.host)}</span> — ${x.ok?('agent v'+esc(x.agentVersion||'?')):esc(x.error||'failed')}</div>`).join("");
+      const lines=(r.results||[]).map(x=>`<div style="font-size:12px" class="${x.ok?'':'muted'}">${x.ok?'✓':'✗'} <span class="mono">${esc(x.host)}</span> <span class="badge" style="font-size:8px;background:var(--muted)">${esc((x.method||'ssh').toUpperCase())}</span> — ${x.ok?('agent v'+esc(x.agentVersion||'?')):esc(x.error||'failed')}</div>`).join("");
       const skip=(r.skipped||[]).length?`<div class="muted" style="font-size:11px;margin-top:6px">Skipped (manual install): ${(r.skipped||[]).map(s=>esc(s.ip)).join(', ')}</div>`:"";
       box.innerHTML=`<div style="font-weight:600;margin-bottom:6px">⬇ Pushed agent to ${r.succeeded}/${r.attempted} eligible host(s)</div>${lines}${skip}`;
     }

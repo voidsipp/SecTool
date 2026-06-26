@@ -147,6 +147,15 @@ export interface Config {
     serverIp?: string;
     concurrency: number;
     timeoutMs: number;
+    /**
+     * WinRM transport for Windows hosts that don't run SSH. Pushes the agent by
+     * driving the local PowerShell client's `Invoke-Command` against the target,
+     * which fetches + runs the same /install.ps1 one-liner the dist server serves.
+     */
+    winrmEnabled: boolean;
+    winrmUser: string;
+    winrmPort: number;
+    winrmUseSsl: boolean;
   };
 }
 
@@ -337,7 +346,7 @@ export function loadConfig(): Config {
     },
     discovery: {
       enabled: bool("DISCOVERY_ENABLED", true),
-      ports: (optStr("DISCOVERY_PORTS") ?? "22,80,443,445,3389,53,7879")
+      ports: (optStr("DISCOVERY_PORTS") ?? "22,80,443,445,3389,53,5985,7879")
         .split(",")
         .map((s) => Number.parseInt(s.trim(), 10))
         .filter((n) => Number.isFinite(n) && n > 0 && n < 65536),
@@ -362,6 +371,12 @@ export function loadConfig(): Config {
       serverIp: optStr("DEPLOY_SERVER_IP"),
       concurrency: int("DEPLOY_CONCURRENCY", 4),
       timeoutMs: int("DEPLOY_TIMEOUT_MS", 120000),
+      // WinRM fallback for Windows hosts without SSH. Needs a password (WinRM has
+      // no key auth) and the local `powershell`/`pwsh` client to drive it.
+      winrmEnabled: bool("DEPLOY_WINRM_ENABLED", true),
+      winrmUser: str("DEPLOY_WINRM_USER", "Administrator"),
+      winrmPort: int("DEPLOY_WINRM_PORT", 5985),
+      winrmUseSsl: bool("DEPLOY_WINRM_USE_SSL", false),
     },
   };
 }
