@@ -42,6 +42,8 @@
  *   GET  /api/cooccur.md?hours=N    -> the same co-occurrence report as a downloadable .md file
  *   GET  /api/surge?hours=N         -> surge / burst (volume spikes above baseline + drivers; model + Markdown)
  *   GET  /api/surge.md?hours=N      -> the same surge report as a downloadable .md file
+ *   GET  /api/persist?hours=N       -> persistence / repeat-offender longevity (recurrence over time; model + Markdown)
+ *   GET  /api/persist.md?hours=N    -> the same persistence report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -112,6 +114,7 @@ import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
 import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
 import { buildSpread, spreadFilename } from "../analytics/spread.ts";
 import { buildSurge, surgeFilename } from "../analytics/surge.ts";
+import { buildPersistence, persistenceFilename } from "../analytics/persistence.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -863,6 +866,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${surgeFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- persistence / repeat-offender longevity (recurrence over time, not volume) ---
+      if (method === "GET" && path === "/api/persist") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || 3;
+        const sessionGapMinutes = Number(url.searchParams.get("sessionGapMinutes")) || 360;
+        return send(res, 200, buildPersistence(hours, { limit, minAlerts, sessionGapMinutes, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/persist.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || 3;
+        const sessionGapMinutes = Number(url.searchParams.get("sessionGapMinutes")) || 360;
+        const now = Date.now();
+        const { markdown } = buildPersistence(hours, { limit, minAlerts, sessionGapMinutes, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${persistenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
