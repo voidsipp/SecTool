@@ -21,6 +21,7 @@ import { protoName } from "./udm.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { alertStore } from "../store/alertStore.ts";
 import { blockStore } from "../store/blocklist.ts";
+import { watchStore } from "../store/watchlist.ts";
 
 // Collapse the IPv6 wrappers a host's socket/flow source can emit so address
 // matching sees a single canonical form. Strips "[::1]" brackets and unwraps
@@ -65,6 +66,16 @@ export interface TrafficPeer {
   ports: number[];
   protos: string[];
   lastSeen: number;
+  /**
+   * True when this peer's IP is on the operator's firewall blocklist. Seeing a
+   * blocked IP still exchanging flows with the host is a red flag — a routing
+   * leak or an endpoint reaching the peer over a path that bypasses the gateway.
+   */
+  blocked?: boolean;
+  /** True when this peer's IP matches the operator's watchlist (IP or CIDR). */
+  watched?: boolean;
+  /** The watchlist entry's free-form note, when the peer is watched and one exists. */
+  watchNote?: string;
 }
 
 export interface TrafficPort {
@@ -93,10 +104,22 @@ export interface TrafficProfile {
     bytesOut: number;
     peers: number;
     externalPeers: number;
+    /** Peers whose IP is on the firewall blocklist (see `flagged`). */
+    blockedPeers: number;
+    /** Peers whose IP matches the watchlist (see `flagged`). */
+    watchedPeers: number;
   };
   topPeers?: TrafficPeer[];
   topPorts?: TrafficPort[];
   alerts?: TrafficAlert[];
+  /**
+   * Peers that matched the operator's blocklist and/or watchlist, ranked by
+   * total bytes. Surfaced separately from `topPeers` so a flagged-but-low-volume
+   * peer is never lost to the top-N byte cut. Empty/omitted when nothing matched.
+   */
+  flagged?: TrafficPeer[];
+  /** Human-readable caveat highlighting blocked/watched peers, when any matched. */
+  note?: string;
 }
 
 export function trafficProfile(host: string, hours: number): TrafficProfile {
@@ -151,10 +174,38 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
     }
   }
 
+  // Offline threat correlation: cross-reference every peer against the operator's
+  // own firewall blocklist and watchlist. This is a pure local join — no agent,
+  // no external API — yet it surfaces the most actionable signal a flow view can
+  // give: this host is still trading traffic with an IP you've already blocked
+  // (a routing leak or an endpoint reaching it off-gateway) or one you're
+  // explicitly watching. We tag each peer and tally the matches.
+  let blockedPeers = 0;
+  let watchedPeers = 0;
+  for (const p of peers.values()) {
+    if (blockStore.has(p.ip)) {
+      p.blocked = true;
+      blockedPeers++;
+    }
+    const w = watchStore.match(p.ip);
+    if (w) {
+      p.watched = true;
+      if (w.note) p.watchNote = w.note;
+      watchedPeers++;
+    }
+  }
+
   const topPeers = [...peers.values()]
     .sort((a, b) => b.bytesIn + b.bytesOut - (a.bytesIn + a.bytesOut))
     .slice(0, 15);
   topPeers.forEach((p) => p.ports.sort((a, b) => a - b));
+  // Flagged peers get their own list (ranked by volume) so a blocked/watched peer
+  // is never hidden below the 15-peer byte cut above.
+  const flagged = [...peers.values()]
+    .filter((p) => p.blocked || p.watched)
+    .sort((a, b) => b.bytesIn + b.bytesOut - (a.bytesIn + a.bytesOut))
+    .slice(0, 20);
+  flagged.forEach((p) => p.ports.sort((a, b) => a - b));
   const topPorts = [...ports.values()].sort((a, b) => b.flows - a.flows).slice(0, 12);
 
   const alerts: TrafficAlert[] = [];
@@ -173,6 +224,17 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
     if (alerts.length >= 20) break;
   }
 
+  const notes: string[] = [];
+  if (blockedPeers > 0) {
+    notes.push(
+      `${blockedPeers} peer(s) on the firewall blocklist are still exchanging traffic with this host — ` +
+        `a routing leak or an endpoint reaching them off-gateway; investigate the flagged peers.`,
+    );
+  }
+  if (watchedPeers > 0) {
+    notes.push(`${watchedPeers} watchlisted peer(s) seen in this window.`);
+  }
+
   return {
     ok: true,
     host,
@@ -183,10 +245,14 @@ export function trafficProfile(host: string, hours: number): TrafficProfile {
       bytesOut,
       peers: peers.size,
       externalPeers: [...peers.values()].filter((p) => p.external).length,
+      blockedPeers,
+      watchedPeers,
     },
     topPeers,
     topPorts,
     alerts,
+    flagged: flagged.length > 0 ? flagged : undefined,
+    note: notes.length > 0 ? notes.join(" ") : undefined,
   };
 }
 
