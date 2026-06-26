@@ -97,7 +97,9 @@ export interface LivePortActivity {
    * current-sessions-only view and notes when no matching connections exist;
    * surfaces the host's live WAN egress — which outbound service ports are
    * reaching external peers right now, i.e. the very activity an outbound-port
-   * IDS/IPS alert is about — and flags any unsolicited inbound from the WAN; and
+   * IDS/IPS alert is about — together with the TCP handshake posture of that
+   * egress (ESTABLISHED = data flowing now vs. half-open SYN_SENT = beaconing to
+   * a dead/sinkholed peer); flags any unsolicited inbound from the WAN; and
    * — importantly — flags when the snapshot was truncated by the gateway-side
    * line cap (aggregates are then only a lower bound) or by the per-connection
    * detail cap, so an operator never mistakes a bounded sample for the full
@@ -253,6 +255,15 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   // anomalous and called out separately in the note.
   const externalOutPeers = new Set<string>();
   const externalInPeers = new Set<string>();
+  // TCP handshake posture of the live WAN egress. Whether the flagged outbound
+  // sessions are ESTABLISHED (a peer is answering and data is flowing on the
+  // port right now) or stuck half-open (SYN_SENT/SYN_RECV — repeated attempts to
+  // an unreachable or filtered peer, the classic shape of beaconing to a dead or
+  // sinkholed C2) is the first triage question an outbound-port alert raises, so
+  // tally it here and surface it in the note. UDP egress has no handshake, so
+  // only TCP connections are counted.
+  const externalOutStates = new Map<string, number>();
+  let externalOutTcpConns = 0;
 
   for (const line of lines) {
     const p = parseConntrackLine(line);
@@ -285,7 +296,14 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
     const bytes = p.bytes ?? 0;
     if (direction === "outbound") {
       outboundConns++;
-      if (remoteExternal && remoteIp) externalOutPeers.add(remoteIp);
+      if (remoteExternal && remoteIp) {
+        externalOutPeers.add(remoteIp);
+        if (p.proto === "tcp") {
+          externalOutTcpConns++;
+          const st = p.state ?? "UNKNOWN";
+          externalOutStates.set(st, (externalOutStates.get(st) ?? 0) + 1);
+        }
+      }
       if (remotePort) pushGroup(outbound, p.proto, remotePort, remoteIp, p.state, bytes);
     } else if (direction === "inbound") {
       inboundConns++;
@@ -316,8 +334,9 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   const inGroups = sortGroups([...inbound.values()]);
 
   // Compose the snapshot note: provenance first, then the live WAN egress/ingress
-  // finding (the reason this view is open), then any truncation caveats so a
-  // bounded sample is never mistaken for a complete view of the host.
+  // finding (the reason this view is open) followed by the egress handshake
+  // posture, then any truncation caveats so a bounded sample is never mistaken
+  // for a complete view of the host.
   const noteParts: string[] = [];
   if (lines.length === 0) {
     noteParts.push(
@@ -343,6 +362,26 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
     noteParts.push(
       `${host} is reaching ${externalOutPeers.size} external (WAN) peer${externalOutPeers.size === 1 ? "" : "s"} on ${extOutGroups.length} outbound service port${extOutGroups.length === 1 ? "" : "s"}: ${portList}${more} — these are the live egress sessions an outbound-port alert would be flagging.`,
     );
+    // Characterise the TCP handshake posture of those WAN egress sessions. An
+    // ESTABLISHED session means a peer is answering and data is moving on the
+    // flagged port at this instant (active exfil/C2); a body of half-open
+    // SYN_SENT/SYN_RECV entries with nothing ESTABLISHED is the signature of
+    // beaconing to an unreachable or sinkholed peer. Either way it tells the
+    // operator whether the alert is firing on a live channel or a dead one.
+    if (externalOutTcpConns > 0) {
+      const established = externalOutStates.get("ESTABLISHED") ?? 0;
+      const halfOpen =
+        (externalOutStates.get("SYN_SENT") ?? 0) + (externalOutStates.get("SYN_RECV") ?? 0);
+      if (established > 0) {
+        noteParts.push(
+          `${established} of those WAN egress TCP session${established === 1 ? " is" : "s are"} ESTABLISHED — a peer is answering and data is flowing on the flagged port right now.`,
+        );
+      } else if (halfOpen > 0) {
+        noteParts.push(
+          `None of the WAN egress TCP sessions are ESTABLISHED — ${halfOpen} ${halfOpen === 1 ? "is" : "are"} half-open (SYN_SENT/SYN_RECV) with no completed handshake, the classic shape of beaconing to an unreachable or sinkholed destination.`,
+        );
+      }
+    }
   }
   // Unsolicited inbound from the WAN to an internal host is rarer and more
   // alarming than egress, so flag it on its own line when present.
