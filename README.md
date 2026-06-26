@@ -355,6 +355,13 @@ or a **fan-out spike** (sudden scanning). Catches novel malware, exfil, and worm
 behavior. Needs `ANOMALY_MIN_LEARN_HOURS` to learn first; anomalies appear on the
 🖥️ Hosts page and (optionally) Discord.
 
+NetFlow is packet-sampled (`NETFLOW_SAMPLING_RATE`, 1:512 on the UDM Pro), so
+volume detection scales the observed bytes back up by that rate to an estimated
+true volume — a real ~50 MB/h exfil trips the threshold instead of looking 512×
+too small. Distinct-port and fan-out counts can't be scaled linearly, so they're
+judged relative to each host's own baseline (they remain conservative lower
+bounds). Set `NETFLOW_SAMPLING_RATE=1` if your exporter doesn't sample.
+
 ## Threat-intel feeds (`INTEL_FEEDS_ENABLED`, `--feeds`)
 
 Fetches public IP blocklists (abuse.ch Feodo/SSLBL, blocklist.de, FireHOL level1,

@@ -84,6 +84,15 @@ export interface Config {
     autoConfigureUdm: boolean;
     advertiseIp?: string;
     persist: boolean;
+    /**
+     * Packet-sampling rate of the gateway's flow export (1:N). UDM/UniFi NetFlow
+     * is sampled — only ~1 in N packets is observed — so raw flow byte/packet
+     * counts are roughly this factor smaller than the true traffic. Consumers
+     * that reason about absolute volume (e.g. behavioral baselining) scale
+     * sampled counts up by this rate to estimate real volume. Defaults to 512
+     * (the UDM Pro default); set to 1 if your exporter does not sample.
+     */
+    samplingRate: number;
   };
   enrich: {
     vtApiKey?: string;
@@ -304,6 +313,7 @@ export function loadConfig(): Config {
       autoConfigureUdm: bool("NETFLOW_AUTOCONFIGURE_UDM", true),
       advertiseIp: optStr("NETFLOW_ADVERTISE_IP"),
       persist: bool("NETFLOW_PERSIST", true),
+      samplingRate: Math.max(1, int("NETFLOW_SAMPLING_RATE", 512)),
     },
     enrich: {
       vtApiKey: optStr("VT_API_KEY"),

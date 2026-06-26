@@ -6,7 +6,16 @@
  * (which are constant for normal browsing).
  *
  * Signals: new outbound service port, outbound volume spike, fan-out spike.
- * Note: forward-only and 1:512-sampled, so treat as directional, not absolute.
+ *
+ * Flows are packet-sampled by the gateway (cfg.netflow.samplingRate, ~1:512 on
+ * the UDM Pro) and forward-only, so raw flow byte counts are only a fraction of
+ * the real traffic. Volume detection scales sampled bytes back up by that rate
+ * to an *estimated* true volume before applying the absolute MB thresholds — so
+ * a real exfil of N MB/h actually trips an N-MB threshold instead of looking
+ * ~rate× too small to ever fire. Counts that can't be scaled linearly (distinct
+ * ports and fan-out) stay as conservative lower bounds — sampling can only hide
+ * destinations, never invent them — so those are judged relative to each host's
+ * own learned baseline rather than an absolute floor.
  */
 import { isIP } from "node:net";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -22,6 +31,12 @@ const DATA_DIR = fileURLToPath(new URL("../../data", import.meta.url));
 const PROFILES_PATH = join(DATA_DIR, "host-profiles.json");
 const ANOM_PATH = join(DATA_DIR, "anomalies.json");
 const COMMON_PORTS = new Set([53, 80, 123, 443, 853, 993, 995, 5223, 8443]);
+
+// Absolute volume thresholds, expressed in real-world (de-sampled) bytes. Raw
+// flow byte counts are scaled up by cfg.netflow.samplingRate before comparison,
+// so these read as the true hourly volumes an analyst reasons about.
+const MIN_BASELINE_BYTES = 1_000_000; // need a learned peak this large before volume-spike checks
+const MIN_SPIKE_BYTES = 50_000_000; // and at least this much estimated this hour to flag
 
 interface Profile {
   firstSeen: number;
@@ -86,6 +101,9 @@ export function updateAndDetect(cfg: Config, now = Date.now()): Anomaly[] {
   const found: Anomaly[] = [];
   const learnMs = cfg.anomaly.minLearnHours * 3_600_000;
   const factor = cfg.anomaly.volumeSpikeFactor;
+  // Scale sampled bytes up to an estimated true volume so the absolute MB
+  // thresholds reflect real traffic, not the ~1/rate fraction we observe.
+  const sampling = cfg.netflow.samplingRate;
 
   for (const [ip, a] of agg) {
     const p = profiles[ip] ?? { firstSeen: now, lastSeen: now, ports: [], peakHourBytes: 0, peakHourFanout: 0 };
@@ -95,8 +113,10 @@ export function updateAndDetect(cfg: Config, now = Date.now()): Anomaly[] {
     if (!learning) {
       const newPorts = [...a.ports].filter((pt) => !known.has(pt) && !COMMON_PORTS.has(pt));
       if (newPorts.length) push(found, ip, "new-port", `new outbound port(s): ${newPorts.slice(0, 8).join(", ")}`, now);
-      if (p.peakHourBytes > 1_000_000 && a.bytes > p.peakHourBytes * factor && a.bytes > 50_000_000)
-        push(found, ip, "volume-spike", `outbound ${(a.bytes / 1e6).toFixed(0)}MB this hour vs ~${(p.peakHourBytes / 1e6).toFixed(0)}MB baseline`, now);
+      const estBytes = a.bytes * sampling;
+      const estPeakBytes = p.peakHourBytes * sampling;
+      if (estPeakBytes > MIN_BASELINE_BYTES && a.bytes > p.peakHourBytes * factor && estBytes > MIN_SPIKE_BYTES)
+        push(found, ip, "volume-spike", `~${(estBytes / 1e6).toFixed(0)}MB outbound this hour (est.) vs ~${(estPeakBytes / 1e6).toFixed(0)}MB baseline`, now);
       if (p.peakHourFanout >= 10 && a.externals.size > p.peakHourFanout * factor && a.externals.size > 40)
         push(found, ip, "fanout-spike", `${a.externals.size} distinct externals this hour vs ~${p.peakHourFanout} baseline (possible scanning)`, now);
     }
