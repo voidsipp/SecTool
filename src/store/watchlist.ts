@@ -18,6 +18,9 @@ import { log } from "../logger.ts";
 const DATA_DIR = fileURLToPath(new URL("../../data", import.meta.url));
 const STORE_PATH = join(DATA_DIR, "watchlist.json");
 
+/** Longest note we persist for a watch entry — see {@link sanitizeNote}. */
+const NOTE_MAX_LEN = 500;
+
 export interface WatchEntry {
   /** The original entry as the user wrote it — IP or CIDR string. */
   target: string;
@@ -25,8 +28,28 @@ export interface WatchEntry {
   family: 4 | 6 | 0;
   /** When the entry was added (epoch ms). */
   at: number;
-  /** Free-form note ("known C2", "vendor pen-test", etc.). */
+  /**
+   * Free-form note explaining why the address is watched ("known C2",
+   * "vendor pen-test", etc.). Stored normalised and length-bounded by
+   * {@link sanitizeNote}; consumers may further clamp it for display.
+   */
   note?: string;
+}
+
+/**
+ * Normalise a free-form operator note before persisting it. The note is raw
+ * user input that flows into `watchlist.json`, the dashboard highlight and the
+ * Watchlist page, so we trim surrounding whitespace and cap the length to keep
+ * a pathological multi-kilobyte paste from bloating the on-disk store. Returns
+ * `undefined` for empty / whitespace-only input so an absent note and a blank
+ * one are stored identically.
+ */
+function sanitizeNote(note: string | undefined): string | undefined {
+  if (typeof note !== "string") return undefined;
+  const trimmed = note.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= NOTE_MAX_LEN) return trimmed;
+  return `${trimmed.slice(0, NOTE_MAX_LEN - 1).trimEnd()}…`;
 }
 
 interface ParsedCidr {
@@ -85,7 +108,7 @@ class WatchStore {
       const arr = JSON.parse(readFileSync(STORE_PATH, "utf8")) as WatchEntry[];
       for (const e of arr) {
         if (!e?.target) continue;
-        this.#map.set(e.target, e);
+        this.#map.set(e.target, { ...e, note: sanitizeNote(e.note) });
         if (e.family === 0) {
           const cidr = parseCidr(e.target);
           if (cidr) this.#cidrs.push({ key: e.target, cidr });
@@ -110,13 +133,18 @@ class WatchStore {
     this.#ensure();
     const c = canonicalizeTarget(raw);
     if (!c) return null;
+    const clean = sanitizeNote(note);
     const existing = this.#map.get(c.canonical);
     if (existing) {
-      if (note !== undefined) existing.note = note;
-      this.#persist();
+      // Already watched — keep the original timestamp but let the operator
+      // attach or amend the justification on a re-add (matches the safelist).
+      if (note !== undefined && clean !== existing.note) {
+        existing.note = clean;
+        this.#persist();
+      }
       return existing;
     }
-    const entry: WatchEntry = { target: c.canonical, family: c.family, at: Date.now(), note };
+    const entry: WatchEntry = { target: c.canonical, family: c.family, at: Date.now(), note: clean };
     this.#map.set(c.canonical, entry);
     if (c.family === 0) {
       const cidr = parseCidr(c.canonical);
