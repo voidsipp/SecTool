@@ -915,8 +915,10 @@ export interface EgressAudit {
    * malicious destinations (authoritative threat-intel verdicts / curated feeds,
    * naming the sources and addresses), then suspicious outbound ports (naming the
    * actual destination port numbers), then watchlist matches (naming the
-   * operator's own notes for *why* each address is watched), then result
-   * truncation and/or degraded enrichment. Undefined when there is nothing to flag.
+   * operator's own notes for *why* each address is watched), then the host-side
+   * process(es) responsible for the risky egress (the operator's first pivot —
+   * what to inspect or terminate), then result truncation and/or degraded
+   * enrichment. Undefined when there is nothing to flag.
    */
   note?: string;
   /**
@@ -1172,6 +1174,34 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       `${watchedCount} audited peer(s) are on the operator watchlist — this host is reaching an address ` +
         `you flagged for close monitoring${detail}; review the flagged peers.`,
     );
+  }
+  // Attribute the risky egress to the responsible process(es) on the host. The
+  // agent reports the owning process for each socket, so once a peer is blocked,
+  // reputation-flagged, watch-listed, or reached on a suspicious port, the
+  // operator's first pivot is "what program is doing this" — naming it turns the
+  // audit into a direct lead (inspect or kill that process) instead of just a set
+  // of remote addresses to chase. Distinct, ordered, and capped; only emitted
+  // when at least one risky peer carries a known owning process (kernel or
+  // otherwise-unattributed sockets report none, in which case we stay silent
+  // rather than imply attribution we don't have).
+  const riskyPeers = peers.filter((p) => p.risk);
+  if (riskyPeers.length > 0) {
+    const procs = [
+      ...new Set(
+        riskyPeers
+          .flatMap((p) => p.processes)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+    if (procs.length > 0) {
+      const shown = procs.slice(0, 5);
+      const more = procs.length - shown.length;
+      notes.push(
+        `Risky egress is attributed to host process(es) ${shown.join(", ")}` +
+          `${more > 0 ? `, +${more} more` : ""} — inspect or terminate these to stop the connection(s).`,
+      );
+    }
   }
   if (distinctRemote > peers.length) {
     notes.push(
