@@ -724,6 +724,10 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   // (not a sum) so the figure stays accurate even when one peer reaches several
   // ports — summing per-port counts would double-count that peer.
   let corroboratedPeerPeak = 0;
+  // The actual port numbers NetFlow corroborated, so the note can name them
+  // instead of only counting them — on an unknown-bind host the operator has no
+  // bind data to cross-reference, so a bare count isn't directly actionable.
+  const corroboratedPorts: number[] = [];
   let flowStoreActive = false;
   if (!sawLocalAddr && listeners.length > 0) {
     const evidence = flowExposureEvidence(host);
@@ -733,6 +737,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
       if (!hit) continue;
       l.observedInbound = hit;
       corroborated++;
+      corroboratedPorts.push(l.port);
       if (hit.external) corroboratedExternal++;
       if (hit.peers > corroboratedPeerPeak) corroboratedPeerPeak = hit.peers;
     }
@@ -761,13 +766,25 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     // reporting what the gateway's NetFlow could corroborate about these ports.
     let note = info.note;
     if (corroborated > 0) {
+      // Name the exact ports so the operator can go check them directly, and only
+      // point at "the flagged listeners" when a corroborated port is actually a
+      // known-sensitive service — otherwise that reference dangles (nothing is
+      // flagged) and we instead prompt a generic exposure review.
+      const portList = corroboratedPorts
+        .slice()
+        .sort((a, b) => a - b)
+        .join(", ");
+      const corroboratedRisky = listeners.filter((l) => l.observedInbound && l.risk).length;
       note +=
-        ` However, the gateway's NetFlow recorded off-host connections to ${corroborated} of these port(s)` +
+        ` However, the gateway's NetFlow recorded off-host connections to ${corroborated} of these port(s) (${portList})` +
         (corroboratedExternal > 0 ? `, ${corroboratedExternal} from a public peer,` : "") +
         (corroboratedPeerPeak > 1
           ? ` reached by as many as ${corroboratedPeerPeak} distinct peers on a single port,`
           : "") +
-        ` confirming they are network-reachable regardless — see the flagged listeners.`;
+        ` confirming they are network-reachable regardless` +
+        (corroboratedRisky > 0
+          ? ` — see the flagged listeners.`
+          : `; none match a known-sensitive service, but review whether each should be reachable off-host.`);
     } else if (flowStoreActive) {
       note +=
         ` Collected NetFlow shows no off-host connections to these ports, but flow data is` +
