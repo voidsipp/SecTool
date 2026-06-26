@@ -27,7 +27,90 @@ export interface CaptureResult {
   command: string;
   packets: number;
   lines: string[];
+  /**
+   * Human-readable triage line for the capture. For the failure cases this
+   * explains why nothing was captured (tcpdump missing, host quiet); when
+   * packets *were* seen it summarizes the live conversation — distinct peers,
+   * in/out direction balance, and the busiest service ports — so the operator
+   * gets the shape of the traffic without scanning the raw tcpdump dump.
+   */
   note?: string;
+}
+
+/** Split a tcpdump `addr.port` token into its IP and (optional) port. */
+function splitEndpoint(token: string): { ip?: string; port?: number } {
+  const dot = token.lastIndexOf(".");
+  if (dot > 0) {
+    const portStr = token.slice(dot + 1);
+    const ip = token.slice(0, dot);
+    // tcpdump renders both IPv4 (1.2.3.4.443) and IPv6 (2001:db8::1.443) this way.
+    if (/^\d+$/.test(portStr) && isIP(ip) > 0) return { ip, port: Number(portStr) };
+  }
+  // No trailing port (e.g. ICMP) — the whole token is the address.
+  return isIP(token) > 0 ? { ip: token } : {};
+}
+
+/**
+ * Summarize parsed tcpdump lines into a one-line triage note: how many IP
+ * packets were seen, across how many distinct peers, the inbound/outbound
+ * balance relative to the captured host(s), and the busiest service ports.
+ * Returns undefined if nothing parseable (e.g. ARP-only traffic) so the
+ * caller can fall back to its generic phrasing.
+ */
+function summarizeCapture(lines: string[], hosts: Set<string>): string | undefined {
+  // `IP[6] <src> > <dst>:` is the common prefix for v4/v6 tcp/udp/icmp lines,
+  // optionally preceded by an `-i any` interface + In/Out direction field. The
+  // dst group is greedy so it backtracks to the colon-before-space, keeping
+  // IPv6 addresses (whose internal colons would trip a lazy match) intact.
+  const wire = /\bIP6?\s+(\S+)\s+>\s+(\S+):/;
+  let parsed = 0;
+  let inbound = 0;
+  let outbound = 0;
+  const peers = new Set<string>();
+  const portCounts = new Map<number, number>();
+
+  for (const line of lines) {
+    const m = wire.exec(line);
+    if (!m) continue;
+    const src = splitEndpoint(m[1]);
+    const dst = splitEndpoint(m[2]);
+    if (!src.ip || !dst.ip) continue;
+    parsed++;
+
+    const srcLocal = hosts.has(src.ip);
+    const dstLocal = hosts.has(dst.ip);
+    if (srcLocal && !dstLocal) {
+      outbound++;
+      peers.add(dst.ip);
+    } else if (dstLocal && !srcLocal) {
+      inbound++;
+      peers.add(src.ip);
+    } else {
+      // Both or neither are our host(s) — still count the far side as a peer.
+      peers.add(srcLocal ? dst.ip : src.ip);
+    }
+
+    // The lower of the two ports is almost always the service/well-known port,
+    // the higher being an ephemeral client port — count that as the signal.
+    const ports = [src.port, dst.port].filter((p): p is number => p !== undefined);
+    if (ports.length) {
+      const service = Math.min(...ports);
+      portCounts.set(service, (portCounts.get(service) ?? 0) + 1);
+    }
+  }
+
+  if (parsed === 0) return undefined;
+
+  const topPorts = [...portCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, 4)
+    .map(([port, count]) => `${port}×${count}`);
+
+  const peerWord = peers.size === 1 ? "peer" : "peers";
+  let note = `${parsed} IP packet${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
+  if (outbound || inbound) note += ` (${outbound} out / ${inbound} in)`;
+  if (topPorts.length) note += `; busiest ports ${topPorts.join(", ")}`;
+  return note + ".";
 }
 
 /** Live tcpdump of current traffic to/from the given host(s). */
@@ -45,17 +128,23 @@ export async function capture(ips: string[], seconds: number): Promise<CaptureRe
     .map((l) => l.trim())
     .filter((l) => l && !/^tcpdump:|listening on|packets (captured|received|dropped)|^\d+ packets/i.test(l));
   const noTcpdump = /command not found|not found/i.test(out);
+
+  let note: string | undefined;
+  if (noTcpdump) {
+    note = "tcpdump not available on the UDM.";
+  } else if (lines.length === 0) {
+    note = `No packets involving ${valid.join(", ")} during the ${sec}s window (the threat may be historical / not currently active).`;
+  } else {
+    note = summarizeCapture(lines, new Set(valid));
+  }
+
   return {
     ips: valid,
     seconds: sec,
     command: remote,
     packets: lines.length,
     lines: lines.slice(0, 300),
-    note: noTcpdump
-      ? "tcpdump not available on the UDM."
-      : lines.length === 0
-        ? `No packets involving ${valid.join(", ")} during the ${sec}s window (the threat may be historical / not currently active).`
-        : undefined,
+    note,
   };
 }
 
