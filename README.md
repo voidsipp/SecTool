@@ -726,6 +726,48 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/direction.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --direction 168 [--limit 15]` (or `npm run direction`) → print the Markdown to stdout (defaults to a 7-day window so outbound/lateral signals reflect more than one shift).
 
+## 🫀 Signature lifecycle / chronic-vs-acute report (`GET /api/lifecycle[.md]`, `--lifecycle`)
+
+Every other report measures a signature by **how much** it fires (tuning,
+trends, focus), **who** fires it (persistence, netblock, edges), or **when it was
+first seen** (novelty). None measures the **temporal shape** of a signature — how
+its alerts are *distributed across the window* — even though that shape is the
+best discriminator between two operationally opposite things that look identical
+in a volume ranking. A signature firing 500 times spread evenly over a week and
+one firing 500 times inside ten minutes have the same volume and the same
+top-signature rank, but the first is **background noise to tune out** and the
+second is a **discrete event to investigate**. This report tells them apart.
+
+Each signature's alerts are bucketed into equal time slices, and from the
+per-bucket counts it computes two orthogonal measures — **coverage** (the share
+of slices the signature fired in; high = ever-present) and **burstiness** (a
+0..1 normalized dispersion of the counts; 0 = perfectly even, 1 = all in one
+slice) — then assigns one of four shapes, in descending investigate-priority:
+
+- **acute** — alerts concentrated into a short burst; a discrete event. Investigate.
+- **one-shot** — fired in a single slice only; an isolated blip. Triage.
+- **intermittent** — on-and-off, neither steady nor a single spike. Watch.
+- **chronic** — steady, broad coverage, low dispersion; background noise. Tune / suppress.
+
+Each row carries the context to act: total volume and per-day rate, peak-slice
+share and when it landed, distinct sources / destinations, severity ceiling,
+lifespan, and a **💤 dormant** flag for a recurring rule that went silent
+mid-window (fixed, rotated away, or a sensor gap). The summary quantifies the
+**noise floor** — how much of the firehose is chronic background and therefore
+suppressible — and pulls out the loudest acute bursts as the morning's
+investigate-first list.
+
+Honest about its limits: **shape is window-relative** (a rule that looks acute
+in a 24h window can look chronic in a 7-day one) and depends on the bucket
+granularity, which is printed for reproducibility. A "chronic" shape means a rule
+fires steadily, **not** that it is benign — cross-check the tuning report's
+operator-value evidence before suppressing. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/lifecycle?hours=N[&limit=25][&buckets=N]` → the structured model **plus** rendered Markdown (per-shape roll-up table, per-signature lifecycle ranking).
+- `GET /api/lifecycle.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --lifecycle 168 [--limit 25] [--buckets N]` (or `npm run lifecycle`) → print the Markdown to stdout (defaults to a 7-day window so chronic vs acute shape reflects more than one shift).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
