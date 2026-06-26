@@ -36,6 +36,8 @@
  *   GET  /api/beacon.md?hours=N     -> the same beaconing report as a downloadable .md file
  *   GET  /api/efficacy?hours=N      -> IPS enforcement-gap / efficacy (block rate + detect-only gaps; model + Markdown)
  *   GET  /api/efficacy.md?hours=N   -> the same efficacy report as a downloadable .md file
+ *   GET  /api/spread?hours=N        -> spread / fan-out (scanning sources + sprayed targets; model + Markdown)
+ *   GET  /api/spread.md?hours=N     -> the same spread report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -104,6 +106,7 @@ import { buildNovelty, noveltyFilename } from "../analytics/novelty.ts";
 import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
 import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
 import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
+import { buildSpread, spreadFilename } from "../analytics/spread.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -784,6 +787,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${efficacyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- spread / fan-out (scanning sources + sprayed targets) ---
+      if (method === "GET" && path === "/api/spread") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minPeers = Number(url.searchParams.get("minPeers")) || 8;
+        return send(res, 200, buildSpread(hours, { limit, minPeers, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/spread.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minPeers = Number(url.searchParams.get("minPeers")) || 8;
+        const now = Date.now();
+        const { markdown } = buildSpread(hours, { limit, minPeers, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${spreadFilename(now)}"`,
         });
         res.end(markdown);
         return;

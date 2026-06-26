@@ -25,6 +25,7 @@
     "killchain": "node src/index.ts --killchain 168",
     "beacon": "node src/index.ts --beacon 168",
     "efficacy": "node src/index.ts --efficacy 168",
+    "spread": "node src/index.ts --spread 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
