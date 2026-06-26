@@ -1292,13 +1292,15 @@ function renderTraffic(j){
 function renderListeners(j){
   if (!(j.listeners||[]).length) return '<div class="empty">No listening sockets reported by the agent.</div>';
   const EXP={'all-interfaces':['ALL IFACES','var(--critical,#ff5c7c)'],'localhost':['LOCALHOST','var(--muted)'],'specific':['BOUND','var(--accent)'],'unknown':['?','var(--muted)']};
-  const row=l=>{ const e=EXP[l.exposure]||EXP.unknown; return `<tr>
-    <td class="mono">${esc(l.proto)} ${l.port}</td>
+  const row=l=>{ const e=EXP[l.exposure]||EXP.unknown; return `<tr style="${l.risk?'background:rgba(255,92,124,.08)':''}" title="${esc((l.riskReasons||[]).join('; '))}">
+    <td class="mono">${l.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${esc(l.proto)} ${l.port}</td>
     <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
     <td><span class="badge" style="background:${e[1]}">${e[0]}</span></td>
     <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td></tr>`; };
-  let h=`<div class="muted" style="margin-bottom:8px">${j.count} listening service(s)${j.exposed?` · <span style="color:var(--critical,#ff5c7c)">${j.exposed} on all interfaces</span>`:''}</div>`;
+  let h=`<div class="muted" style="margin-bottom:8px">${j.count} listening service(s)${j.risky?` · <span style="color:var(--critical,#ff5c7c)">${j.risky} risky</span>`:''}${j.exposed?` · <span style="color:var(--critical,#ff5c7c)">${j.exposed} on all interfaces</span>`:''}</div>`;
   h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Port</th><th>Process</th><th>Exposure</th><th>Binary</th></tr></thead><tbody>${j.listeners.map(row).join("")}</tbody></table>`;
+  const risky=(j.listeners||[]).filter(l=>l.risk);
+  if (risky.length) h+=`<div style="margin-top:6px;font-size:11px"><span style="color:var(--critical,#ff5c7c)">⚠ Sensitive services reachable off-host:</span> ${esc(risky.map(l=>(l.riskReasons||[]).join('; ')).join(' · '))}</div>`;
   if (j.note) h+=`<div class="muted" style="margin-top:6px;font-size:11px">${esc(j.note)}</div>`;
   return h;
 }
