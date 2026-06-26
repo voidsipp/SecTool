@@ -202,6 +202,14 @@ export interface ListenerAudit {
   listeners?: Listener[];
   /** Installed agent version, resolved from /health when bind data was missing. */
   agentVersion?: string;
+  /**
+   * Human-readable caveats about this audit, joined into one string. Leads with
+   * a summary of any network-reachable sensitive services found (so the operator
+   * sees what to lock down without scanning the list), and/or notes that the
+   * agent couldn't report bind addresses — in which case exposure is "unknown"
+   * and risk classification is degraded (see `agentVersion`). Undefined when
+   * there is nothing to flag.
+   */
   note?: string;
 }
 
@@ -367,14 +375,27 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
       a.port - b.port ||
       a.proto.localeCompare(b.proto),
   );
-  // Only chase the agent's version when bind data is genuinely missing AND there
-  // is something to report — a host with no listeners needs no upgrade nag.
-  let note: string | undefined;
+  // Build the operator-facing caveats. Only chase the agent's version when bind
+  // data is genuinely missing AND there is something to report — a host with no
+  // listeners needs no upgrade nag.
+  const notes: string[] = [];
   let agentVersion: string | undefined;
   if (!sawLocalAddr && listeners.length > 0) {
     const info = await bindExposureNote(cfg, host);
-    note = info.note;
+    notes.push(info.note);
     agentVersion = info.agentVersion;
+  }
+  // Lead with the actionable takeaway: name the dangerous, network-reachable
+  // services so they can't be lost among a long listener list.
+  const risky = listeners.filter((l) => l.risk);
+  if (risky.length > 0) {
+    const names = [
+      ...new Set(risky.map((l) => RISKY_SERVICES[l.port]?.name ?? `port ${l.port}`)),
+    ];
+    notes.unshift(
+      `${risky.length} network-reachable sensitive service(s) detected (${names.join(", ")}) — ` +
+        `review whether each should be exposed off-host.`,
+    );
   }
 
   return {
@@ -382,10 +403,10 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     host: r.host,
     count: listeners.length,
     exposed: listeners.filter((l) => l.exposure === "all-interfaces").length,
-    risky: listeners.filter((l) => l.risk).length,
+    risky: risky.length,
     listeners,
     agentVersion,
-    note,
+    note: notes.length > 0 ? notes.join(" ") : undefined,
   };
 }
 
