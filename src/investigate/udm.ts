@@ -310,7 +310,85 @@ export interface DnsResult {
   windowMinutes: number;
   total: number;
   domains: Array<{ domain: string; count: number }>;
+  /**
+   * Human-readable triage line for the DNS snapshot. When there are no queries
+   * it says so (the log may have rotated, or resolution didn't go via the UDM
+   * resolver); when queries *are* present it summarizes them — total volume,
+   * the breadth of distinct domains, and the busiest domains — and, because DNS
+   * is a common exfiltration / C2 channel, flags the two indicators that stand
+   * out in a flat query log: an unusually long label (data smuggled into the
+   * name) and one parent domain fanning out into many distinct subdomains (the
+   * footprint of DNS tunneling or DGA beaconing). The network-wide attribution
+   * caveat is always appended, since this log isn't per-client.
+   */
   note?: string;
+}
+
+/** The registrable-ish parent of a hostname: its last two dot-labels. */
+function dnsParent(domain: string): string {
+  const labels = domain.replace(/\.$/, "").split(".").filter(Boolean);
+  return labels.length <= 2 ? labels.join(".") : labels.slice(-2).join(".");
+}
+
+// Per-client attribution isn't available in the UDM's network-wide resolver log,
+// so every populated DNS note carries this caveat to keep the operator honest
+// about what the data can and can't pin to a single host.
+const DNS_ATTRIBUTION_CAVEAT =
+  "DNS is logged network-wide via the UDM resolver (per-client attribution isn't available in this log).";
+
+/**
+ * Summarize the DNS query log into a one-line triage note. Surfaces query
+ * volume, distinct-domain breadth and the busiest domains, then flags the two
+ * sharpest compromise signals visible in a flat query log: an unusually long
+ * DNS label (possible data exfiltration via the name) and a parent domain with
+ * an abnormal number of distinct subdomains (possible DNS tunneling / DGA
+ * beaconing). `counts` is the full per-domain tally (not the truncated top-N)
+ * so the tunneling fan-out is measured across every domain seen in the window.
+ */
+function summarizeDns(counts: Map<string, number>, total: number): string {
+  const distinct = counts.size;
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([domain, count]) => `${domain}×${count}`);
+
+  // Tunneling/DGA indicators, computed over every distinct domain:
+  //  - the longest single dot-label (encoded payloads inflate label length);
+  //  - the parent domain answering the most distinct subdomains (a tunnel or
+  //    DGA fans one registrable domain out into many one-off names).
+  let longestLabel = 0;
+  const fanout = new Map<string, Set<string>>();
+  for (const domain of counts.keys()) {
+    for (const label of domain.replace(/\.$/, "").split(".")) {
+      if (label.length > longestLabel) longestLabel = label.length;
+    }
+    const parent = dnsParent(domain);
+    let subs = fanout.get(parent);
+    if (!subs) fanout.set(parent, (subs = new Set()));
+    subs.add(domain);
+  }
+  let topFanout: { parent: string; subs: number } | undefined;
+  for (const [parent, subs] of fanout) {
+    if (!topFanout || subs.size > topFanout.subs) topFanout = { parent, subs: subs.size };
+  }
+
+  const domainWord = distinct === 1 ? "domain" : "domains";
+  let note = `${total} DNS quer${total === 1 ? "y" : "ies"} across ${distinct} distinct ${domainWord}`;
+  if (top.length) note += `; busiest ${top.join(", ")}`;
+  note += ".";
+
+  const flags: string[] = [];
+  if (longestLabel >= 40) {
+    flags.push(`unusually long DNS label (${longestLabel} chars) — possible exfiltration/tunneling`);
+  }
+  if (topFanout && topFanout.subs >= 20) {
+    flags.push(
+      `${topFanout.subs} distinct subdomains under ${topFanout.parent} — possible DNS tunneling / DGA beaconing`,
+    );
+  }
+  if (flags.length) note += ` Watch: ${flags.join("; ")}.`;
+
+  return `${note} ${DNS_ATTRIBUTION_CAVEAT}`;
 }
 
 /**
@@ -349,7 +427,7 @@ export async function dnsActivity(timeMs: number, windowMinutes: number): Promis
     note:
       total === 0
         ? "No DNS queries in this window (log may have rotated, or queries weren't via the UDM resolver)."
-        : "DNS is logged network-wide via the UDM resolver (per-client attribution isn't available in this log).",
+        : summarizeDns(counts, total),
   };
 }
 
