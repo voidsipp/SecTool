@@ -35,6 +35,7 @@
     "focus": "node src/index.ts --focus 168",
     "netblocks": "node src/index.ts --netblocks 168",
     "coverage": "node src/index.ts --coverage 168",
+    "direction": "node src/index.ts --direction 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"

@@ -56,6 +56,8 @@
  *   GET  /api/netblocks.md?hours=N  -> the same source-netblock report as a downloadable .md file
  *   GET  /api/coverage?hours=N      -> data-coverage / quality audit (retention · field completeness · blind-spot gaps; model + Markdown)
  *   GET  /api/coverage.md?hours=N   -> the same data-coverage report as a downloadable .md file
+ *   GET  /api/direction?hours=N     -> traffic-direction / exposure (inbound/outbound/lateral split + candidate-compromise hosts; model + Markdown)
+ *   GET  /api/direction.md?hours=N  -> the same traffic-direction report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -133,6 +135,7 @@ import { buildClassify, classifyFilename } from "../analytics/classify.ts";
 import { buildFocus, focusFilename } from "../analytics/focus.ts";
 import { buildNetblock, netblockFilename } from "../analytics/netblock.ts";
 import { buildCoverage, coverageFilename } from "../analytics/coverage.ts";
+import { buildDirection, directionFilename } from "../analytics/direction.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1030,6 +1033,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${coverageFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- traffic-direction / exposure (inbound/outbound/lateral split) ---
+      if (method === "GET" && path === "/api/direction") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildDirection(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/direction.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildDirection(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${directionFilename(now)}"`,
         });
         res.end(markdown);
         return;
