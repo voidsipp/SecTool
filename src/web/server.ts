@@ -34,6 +34,8 @@
  *   GET  /api/killchain.md?hours=N  -> the same kill-chain report as a downloadable .md file
  *   GET  /api/beacon?hours=N        -> beaconing / periodicity (regular-cadence src→dst pairs, i.e. C2; model + Markdown)
  *   GET  /api/beacon.md?hours=N     -> the same beaconing report as a downloadable .md file
+ *   GET  /api/efficacy?hours=N      -> IPS enforcement-gap / efficacy (block rate + detect-only gaps; model + Markdown)
+ *   GET  /api/efficacy.md?hours=N   -> the same efficacy report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -101,6 +103,7 @@ import { buildBacklog, backlogFilename } from "../analytics/backlog.ts";
 import { buildNovelty, noveltyFilename } from "../analytics/novelty.ts";
 import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
 import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
+import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -761,6 +764,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${beaconFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- IPS enforcement-gap / efficacy (block rate + detect-only gaps) ---
+      if (method === "GET" && path === "/api/efficacy") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        return send(res, 200, buildEfficacy(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/efficacy.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const now = Date.now();
+        const { markdown } = buildEfficacy(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${efficacyFilename(now)}"`,
         });
         res.end(markdown);
         return;
