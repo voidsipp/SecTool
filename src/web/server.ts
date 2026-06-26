@@ -58,6 +58,7 @@ import { SEVERITY_ORDER, type Severity } from "../types.ts";
 import { getActiveFlowStore } from "../netflow/flowAccess.ts";
 import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
+import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
 import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
@@ -77,6 +78,18 @@ const INDEX_HTML = join(HERE, "public", "index.html");
 
 export interface WebServer {
   close: () => Promise<void>;
+}
+
+/**
+ * Validate a client-supplied chat session id. Keeps only opaque, bounded tokens
+ * (the UUIDs the dashboard generates) so the conversation-memory map can't be
+ * polluted with huge or hostile keys. Returns undefined for anything invalid,
+ * which transparently disables memory for that request.
+ */
+function chatSessionId(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.trim();
+  return s && s.length <= 128 && /^[A-Za-z0-9_-]+$/.test(s) ? s : undefined;
 }
 
 function send(res: ServerResponse, status: number, body: unknown, type = "application/json"): void {
@@ -300,7 +313,8 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const body = await readJson(req);
         const question = String(body["question"] ?? "").slice(0, 1000);
         if (!question.trim()) return send(res, 400, { error: "Empty question." });
-        const result = await askAnalyst(cfg, question);
+        const sessionId = chatSessionId(body["sessionId"]);
+        const result = await askAnalyst(cfg, question, { sessionId });
         return send(res, 200, result);
       }
 
@@ -311,8 +325,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const instruction = String(body["instruction"] ?? body["question"] ?? "").slice(0, 1000);
         if (!instruction.trim()) return send(res, 400, { error: "Empty instruction." });
         const dryRun = body["dryRun"] === true || body["dryRun"] === "1";
-        const result = await runAgent(cfg, instruction, { dryRun });
+        const sessionId = chatSessionId(body["sessionId"]);
+        const result = await runAgent(cfg, instruction, { dryRun, sessionId });
         return send(res, 200, result);
+      }
+
+      // --- forget a chat session's conversational memory ("new chat") ---
+      if (method === "POST" && path === "/api/chat/reset") {
+        const body = await readJson(req);
+        const sessionId = chatSessionId(body["sessionId"]);
+        const cleared = sessionId ? conversationStore.clear(sessionId) : false;
+        return send(res, 200, { ok: true, cleared });
       }
 
       // --- internal host risk + behavioral anomalies ---

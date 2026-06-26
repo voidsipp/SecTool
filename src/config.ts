@@ -137,6 +137,18 @@ export interface Config {
     distHost: string;
     distPort: number;
   };
+  /**
+   * Conversational memory for the "Ask" analyst and the action agent. When
+   * enabled, each browser chat session retains a rolling window of recent turns
+   * so follow-up questions keep context instead of starting cold every request.
+   */
+  conversation: {
+    memoryEnabled: boolean;
+    /** Max messages (user + assistant turns) retained per session. */
+    memoryMaxMessages: number;
+    /** Idle minutes after which a session's history is forgotten. */
+    memoryTtlMin: number;
+  };
   discovery: {
     enabled: boolean;
     ports: number[];
@@ -350,6 +362,12 @@ export function loadConfig(): Config {
       token: optStr("AGENT_TOKEN"),
       distHost: str("AGENT_DIST_HOST", "0.0.0.0"),
       distPort: int("AGENT_DIST_PORT", 7878),
+    },
+    conversation: {
+      memoryEnabled: bool("CONVO_MEMORY_ENABLED", true),
+      // Default 10 messages ≈ 5 question/answer exchanges of carried context.
+      memoryMaxMessages: Math.max(0, int("CONVO_MEMORY_MAX", 10)),
+      memoryTtlMin: Math.max(0, int("CONVO_MEMORY_TTL_MIN", 120)),
     },
     discovery: {
       enabled: bool("DISCOVERY_ENABLED", true),

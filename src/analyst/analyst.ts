@@ -20,6 +20,7 @@ import { triageStore } from "../store/triage.ts";
 import { dismissStore } from "../store/dismissed.ts";
 import { alertStore } from "../store/alertStore.ts";
 import { buildTrends } from "../analytics/trends.ts";
+import { loadHistory, recordExchange, type MemoryOpts } from "./memory.ts";
 
 const SYSTEM = `You are a security analyst assistant embedded in "SecTool", a network-security monitoring app for a home/small-office network behind a UniFi UDM Pro.
 Answer the user's question by calling the provided tools — never invent data.
@@ -274,11 +275,19 @@ async function execTool(cfg: Config, name: string, input: Record<string, unknown
   }
 }
 
-export async function askAnalyst(cfg: Config, question: string): Promise<{ answer: string; toolsUsed: string[] }> {
+export async function askAnalyst(
+  cfg: Config,
+  question: string,
+  opts: MemoryOpts = {},
+): Promise<{ answer: string; toolsUsed: string[] }> {
   const summarizer = new Summarizer(cfg);
   await summarizer.preflight();
-  return summarizer.toolLoop(SYSTEM, question, TOOLS, (name, input) => execTool(cfg, name, input), {
+  const history = loadHistory(cfg, opts.sessionId);
+  const result = await summarizer.toolLoop(SYSTEM, question, TOOLS, (name, input) => execTool(cfg, name, input), {
     maxTokens: 1500,
     maxRounds: 6,
+    history,
   });
+  recordExchange(cfg, opts.sessionId, question, result.answer);
+  return result;
 }
