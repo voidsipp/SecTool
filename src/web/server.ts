@@ -48,6 +48,8 @@
  *   GET  /api/edges.md?hours=N      -> the same attack-edge report as a downloadable .md file
  *   GET  /api/notify?hours=N        -> notification audit / alert-fatigue (delivery coverage + signal gaps; model + Markdown)
  *   GET  /api/notify.md?hours=N     -> the same notification-audit report as a downloadable .md file
+ *   GET  /api/classify?hours=N      -> threat-classification breakdown (threat-type mix + control gaps; model + Markdown)
+ *   GET  /api/classify.md?hours=N   -> the same classification report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -121,6 +123,7 @@ import { buildSurge, surgeFilename } from "../analytics/surge.ts";
 import { buildPersistence, persistenceFilename } from "../analytics/persistence.ts";
 import { buildEdges, edgesFilename } from "../analytics/edges.ts";
 import { buildNotify, notifyFilename } from "../analytics/notify.ts";
+import { buildClassify, classifyFilename } from "../analytics/classify.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -938,6 +941,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${notifyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- threat-classification breakdown (threat-type mix + control gaps) ---
+      if (method === "GET" && path === "/api/classify") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        return send(res, 200, buildClassify(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/classify.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const now = Date.now();
+        const { markdown } = buildClassify(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${classifyFilename(now)}"`,
         });
         res.end(markdown);
         return;

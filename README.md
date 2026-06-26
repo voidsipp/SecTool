@@ -517,6 +517,42 @@ live gateway query**.
 - `GET /api/spread.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --spread 168 [--limit 25] [--min-peers 8]` (or `npm run spread`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow sweep has room to touch many peers).
 
+## 🧬 Threat-classification breakdown (`GET /api/classify[.md]`, `--classify`)
+
+Every other report pivots on an *entity* (attacker IP, internal host, src→dst
+pair) or a *time shape* (beacon, surge, rhythm). This one answers the first
+question a SOC lead asks at a glance — **"what is the threat *mix*?"** — by
+folding the window over Suricata's own threat taxonomy (the `classification` /
+classtype: *"Attempted Administrator Privilege Gain"*, *"A Network Trojan was
+Detected"*, *"Detection of a Network Scan"*, policy chatter, and so on). The
+Trends view ranks top *categories* (`IDS/IPS`, `Firewall`) — a coarse
+source-of-event label — but the fine-grained classification mix has never been
+surfaced offline until now.
+
+For each threat class the report rolls up its alert volume and **share** of the
+window, its **severity profile** (worst severity, medium-or-worse count, critical
+count), its **enforcement posture** (actively blocked vs only detected, and the
+resulting block rate), its **breadth** (distinct attacker sources → distinct
+internal targets), the dominant signature, and a **recent-vs-older split** so a
+class that is *accelerating* (most of its volume in the recent half of the
+window) is flagged with a ▲ trend glyph.
+
+Classes are ranked by a **severity-weighted score**, not raw volume — so a small
+but dangerous class (a handful of trojan detections) outranks benign chatter
+(thousands of policy hits), instead of being buried under it. The sharpest rows
+are the **control gaps** (🚩): medium-or-worse classes that were mostly *detected,
+not blocked* — exactly where to verify enforcement first.
+
+Honest about its limits: `classification` is optional (firewall blocks carry
+none), so those alerts fall back to the event **category** and are marked `~`
+rather than dropped; and a low block rate reflects detection-mode sensing as much
+as a real enforcement gap. Pure offline math over the local alert history — **no
+SSH, no Claude, no live gateway query**.
+
+- `GET /api/classify?hours=N[&limit=25]` → the structured model **plus** rendered Markdown (one table of threat classes, ranked by severity-weighted attention).
+- `GET /api/classify.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --classify 168 [--limit 25]` (or `npm run classify`) → print the Markdown to stdout (defaults to a 7-day window so the mix reflects more than one shift's chatter).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
