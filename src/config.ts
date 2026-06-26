@@ -41,6 +41,12 @@ export interface Config {
     minSeverity: Severity;
     dedupeWindowMs: number;
     customPattern?: RegExp;
+    /**
+     * When true (default), detections the gateway already blocked/dropped are
+     * recorded for history but not pushed as notifications — the threat was
+     * already stopped at the edge, so it's noise rather than something to act on.
+     */
+    skipGatewayBlocked: boolean;
   };
   runtime: {
     logLevel: LogLevel;
@@ -248,6 +254,7 @@ export function loadConfig(): Config {
       minSeverity: oneOf<Severity>("MIN_SEVERITY", SEVERITY_ORDER, "low"),
       dedupeWindowMs: int("DEDUPE_WINDOW_SEC", 300) * 1000,
       customPattern,
+      skipGatewayBlocked: bool("SKIP_GATEWAY_BLOCKED", true),
     },
     runtime: {
       logLevel: oneOf<LogLevel>("LOG_LEVEL", LOG_LEVELS, "info"),

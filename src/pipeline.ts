@@ -22,6 +22,8 @@ export interface PipelineStats {
   alerts: number;
   belowThreshold: number;
   suppressed: number;
+  /** Detections the gateway already blocked, skipped per cfg.alerts.skipGatewayBlocked. */
+  gatewayBlocked: number;
   notified: number;
   failed: number;
 }
@@ -38,6 +40,7 @@ export class Pipeline {
     alerts: 0,
     belowThreshold: 0,
     suppressed: 0,
+    gatewayBlocked: 0,
     notified: 0,
     failed: 0,
   };
@@ -84,6 +87,17 @@ export class Pipeline {
       suppressionStore.recordHit(suppressedBy.id, event.receivedAt);
       log.info(
         `Alert suppressed by rule ${suppressedBy.id} (${describeMatch(suppressedBy.match)}): ${alert.signature ?? alert.category}`,
+      );
+      return;
+    }
+
+    // The threat was already stopped at the edge — record it for history/search
+    // but don't page anyone, unless the operator opted out of this behavior.
+    if (this.#cfg.alerts.skipGatewayBlocked && alert.action === "blocked") {
+      this.stats.gatewayBlocked++;
+      alertStore.record(alert, undefined, false);
+      log.info(
+        `Gateway-blocked, notification skipped: ${alert.signature ?? alert.category} (${alert.srcIp ?? "?"} -> ${alert.dstIp ?? "?"})`,
       );
       return;
     }

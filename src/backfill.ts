@@ -77,9 +77,20 @@ export async function processRawEvents(
 
   let notified = 0;
   let failed = 0;
+  let gatewayBlocked = 0;
   for (let i = 0; i < toSend.length; i++) {
     const m = toSend[i]!;
     void dedupe.shouldSend(m.alert.id, m.logEvent.timestamp ?? nowMs);
+
+    // Mirror the live pipeline: detections the gateway already blocked are
+    // recorded for history but not re-posted to Discord (default behavior).
+    if (cfg.alerts.skipGatewayBlocked && m.alert.action === "blocked") {
+      gatewayBlocked++;
+      alertStore.record(m.alert, undefined, false);
+      log.info(`(${i + 1}/${toSend.length}) gateway-blocked, skipping notification: ${m.alert.signature}`);
+      continue;
+    }
+
     const ctx = correlate(m.alert, buffer, cfg);
     log.info(`(${i + 1}/${toSend.length}) [${m.alert.severity}] ${m.alert.signature}`);
     try {
@@ -108,7 +119,7 @@ export async function processRawEvents(
     if (i < toSend.length - 1) await sleep(cfg.backfill.postDelayMs);
   }
 
-  log.info(`Done: notified=${notified} failed=${failed}.`);
+  log.info(`Done: notified=${notified} failed=${failed} gatewayBlocked=${gatewayBlocked}.`);
 }
 
 export async function runBackfill(cfg: Config, hours: number, nowMs: number): Promise<void> {

@@ -442,6 +442,7 @@ All keys live in `.env`; see **`.env.example`** for the annotated list. Highligh
 | `SUMMARIZE_ENABLED` | `true` | `false` → raw alerts, no Claude. |
 | `MIN_SEVERITY` | `low` | Only notify at/above this level. |
 | `DEDUPE_WINDOW_SEC` | `300` | Suppress repeat alerts for N seconds. |
+| `SKIP_GATEWAY_BLOCKED` | `true` | Don't notify when the gateway already blocked the detection (still recorded to history). |
 | `CORRELATION_WINDOW_SEC` | `180` | Time window for related-log gathering. |
 | `ALERT_PATTERN` | — | Optional regex an event must match to be an alert. |
 | `DISCOVERY_ENABLED` | `true` | Active LAN device sweep (Devices → 🔍 Scan LAN). |
