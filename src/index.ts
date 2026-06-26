@@ -11,6 +11,7 @@
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
  *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
  *   node src/index.ts --rhythm 168    # offline temporal activity rhythm report (Markdown)
+ *   node src/index.ts --backlog 720   # offline triage SLA backlog report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -39,6 +40,7 @@ import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
 import { buildWatchlist } from "./analytics/watchlist.ts";
 import { buildRhythm } from "./analytics/rhythm.ts";
+import { buildBacklog } from "./analytics/backlog.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -356,6 +358,23 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown activity rhythm report to stdout.
       console.log(buildRhythm(hours, tzOffsetMinutes, Date.now()).markdown);
+      return;
+    }
+    const backlogIdx = argv.findIndex((a) => a === "--backlog" || a.startsWith("--backlog="));
+    if (backlogIdx !== -1) {
+      const inline = argv[backlogIdx]!.split("=")[1];
+      const next = argv[backlogIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a wide 30-day window so genuinely stale, long-unhandled alerts surface.
+      const hours = raw ? Number(raw) : 720;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --backlog hours: "${raw}". Use e.g. --backlog 720`);
+        process.exit(2);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown triage SLA backlog report to stdout.
+      console.log(buildBacklog(hours, { nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

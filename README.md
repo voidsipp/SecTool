@@ -374,6 +374,28 @@ history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/rhythm.md?hours=N&tz=M` → the same report as a downloadable `.md` file.
 - `node src/index.ts --rhythm 168 [--tz -300]` (or `npm run rhythm`) → print the Markdown to stdout (defaults to a 7-day window so every weekday is represented).
 
+## 📋 Triage SLA backlog (`GET /api/backlog[.md]`, `--backlog`)
+
+Every other report is about the *threats*; this one is about the **response**.
+It answers the question a SOC lead asks every morning: *of everything that fired,
+what is still unhandled, how old is it, and have we blown our SLA on any of it?*
+It joins the stored alert history with the per-alert **triage** workflow state
+and the **dismissal** set to produce a service-level view of the queue: the
+**open backlog** (status `open` or `investigating`, not dismissed) broken down by
+severity and status; **SLA breaches** — unresolved alerts past the
+time-to-resolve target for their severity (critical 1h, high 4h, medium 24h, low
+72h, info 7d by default) — with the **worst offenders** listed most-overdue-first
+so they can be actioned now; **untouched** alerts (still `open` with no triage
+note — nobody has even looked); and **throughput** over resolved items (mean /
+median time-to-resolve and the share closed inside SLA, so you can tell whether
+the backlog is growing or shrinking). Dismissed alerts are excluded — the
+operator explicitly chose to hide them. Pure offline math over the local stores —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/backlog?hours=N[&limit=25]` → the structured model **plus** rendered Markdown.
+- `GET /api/backlog.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --backlog 720` (or `npm run backlog`) → print the Markdown to stdout (defaults to a wide 30-day window so genuinely stale, long-unhandled alerts still surface).
+
 ## 🎯 Threat-indicator export (`GET /api/iocs`, `--iocs`)
 
 Every other report is a *human narrative*. This one closes the loop **after**
