@@ -14,6 +14,15 @@ const DATA_DIR = join(ROOT, "data");
 const STORE_PATH = join(DATA_DIR, "alerts.json");
 const MAX_ENTRIES = 2000;
 
+/**
+ * The store's hard capacity. Once this many alerts accumulate the oldest are
+ * evicted on the next persist (see {@link AlertStore} `#persist`), so any
+ * look-back longer than the retained history is silently truncated. Exported so
+ * the offline coverage / data-quality report can warn when the store is at (or
+ * near) this cap and downstream reports may be reading an incomplete history.
+ */
+export const ALERT_STORE_CAP = MAX_ENTRIES;
+
 export interface StoredAlert {
   id: string;
   time: number;

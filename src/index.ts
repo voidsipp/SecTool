@@ -25,6 +25,7 @@
  *   node src/index.ts --classify 168  # offline threat-classification breakdown report (Markdown)
  *   node src/index.ts --focus 168     # offline threat-focus / concentration (Pareto) report (Markdown)
  *   node src/index.ts --netblocks 168 # offline source-netblock / infrastructure (CIDR) report (Markdown)
+ *   node src/index.ts --coverage 168  # offline data-coverage / quality (dataset-integrity) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -67,6 +68,7 @@ import { buildNotify } from "./analytics/notify.ts";
 import { buildClassify } from "./analytics/classify.ts";
 import { buildFocus } from "./analytics/focus.ts";
 import { buildNetblock } from "./analytics/netblock.ts";
+import { buildCoverage } from "./analytics/coverage.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -797,6 +799,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown netblock report to stdout.
       console.log(buildNetblock(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const coverageIdx = argv.findIndex((a) => a === "--coverage" || a.startsWith("--coverage="));
+    if (coverageIdx !== -1) {
+      const inline = argv[coverageIdx]!.split("=")[1];
+      const next = argv[coverageIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so retention/blind-spot signals reflect more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --coverage hours: "${raw}". Use e.g. --coverage 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the blind-spot gap table.
+      let limit = 6;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown coverage report to stdout.
+      console.log(buildCoverage(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
