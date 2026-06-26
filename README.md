@@ -180,6 +180,20 @@ automatically (or standalone via `node src/index.ts --web`) and is served at
 > so don't expose it on the LAN without putting authentication in front of it.
 > Requires the SSH connection from `--setup-ssh`.
 
+### 🔎 Search history (`GET /api/search`)
+
+The live alert list needs SSH and only covers a recent window. The **🔎 Search**
+tab instead queries the *persisted* alert history (up to 2000 stored alerts, with
+their AI summaries and triage state) **entirely offline** — no SSH or UDM
+round-trip. Free-text terms (space-separated, ANDed across signature / IP /
+classification / category / raw) combine with structured filters: minimum
+severity, action, triage status, time window, a `src OR dst` IP/CIDR match, and
+`has-AI-summary` / `notified` / `include-dismissed` toggles, sortable by time or
+severity. Selecting a result shows its stored Claude summary and full triage
+controls (status + append-only notes). Export the whole match set to a
+spreadsheet-friendly CSV (`GET /api/search.csv?…`, CSV-injection-safe) with the
+**⬇ CSV** button.
+
 ## Active response: firewall blocking (`BLOCK_ENABLED`)
 
 Block a malicious IP at the gateway from the dashboard (**🚫 Block this IP**) or

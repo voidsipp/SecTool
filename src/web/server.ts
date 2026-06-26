@@ -11,6 +11,8 @@
  *   POST /api/alerts/:id/connections-> active conntrack sessions
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
+ *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
+ *   GET  /api/search.csv?q=&...     -> same query, downloaded as CSV
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -55,6 +57,7 @@ import { discoverDevices } from "../investigate/discovery.ts";
 import { deployAgent, deployToAllEligible, assessDeploy } from "../investigate/agentPush.ts";
 import { blockIp, unblockIp, listBlocksWithStats } from "../respond/blocker.ts";
 import { buildTrends } from "../analytics/trends.ts";
+import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -433,6 +436,24 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         return send(res, 200, buildTrends(hours, limit, Date.now()));
       }
 
+      // --- full-history alert search (offline; no SSH) ---
+      if (method === "GET" && (path === "/api/search" || path === "/api/search.csv")) {
+        const q = parseSearchQuery(url.searchParams);
+        if (path === "/api/search.csv") {
+          // Export the full match set (ignore pagination) up to the store cap.
+          const result = searchAlerts({ ...q, offset: 0, limit: MAX_EXPORT }, Date.now(), { maxLimit: MAX_EXPORT });
+          const csv = hitsToCsv(result.items);
+          res.writeHead(200, {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": `attachment; filename="sectool-alerts-${result.items.length}.csv"`,
+            "cache-control": "no-store",
+          });
+          res.end(csv);
+          return;
+        }
+        return send(res, 200, searchAlerts(q));
+      }
+
       // --- firewall blocklist ---
       if (method === "GET" && path === "/api/blocklist") {
         const blocks = await listBlocksWithStats();
@@ -636,6 +657,41 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
   });
 
   return { close: () => new Promise((r) => server.close(() => r())) };
+}
+
+/** Map the `/api/search` query string onto a normalized SearchQuery. */
+function parseSearchQuery(p: URLSearchParams): SearchQuery {
+  const str = (k: string): string | undefined => {
+    const v = (p.get(k) ?? "").trim();
+    return v ? v : undefined;
+  };
+  const bool = (k: string): boolean | undefined => {
+    const v = p.get(k);
+    if (v === null || v === "") return undefined;
+    return v === "1" || v === "true" || v === "yes";
+  };
+  const sevRaw = str("sev") ?? str("minSeverity");
+  const minSeverity = sevRaw && (SEVERITY_ORDER as readonly string[]).includes(sevRaw) ? (sevRaw as Severity) : undefined;
+  const sortRaw = str("sort");
+  const sort: SortMode | undefined =
+    sortRaw === "time-asc" || sortRaw === "severity" || sortRaw === "time-desc" ? sortRaw : undefined;
+  const statusRaw = str("status");
+  const status = statusRaw && isTriageStatus(statusRaw) ? statusRaw : statusRaw === "open" ? "open" : undefined;
+  return {
+    q: str("q"),
+    minSeverity,
+    category: str("category") ?? str("cat"),
+    action: str("action"),
+    ip: str("ip"),
+    status,
+    hours: Number(p.get("hours")) || 0,
+    hasSummary: bool("hasSummary"),
+    notified: bool("notified"),
+    includeDismissed: bool("includeDismissed"),
+    sort,
+    limit: Number(p.get("limit")) || undefined,
+    offset: Number(p.get("offset")) || undefined,
+  };
 }
 
 function isPrivate(ip: string): boolean {
