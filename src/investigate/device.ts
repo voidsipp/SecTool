@@ -396,7 +396,25 @@ export interface ListenerAudit {
   host?: string;
   error?: string;
   count?: number;
+  /**
+   * Listeners bound to *all* interfaces (a wildcard bind, exposure
+   * "all-interfaces") — the most-open binding and a strict subset of
+   * `networkReachable`. A listener bound to a single network interface is also
+   * reachable off-host but is *not* counted here; see `networkReachable` for the
+   * full externally-reachable surface.
+   */
   exposed?: number;
+  /**
+   * Total listeners reachable from off this host — the device's externally
+   * facing attack surface. Counts every listener bound to a network interface
+   * (exposure "all-interfaces" or "specific") plus any whose bind address was
+   * missing but the gateway's NetFlow proves accepted an off-host connection
+   * (exposure "unknown" with `observedInbound`). Localhost-only bindings and
+   * unknown bindings with no corroborating flow are excluded — we only ever
+   * count positive reachability evidence. A superset of both `exposed` and
+   * `risky`. Present (and > 0) only when at least one reachable listener exists.
+   */
+  networkReachable?: number;
   /** Listeners flagged as a dangerous, network-reachable attack surface. */
   risky?: number;
   listeners?: Listener[];
@@ -588,6 +606,19 @@ const RISKY_SERVICES: Record<number, { name: string; why: string }> = {
   27017: { name: "MongoDB", why: "database, default-open in old versions" },
 };
 
+// True when a listener is reachable from off this host — bound to a network
+// interface (all-interfaces or a specific non-loopback address), or, when the
+// bind address was missing, proven reachable by an off-host NetFlow connection.
+// Localhost-only and unknown-without-evidence bindings are not counted: we only
+// ever treat positive evidence as reachability (mirroring flowExposureEvidence).
+function isNetworkReachable(l: Listener): boolean {
+  return (
+    l.exposure === "all-interfaces" ||
+    l.exposure === "specific" ||
+    (l.exposure === "unknown" && l.observedInbound !== undefined)
+  );
+}
+
 // A listener is risky when a sensitive service is bound somewhere reachable from
 // off the host. Localhost-only bindings are safe regardless of the service.
 function classifyListenerRisk(l: Listener): string[] {
@@ -703,6 +734,10 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
   // egress audit's bypassed-blocklist hit — so it must lead the note, ahead of the
   // broader "network-reachable" set, and it's also exported structurally.
   const internetExposed = risky.filter((l) => l.observedInbound?.external);
+  // The host's full externally-reachable surface: everything bound to a network
+  // interface plus any NetFlow-corroborated "unknown" port (superset of risky
+  // and exposed). Reported so the summary isn't limited to the all-interfaces count.
+  const networkReachable = listeners.filter(isNetworkReachable).length;
   if (risky.length > 0) {
     const names = [
       ...new Set(risky.map((l) => RISKY_SERVICES[l.port]?.name ?? `port ${l.port}`)),
@@ -727,6 +762,7 @@ export async function listenerAudit(cfg: Config, host: string): Promise<Listener
     host: r.host,
     count: listeners.length,
     exposed: listeners.filter((l) => l.exposure === "all-interfaces").length,
+    networkReachable: networkReachable > 0 ? networkReachable : undefined,
     risky: risky.length,
     listeners,
     agentVersion,
