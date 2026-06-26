@@ -417,7 +417,15 @@ export interface EgressAudit {
   distinctRemote?: number;
   audited?: number;
   riskyCount?: number;
+  /**
+   * True when at least one authoritative reputation source (VirusTotal,
+   * AbuseIPDB) was unavailable, so peers were scored only against the local
+   * blocklist and keyless threat feeds. A low `riskyCount` is then a coverage
+   * gap, not a clean bill of health — see `note` for specifics.
+   */
+  reputationDegraded?: boolean;
   peers?: EgressPeer[];
+  /** Human-readable caveats: result truncation and/or degraded enrichment. */
   note?: string;
 }
 
@@ -488,13 +496,41 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   );
 
   peers.sort((a, b) => Number(b.risk) - Number(a.risk) || b.conns - a.conns);
+
+  // Reputation-source coverage. The two authoritative verdict sources need API
+  // keys; without them — or when every lookup is rate-limited/unreachable — a
+  // peer can only be scored against the local blocklist and keyless threat
+  // feeds. In that case a low `riskyCount` means "not actually checked", not
+  // "clean", so we say so explicitly rather than implying an all-clear.
+  const degraded: string[] = [];
+  if (peers.length > 0) {
+    if (!cfg.enrich.vtApiKey) degraded.push("VirusTotal (set VT_API_KEY)");
+    else if (!peers.some((p) => p.virustotal))
+      degraded.push("VirusTotal (no verdicts returned — rate-limited or unreachable)");
+    if (!cfg.enrich.abuseKey) degraded.push("AbuseIPDB (set ABUSEIPDB_API_KEY)");
+    else if (!peers.some((p) => p.abuseipdb))
+      degraded.push("AbuseIPDB (no verdicts returned — rate-limited or unreachable)");
+  }
+
+  const notes: string[] = [];
+  if (distinctRemote > MAX_ENRICH) {
+    notes.push(`Showing the ${MAX_ENRICH} busiest of ${distinctRemote} external peers.`);
+  }
+  if (degraded.length > 0) {
+    notes.push(
+      `Reputation enrichment is degraded — ${degraded.join(" and ")} unavailable; ` +
+        `peers were scored only against the local blocklist and keyless threat feeds, so risk flags may undercount.`,
+    );
+  }
+
   return {
     ok: true,
     host: r.host,
     distinctRemote,
     audited: peers.length,
     riskyCount: peers.filter((p) => p.risk).length,
+    reputationDegraded: degraded.length > 0,
     peers,
-    note: distinctRemote > MAX_ENRICH ? `Showing the ${MAX_ENRICH} busiest of ${distinctRemote} external peers.` : undefined,
+    note: notes.length > 0 ? notes.join(" ") : undefined,
   };
 }
