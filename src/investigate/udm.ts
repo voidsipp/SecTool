@@ -198,7 +198,93 @@ export interface ConnectionsResult {
   ip: string;
   count: number;
   lines: string[];
+  /**
+   * Human-readable triage line for the connection snapshot. When there are no
+   * sessions it says so (the threat may be historical / not currently active);
+   * when sessions *are* present it summarizes them — session count, distinct
+   * peers, in/out balance relative to the host, the protocol mix, the TCP
+   * connection states (the sharpest signal: ESTABLISHED vs SYN_SENT vs
+   * TIME_WAIT), and the busiest destination ports — so the operator gets the
+   * shape of the host's live conversations without scanning raw conntrack rows.
+   */
   note?: string;
+}
+
+const TCP_STATE_RE =
+  /\b(ESTABLISHED|SYN_SENT|SYN_RECV|FIN_WAIT|CLOSE_WAIT|LAST_ACK|TIME_WAIT|CLOSING|CLOSE|LISTEN)\b/;
+const L4_PROTO_RE = /\b(tcp|udp|udplite|icmpv6|icmp|gre|esp|sctp|dccp)\b/i;
+
+/**
+ * Summarize parsed conntrack / nf_conntrack rows into a one-line triage note for
+ * `host`. Both formats expose the connection's original direction as the first
+ * `src=/dst=/dport=` tuple, so we read that to attribute each session to a peer
+ * and a service port; the uppercase TCP state token (and `tcp`/`udp`/… proto
+ * name) appear inline in both. Returns undefined when nothing was parseable so
+ * the caller can fall back to its generic phrasing.
+ */
+function summarizeConnections(lines: string[], host: string): string | undefined {
+  let parsed = 0;
+  let inbound = 0;
+  let outbound = 0;
+  const peers = new Set<string>();
+  const protoCounts = new Map<string, number>();
+  const stateCounts = new Map<string, number>();
+  const portCounts = new Map<number, number>();
+
+  for (const line of lines) {
+    // First src=/dst= is the original direction (the session initiator), which
+    // is what we want to attribute regardless of any NAT in the reply tuple.
+    const src = /\bsrc=(\S+)/.exec(line)?.[1];
+    const dst = /\bdst=(\S+)/.exec(line)?.[1];
+    if (!src || !dst) continue;
+    parsed++;
+
+    const proto = L4_PROTO_RE.exec(line)?.[1]?.toLowerCase();
+    if (proto) protoCounts.set(proto, (protoCounts.get(proto) ?? 0) + 1);
+
+    const state = TCP_STATE_RE.exec(line)?.[1];
+    if (state) stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
+
+    // Attribute direction relative to the host: src=host → the host reached out
+    // (outbound), otherwise treat the far end as the peer (inbound / best effort
+    // when the host only appears in the reply tuple under NAT).
+    if (src === host) {
+      outbound++;
+      peers.add(dst);
+    } else {
+      inbound++;
+      peers.add(src);
+    }
+
+    // Original-direction dport is the service/well-known port being contacted.
+    const dport = /\bdport=(\d+)/.exec(line)?.[1];
+    if (dport) {
+      const p = Number(dport);
+      portCounts.set(p, (portCounts.get(p) ?? 0) + 1);
+    }
+  }
+
+  if (parsed === 0) return undefined;
+
+  const protoMix = [...protoCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([proto, count]) => `${proto}×${count}`);
+  const topStates = [...stateCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 4)
+    .map(([state, count]) => `${state}×${count}`);
+  const topPorts = [...portCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, 4)
+    .map(([port, count]) => `${port}×${count}`);
+
+  const peerWord = peers.size === 1 ? "peer" : "peers";
+  let note = `${parsed} active session${parsed === 1 ? "" : "s"} across ${peers.size} ${peerWord}`;
+  if (outbound || inbound) note += ` (${outbound} out / ${inbound} in)`;
+  if (protoMix.length > 1) note += `; ${protoMix.join(", ")}`;
+  if (topStates.length) note += `; states ${topStates.join(", ")}`;
+  if (topPorts.length) note += `; busiest dports ${topPorts.join(", ")}`;
+  return note + ".";
 }
 
 /** Active conntrack sessions involving the host. */
@@ -213,7 +299,10 @@ export async function connections(ip: string): Promise<ConnectionsResult> {
     ip,
     count: lines.length,
     lines: lines.slice(0, 200),
-    note: lines.length === 0 ? `No active connections involving ${ip} right now.` : undefined,
+    note:
+      lines.length === 0
+        ? `No active connections involving ${ip} right now (the threat may be historical / not currently active).`
+        : summarizeConnections(lines, ip),
   };
 }
 
