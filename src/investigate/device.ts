@@ -771,7 +771,13 @@ export interface EgressAudit {
    */
   reputationDegraded?: boolean;
   peers?: EgressPeer[];
-  /** Human-readable caveats: result truncation and/or degraded enrichment. */
+  /**
+   * Human-readable caveats over this audit, leading with the strongest signals:
+   * firewall-blocklist egress (a bypassed block), then suspicious outbound ports,
+   * then watchlist matches (naming the operator's own notes for *why* each address
+   * is watched), then result truncation and/or degraded enrichment. Undefined when
+   * there is nothing to flag.
+   */
   note?: string;
   /**
    * Audited peers reached on a destination port that is suspicious as an
@@ -965,9 +971,27 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     );
   }
   if (watchedCount > 0) {
+    // Surface the operator's own annotations on the matched watchlist entries so
+    // the takeaway says *why* these addresses are watched (mirroring trafficProfile),
+    // not just how many matched. Distinct, ordered, and length-capped so a long
+    // or noisy free-form note can't dominate the summary line.
+    const watchNotes = [
+      ...new Set(
+        peers
+          .filter((p) => p.watched && p.watchNote)
+          .map((p) => p.watchNote!.replace(/\s+/g, " ").trim())
+          .filter((n) => n.length > 0),
+      ),
+    ];
+    let detail = "";
+    if (watchNotes.length > 0) {
+      const shown = watchNotes.slice(0, 3).map((n) => (n.length > 80 ? `${n.slice(0, 79)}…` : n));
+      const more = watchNotes.length - shown.length;
+      detail = ` (note: ${shown.join("; ")}${more > 0 ? `; +${more} more` : ""})`;
+    }
     notes.push(
       `${watchedCount} audited peer(s) are on the operator watchlist — this host is reaching an address ` +
-        `you flagged for close monitoring; review the flagged peers.`,
+        `you flagged for close monitoring${detail}; review the flagged peers.`,
     );
   }
   if (distinctRemote > peers.length) {
