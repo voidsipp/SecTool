@@ -91,6 +91,14 @@ export interface LivePortActivity {
   outbound?: PortGroup[];
   inbound?: PortGroup[];
   conns?: LiveConn[];
+  /**
+   * Human-readable caveat about the snapshot's completeness and provenance.
+   * Always set when the query succeeds. It explains that conntrack is a live,
+   * current-sessions-only view, notes when no matching connections exist, and —
+   * importantly — flags when the snapshot was truncated by the gateway-side line
+   * cap (aggregates are then only a lower bound) or by the per-connection detail
+   * cap, so an operator never mistakes a bounded sample for the full picture.
+   */
   note?: string;
 }
 
@@ -175,7 +183,15 @@ function pushGroup(map: Map<string, PortGroup>, proto: string, port: number, pee
   }
 }
 
+// Per-connection detail entries returned to the dashboard. Aggregate counts and
+// port groups are always computed from every parsed line; only this verbose list
+// is capped to keep the payload bounded.
 const MAX_CONNS = 600;
+
+// Hard cap on conntrack lines pulled back over SSH. A host this busy is unusual,
+// and hitting the cap means even the aggregates are a partial sample — surfaced
+// to the operator via the snapshot note rather than silently truncated.
+const MAX_REMOTE_LINES = 4000;
 
 /**
  * Live port activity for an internal host from the gateway's conntrack table.
@@ -193,7 +209,7 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   // mention the host (the parser re-checks exact tuple equality afterwards, so
   // an over-broad substring match never mis-attributes a connection).
   const remote =
-    `(conntrack -L 2>/dev/null || cat /proc/net/nf_conntrack 2>/dev/null) | grep -F '${host}' | head -4000 || true`;
+    `(conntrack -L 2>/dev/null || cat /proc/net/nf_conntrack 2>/dev/null) | grep -F '${host}' | head -${MAX_REMOTE_LINES} || true`;
   let out: string;
   try {
     out = await sshExec(remote, { timeoutMs: 15000 });
@@ -202,6 +218,9 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   }
 
   const lines = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // The gateway-side `head` caps the result set; reaching it means we only saw a
+  // prefix of this host's connections, so the aggregates are a lower bound.
+  const truncatedSnapshot = lines.length >= MAX_REMOTE_LINES;
   const source: LivePortActivity["source"] =
     lines.length === 0 ? "none" : lines.some((l) => /^ipv[46]\b/i.test(l)) ? "nf_conntrack" : "conntrack";
 
@@ -210,6 +229,9 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   const inbound = new Map<string, PortGroup>();
   let outboundConns = 0;
   let inboundConns = 0;
+  // Every connection attributed to this host (incl. local), used to tell whether
+  // the bounded `conns` detail list dropped any entries.
+  let attributedConns = 0;
   const externalPeers = new Set<string>();
 
   for (const line of lines) {
@@ -236,6 +258,7 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
       continue;
     }
     if (remoteIp === host) direction = "local";
+    attributedConns++;
     const remoteExternal = remoteIp ? !isPrivateIp(remoteIp) : false;
     if (remoteExternal && remoteIp) externalPeers.add(remoteIp);
 
@@ -270,6 +293,29 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
   const outGroups = sortGroups([...outbound.values()]);
   const inGroups = sortGroups([...inbound.values()]);
 
+  // Compose the snapshot note: provenance first, then any truncation caveats so
+  // a bounded sample is never mistaken for a complete view of the host.
+  const noteParts: string[] = [];
+  if (lines.length === 0) {
+    noteParts.push(
+      `No active connections involving ${host} on the gateway right now. conntrack is a live snapshot — the flagged port may be idle at the moment, or this host routes through a different gateway.`,
+    );
+  } else {
+    noteParts.push(
+      "Live snapshot of the gateway's connection-tracking table (current sessions only; no agent required).",
+    );
+  }
+  if (truncatedSnapshot) {
+    noteParts.push(
+      `The gateway returned the maximum of ${MAX_REMOTE_LINES} conntrack lines for ${host}, so the counts and port groups above are a partial sample of an unusually busy host — treat them as a lower bound.`,
+    );
+  }
+  if (attributedConns > MAX_CONNS) {
+    noteParts.push(
+      `Per-connection detail is capped at ${MAX_CONNS} of ${attributedConns} connections; the aggregate counts and port groups still reflect every connection seen.`,
+    );
+  }
+
   return {
     ok: true,
     host,
@@ -286,9 +332,6 @@ export async function livePortActivity(host: string, capturedAt: number = Date.n
     outbound: outGroups,
     inbound: inGroups,
     conns,
-    note:
-      lines.length === 0
-        ? `No active connections involving ${host} on the gateway right now. conntrack is a live snapshot — the flagged port may be idle at the moment, or this host routes through a different gateway.`
-        : "Live snapshot of the gateway's connection-tracking table (current sessions only; no agent required).",
+    note: noteParts.join(" "),
   };
 }
