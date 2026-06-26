@@ -29,6 +29,7 @@
     "cooccur": "node src/index.ts --cooccur 168",
     "surge": "node src/index.ts --surge 168",
     "persist": "node src/index.ts --persist 168",
+    "edges": "node src/index.ts --edges 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
