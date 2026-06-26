@@ -44,6 +44,8 @@
  *   GET  /api/surge.md?hours=N      -> the same surge report as a downloadable .md file
  *   GET  /api/persist?hours=N       -> persistence / repeat-offender longevity (recurrence over time; model + Markdown)
  *   GET  /api/persist.md?hours=N    -> the same persistence report as a downloadable .md file
+ *   GET  /api/edges?hours=N         -> attack-edge / lateral-movement (directed src→dst pairs; model + Markdown)
+ *   GET  /api/edges.md?hours=N      -> the same attack-edge report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -115,6 +117,7 @@ import { buildEfficacy, efficacyFilename } from "../analytics/efficacy.ts";
 import { buildSpread, spreadFilename } from "../analytics/spread.ts";
 import { buildSurge, surgeFilename } from "../analytics/surge.ts";
 import { buildPersistence, persistenceFilename } from "../analytics/persistence.ts";
+import { buildEdges, edgesFilename } from "../analytics/edges.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -890,6 +893,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${persistenceFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attack-edge / lateral-movement (directed src→dst relationships) ---
+      if (method === "GET" && path === "/api/edges") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || 2;
+        return send(res, 200, buildEdges(hours, { limit, minAlerts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/edges.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || 2;
+        const now = Date.now();
+        const { markdown } = buildEdges(hours, { limit, minAlerts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${edgesFilename(now)}"`,
         });
         res.end(markdown);
         return;
