@@ -27,6 +27,7 @@
  *   node src/index.ts --netblocks 168 # offline source-netblock / infrastructure (CIDR) report (Markdown)
  *   node src/index.ts --coverage 168  # offline data-coverage / quality (dataset-integrity) report (Markdown)
  *   node src/index.ts --direction 168 # offline traffic-direction / exposure (inbound/outbound/lateral) report (Markdown)
+ *   node src/index.ts --lifecycle 168 # offline signature lifecycle / chronic-vs-acute report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -71,6 +72,7 @@ import { buildFocus } from "./analytics/focus.ts";
 import { buildNetblock } from "./analytics/netblock.ts";
 import { buildCoverage } from "./analytics/coverage.ts";
 import { buildDirection } from "./analytics/direction.ts";
+import { buildLifecycle } from "./analytics/lifecycle.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -851,6 +853,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown direction report to stdout.
       console.log(buildDirection(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const lifecycleIdx = argv.findIndex((a) => a === "--lifecycle" || a.startsWith("--lifecycle="));
+    if (lifecycleIdx !== -1) {
+      const inline = argv[lifecycleIdx]!.split("=")[1];
+      const next = argv[lifecycleIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so chronic vs acute shape reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --lifecycle hours: "${raw}". Use e.g. --lifecycle 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-signature table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--buckets N` to override the time-slice granularity.
+      let buckets: number | undefined;
+      const bucketsIdx = argv.findIndex((a) => a === "--buckets" || a.startsWith("--buckets="));
+      if (bucketsIdx !== -1) {
+        const bi = argv[bucketsIdx]!.split("=")[1] ?? argv[bucketsIdx + 1];
+        const n = bi !== undefined ? Number(bi) : NaN;
+        if (Number.isFinite(n) && n > 0) buckets = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown lifecycle report to stdout.
+      console.log(buildLifecycle(hours, { limit, buckets, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
