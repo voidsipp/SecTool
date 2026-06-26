@@ -628,6 +628,51 @@ SSH, no Claude, no live gateway query**.
 - `GET /api/netblocks.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --netblocks 168 [--limit 20]` (or `npm run netblocks`) → print the Markdown to stdout (defaults to a 7-day window so adjacent-IP rotation across days is visible).
 
+## 🩺 Data-coverage / quality report (`GET /api/coverage[.md]`, `--coverage`)
+
+Every other offline report *analyses* the stored alert history and ends with the
+same honest disclaimer — the answer is only as good as the data, which is
+window-bounded, store-capped, and only as complete as the collector that fed it.
+None of them actually **measures** that foundation. This one does. It is a
+meta-report that audits the dataset itself rather than the threats in it, and
+answers the question you should ask *before* acting on any other report: **"is
+this history complete enough that the conclusions hold?"**
+
+It surfaces the three failure modes that silently corrupt every downstream
+report and are invisible from the reports themselves:
+
+- **Truncation** — the store keeps at most a fixed number of alerts and evicts
+  the oldest once full, so a long look-back reads a *clipped* history and
+  "first-seen" / "novelty" / "persistence" quietly understate the past. The
+  report flags when the store is at (or near) capacity and when the requested
+  window reaches back further than the oldest retained alert.
+- **Missing fields** — a report can only rank what was recorded. It measures the
+  **completeness** of every field other reports depend on (source/destination IP,
+  signature, severity, classification, action), with IP fields' *invalid*
+  (present-but-malformed) count broken out, so a hole is named rather than
+  inferred from a suspiciously short table.
+- **Blind spots** — a collector outage or syslog drop makes the history go quiet,
+  and "no alerts" reads as "no activity" when it may be "no *visibility*". The
+  report finds the largest **time gaps** between consecutive alerts and flags any
+  far longer than the typical inter-arrival as a candidate outage.
+
+It also reports the distinct `severity` / `action` label vocabularies (an empty
+or unexpected label is usually a parser regression), Claude-summary and
+notification coverage, and rolls everything into a **0-100 health score** and a
+categorical grade (`🟢 excellent` / `🟡 good` / `🟠 fair` / `🔴 poor`) — with the
+raw numbers always shown so you can overrule the heuristic.
+
+Honest about its own limits: **completeness ≠ correctness** (a present value can
+still be mis-parsed), **gaps ≠ outages** (a genuinely quiet network also goes
+silent — a flagged gap is a prompt to check the collector, not proof it failed),
+and the audit reads the same capped store it audits, so it can see *that* the
+store is full but not what was evicted before it looked. Pure offline math over
+the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/coverage?hours=N[&limit=6]` → the structured model **plus** rendered Markdown (retention/time-coverage table, per-field completeness, blind-spot gaps, value vocabularies and enrichment coverage).
+- `GET /api/coverage.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --coverage 168 [--limit 6]` (or `npm run coverage`) → print the Markdown to stdout (defaults to a 7-day window so retention and blind-spot signals reflect more than one shift).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
