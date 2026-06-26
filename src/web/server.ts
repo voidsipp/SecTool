@@ -60,6 +60,8 @@
  *   GET  /api/direction.md?hours=N  -> the same traffic-direction report as a downloadable .md file
  *   GET  /api/lifecycle?hours=N     -> signature lifecycle / chronic-vs-acute (temporal-shape classification; model + Markdown)
  *   GET  /api/lifecycle.md?hours=N  -> the same signature-lifecycle report as a downloadable .md file
+ *   GET  /api/risk?hours=N          -> risk-index / threat-posture (severity-weighted magnitude + grade + driver attribution; model + Markdown)
+ *   GET  /api/risk.md?hours=N       -> the same risk-index report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -139,6 +141,7 @@ import { buildNetblock, netblockFilename } from "../analytics/netblock.ts";
 import { buildCoverage, coverageFilename } from "../analytics/coverage.ts";
 import { buildDirection, directionFilename } from "../analytics/direction.ts";
 import { buildLifecycle, lifecycleFilename } from "../analytics/lifecycle.ts";
+import { buildRisk, riskFilename } from "../analytics/risk.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1080,6 +1083,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${lifecycleFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- risk-index / threat-posture (severity-weighted magnitude + grade) ---
+      if (method === "GET" && path === "/api/risk") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildRisk(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/risk.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildRisk(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${riskFilename(now)}"`,
         });
         res.end(markdown);
         return;
