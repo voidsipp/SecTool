@@ -25,7 +25,11 @@ import { buildTrends, type Trends } from "./trends.ts";
 export interface WatchHit {
   /** The watchlisted IP/CIDR that registered activity. */
   target: string;
-  /** Operator's free-form note for the entry, if any. */
+  /**
+   * Operator's free-form note for the entry, if any. Surfaced both in the
+   * Watchlist section and inline against any Notable detection that touches
+   * this target (see {@link NotableDetection.watchNote}).
+   */
   note?: string;
   /** Number of distinct alerts in the window that touched this target. */
   alertHits: number;
@@ -56,6 +60,10 @@ export interface NotableDetection {
   action: string;
   /** Current triage workflow status (defaults to "open" when untouched). */
   triageStatus: string;
+  /** Watchlisted IP/CIDR this detection's source or dest matched, if any. */
+  watchTarget?: string;
+  /** Operator's free-form watchlist note for {@link watchTarget}, if one was set. */
+  watchNote?: string;
 }
 
 export interface ReportModel {
@@ -221,17 +229,27 @@ function collectNotableDetections(
       (SEV_WEIGHT[a.severity] ?? 0) >= NOTABLE_MIN_WEIGHT,
   );
   notable.sort((a, b) => (SEV_WEIGHT[b.severity] ?? 0) - (SEV_WEIGHT[a.severity] ?? 0) || b.time - a.time);
-  return notable.slice(0, limit).map((a) => ({
-    id: a.id,
-    time: a.time,
-    severity: a.severity,
-    signature: a.signature || a.category || "—",
-    category: a.category,
-    srcIp: a.srcIp,
-    dstIp: a.dstIp,
-    action: normalizeAction(a.action),
-    triageStatus: triageStore.get(a.id)?.status ?? "open",
-  }));
+  return notable.slice(0, limit).map((a) => {
+    // Surface the operator's watchlist context inline: if either endpoint is on
+    // the watchlist, prefer the entry that actually carries a note so the
+    // analyst sees *why* it was flagged ("known C2") next to the detection.
+    const src = watchStore.match(a.srcIp);
+    const dst = watchStore.match(a.dstIp);
+    const watch = src?.note ? src : dst?.note ? dst : (src ?? dst);
+    return {
+      id: a.id,
+      time: a.time,
+      severity: a.severity,
+      signature: a.signature || a.category || "—",
+      category: a.category,
+      srcIp: a.srcIp,
+      dstIp: a.dstIp,
+      action: normalizeAction(a.action),
+      triageStatus: triageStore.get(a.id)?.status ?? "open",
+      watchTarget: watch?.target,
+      watchNote: watch?.note,
+    };
+  });
 }
 
 /** Compose the plain-language executive summary from the numbers. */
@@ -374,20 +392,32 @@ function renderMarkdown(model: ReportModel): string {
   lines.push("");
 
   if (model.notable.length) {
+    // Only show the watchlist column when something actually matched, so quiet
+    // reports don't carry an all-"—" column.
+    const showWatch = model.notable.some((d) => d.watchTarget);
+    const headers = ["#", "When", "Severity", "Signature", "Source → Dest", "Action", "Triage"];
+    if (showWatch) headers.push("Watchlist");
     lines.push(`## Notable detections`);
     lines.push("");
     lines.push(
       mdTable(
-        ["#", "When", "Severity", "Signature", "Source → Dest", "Action", "Triage"],
-        model.notable.map((d, i) => [
-          String(i + 1),
-          cell(`${fmtTime(d.time)} (${fmtAgo(d.time, model.generatedAt)})`),
-          cell(d.severity),
-          cell(d.signature),
-          cell(`${d.srcIp ?? "—"} → ${d.dstIp ?? "—"}`),
-          cell(d.action),
-          cell(d.triageStatus),
-        ]),
+        headers,
+        model.notable.map((d, i) => {
+          const row = [
+            String(i + 1),
+            cell(`${fmtTime(d.time)} (${fmtAgo(d.time, model.generatedAt)})`),
+            cell(d.severity),
+            cell(d.signature),
+            cell(`${d.srcIp ?? "—"} → ${d.dstIp ?? "—"}`),
+            cell(d.action),
+            cell(d.triageStatus),
+          ];
+          if (showWatch) {
+            const note = d.watchNote ? ` — ${d.watchNote}` : "";
+            row.push(d.watchTarget ? cell(`⚑ ${d.watchTarget}${note}`) : "—");
+          }
+          return row;
+        }),
       ),
     );
     lines.push("");
