@@ -612,6 +612,15 @@ export interface EgressPeer {
   processes: string[];
   lastSeen: number;
   blocked: boolean;
+  /**
+   * True when this public peer matches the operator's watchlist (IP or CIDR).
+   * An internal host reaching a watchlisted external address is exactly the
+   * activity the watchlist exists to catch, so we flag it as risk — mirroring
+   * the block/watch correlation the sibling `trafficProfile` tool performs.
+   */
+  watched: boolean;
+  /** The watchlist entry's free-form note, when the peer is watched and one exists. */
+  watchNote?: string;
   risk: boolean;
   riskReasons: string[];
   geo?: Enrichment["geo"];
@@ -627,6 +636,8 @@ export interface EgressAudit {
   distinctRemote?: number;
   audited?: number;
   riskyCount?: number;
+  /** Audited peers whose IP matches the operator's watchlist (IP or CIDR). */
+  watchedCount?: number;
   /**
    * True when at least one authoritative reputation source (VirusTotal,
    * AbuseIPDB) was unavailable, so peers were scored only against the local
@@ -688,8 +699,16 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       if (e?.geo?.hosting) reasons.push("hosting/VPS");
       if (e?.geo?.proxy) reasons.push("proxy/anon");
       const blocked = blockStore.has(a.ip);
-      // hosting/proxy alone are weak signals — only flag risk on a real verdict.
-      const risk = vtBad > 0 || abuse >= 50 || (e?.feeds.length ?? 0) > 0 || blocked;
+      if (blocked) reasons.push("on firewall blocklist");
+      // Offline watchlist correlation — a pure local join (no agent/API). The
+      // operator flagged this address for close monitoring; an internal host
+      // reaching it is precisely the egress we want surfaced.
+      const watch = watchStore.match(a.ip);
+      const watched = watch !== undefined;
+      if (watched) reasons.push(watch!.note ? `on watchlist: ${watch!.note}` : "on watchlist");
+      // hosting/proxy alone are weak signals — only flag risk on a real verdict
+      // or an explicit operator signal (blocklist/watchlist).
+      const risk = vtBad > 0 || abuse >= 50 || (e?.feeds.length ?? 0) > 0 || blocked || watched;
       return {
         ip: a.ip,
         conns: a.conns,
@@ -697,6 +716,8 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
         processes: [...a.processes],
         lastSeen: a.lastSeen,
         blocked,
+        watched,
+        watchNote: watch?.note,
         risk,
         riskReasons: reasons,
         geo: e?.geo,
@@ -724,7 +745,15 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       degraded.push("AbuseIPDB (no verdicts returned — rate-limited or unreachable)");
   }
 
+  const watchedCount = peers.filter((p) => p.watched).length;
+
   const notes: string[] = [];
+  if (watchedCount > 0) {
+    notes.push(
+      `${watchedCount} audited peer(s) are on the operator watchlist — this host is reaching an address ` +
+        `you flagged for close monitoring; review the flagged peers.`,
+    );
+  }
   if (distinctRemote > MAX_ENRICH) {
     notes.push(`Showing the ${MAX_ENRICH} busiest of ${distinctRemote} external peers.`);
   }
@@ -741,6 +770,7 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     distinctRemote,
     audited: peers.length,
     riskyCount: peers.filter((p) => p.risk).length,
+    watchedCount: watchedCount > 0 ? watchedCount : undefined,
     reputationDegraded: degraded.length > 0,
     peers,
     note: notes.length > 0 ? notes.join(" ") : undefined,
