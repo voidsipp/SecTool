@@ -492,10 +492,11 @@
         <option value="48">48h</option><option value="168">7d</option><option value="720">30d</option>
       </select>
     </label>
+    <button id="reportCompare">⇆ Compare periods</button>
     <button id="reportCopy">⧉ Copy Markdown</button>
     <button id="reportDownload" class="primary">⬇ Download .md</button>
   </div>
-  <div class="muted" style="margin-bottom:12px;">A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.</div>
+  <div id="reportDesc" class="muted" style="margin-bottom:12px;">A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.</div>
   <div id="reportBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="intelView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
@@ -1830,9 +1831,37 @@ function reportSummaryCards(t, model){
     <div class="kv"><div class="k">Watchlist active</div><div class="v">${model.watchHits.length}</div></div>
   </div>`;
 }
+// Report tab hosts two offline documents: the single-window incident report and
+// the period-over-period comparison. `compareMode` toggles between them without
+// touching the global view-switching logic.
+let compareMode = false;
+function deltaSpan(d){
+  if (!d || d.delta === 0 || d.trend === "flat") return '<span class="muted">—</span>';
+  const up = d.delta > 0;
+  const arrow = up ? "▲" : "▼";
+  const sign = up ? "+" : "";
+  const pct = (d.pctChange === null || d.pctChange === undefined) ? "new" : `${sign}${d.pctChange}%`;
+  const cls = up ? "high" : "low";
+  return `<span class="${cls}">${arrow} ${sign}${d.delta} (${pct})</span>`;
+}
+function compareSummaryCards(j){
+  const sev = m => (j.bySeverity||[]).find(x=>x.label===m) || {current:0,previous:0,delta:0,trend:"flat",pctChange:0};
+  return `<div class="trends-summary">
+    <div class="kv"><div class="k">Total alerts</div><div class="v big">${j.total.current}</div><div class="k">${deltaSpan(j.total)} vs ${j.total.previous}</div></div>
+    <div class="kv crit"><div class="k">Critical</div><div class="v">${sev('critical').current}</div><div class="k">${deltaSpan(sev('critical'))}</div></div>
+    <div class="kv high"><div class="k">High</div><div class="v">${sev('high').current}</div><div class="k">${deltaSpan(sev('high'))}</div></div>
+    <div class="kv"><div class="k">New signatures</div><div class="v">${(j.newSignatures||[]).length}</div></div>
+    <div class="kv"><div class="k">Surging</div><div class="v">${(j.surgingSignatures||[]).length}</div></div>
+    <div class="kv low"><div class="k">New sources</div><div class="v">${(j.newSources||[]).length}</div></div>
+  </div>`;
+}
 async function showReport(){
   $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#reportView").style.display="block";
+  $("#reportCompare").textContent = compareMode ? "📄 Incident report" : "⇆ Compare periods";
+  if (compareMode) return showCompare();
+  $("#reportView").querySelector("h2").innerHTML = '📄 Incident Report <span id="reportMeta" class="muted"></span>';
+  $("#reportDesc").innerHTML = "A shareable, offline security report built entirely from the local alert history — executive summary, key metrics, severity &amp; disposition breakdown, top threats, watchlist activity and active suppressions. No SSH, no Claude, no live gateway query: safe to generate anytime.";
   $("#reportBody").innerHTML='<div class="empty">Building report…</div>';
   try {
     const hours = $("#reportHours").value;
@@ -1857,6 +1886,33 @@ async function showReport(){
     $("#reportBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
   }
 }
+async function showCompare(){
+  $("#reportView").querySelector("h2").innerHTML = '⇆ Period Comparison <span id="reportMeta" class="muted"></span>';
+  $("#reportDesc").innerHTML = "How this window compares to the immediately preceding window of equal length — volume &amp; risk-posture movement, new and surging signatures, and attacker source IPs seen for the first time. Pure offline math over the local alert history.";
+  $("#reportBody").innerHTML='<div class="empty">Comparing periods…</div>';
+  try {
+    const hours = $("#reportHours").value;
+    const j = await api("/api/compare?hours="+hours);
+    lastReportMd = j.markdown || "";
+    $("#reportMeta").textContent = `(last ${j.hours}h vs prior ${j.hours}h)`;
+    const cur = (j.posture && j.posture.current) || {label:"—",score:0};
+    const prev = (j.posture && j.posture.previous) || {label:"—",score:0};
+    const banner = `<div class="posture-banner">
+        <div class="posture-badge ${esc(String(cur.label).toLowerCase())}">${esc(prev.label)} → ${esc(cur.label)}</div>
+        <div>
+          <div class="exec-summary">${esc(j.headline)}</div>
+          ${j.highlights && j.highlights.length ? `<ul class="report-highlights">${j.highlights.map(h=>`<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+        </div>
+      </div>`;
+    const cards = compareSummaryCards(j);
+    const preview = `<div class="section"><h3>📝 Comparison preview (Markdown)</h3>
+        <div class="muted" style="margin-bottom:8px;font-size:12px;">This is the exact document the Copy / Download buttons produce.</div>
+        <pre class="report-md">${esc(lastReportMd)}</pre></div>`;
+    $("#reportBody").innerHTML = banner + cards + preview;
+  } catch(e){
+    $("#reportBody").innerHTML='<pre>'+esc(e.message)+'</pre>';
+  }
+}
 async function copyReport(){
   if (!lastReportMd) return;
   try {
@@ -1867,10 +1923,13 @@ async function copyReport(){
 }
 function downloadReport(){
   const hours = $("#reportHours").value;
-  window.open("/api/report.md?hours="+encodeURIComponent(hours), "_blank");
+  const endpoint = compareMode ? "/api/compare.md" : "/api/report.md";
+  window.open(endpoint+"?hours="+encodeURIComponent(hours), "_blank");
 }
-$("#navReport").onclick = showReport;
+function toggleCompare(){ compareMode = !compareMode; showReport(); }
+$("#navReport").onclick = () => { compareMode = false; showReport(); };
 $("#reportHours").onchange = showReport;
+$("#reportCompare").onclick = toggleCompare;
 $("#reportCopy").onclick = copyReport;
 $("#reportDownload").onclick = downloadReport;
 $("#backAlerts10").onclick = showAlerts;

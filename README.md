@@ -238,6 +238,22 @@ Use **⧉ Copy Markdown** to paste it into a ticket/chat, or **⬇ Download .md*
 keep a dated record. This complements the interactive **📊 Trends** view (not
 exportable) and the Claude-written Discord **digest** (needs SSH + Claude).
 
+## ⇆ Period comparison (`GET /api/compare[.md]`, `--compare`)
+
+The Report tab's **⇆ Compare periods** toggle answers the orthogonal question to
+the snapshot report: *what changed since last time?* It diffs the current window
+against the immediately preceding window of equal length and surfaces the deltas
+an analyst actually cares about — whether total volume and risk posture are
+rising or falling (and by how much), which severities and dispositions moved,
+which **signatures are brand new** this period, which existing signatures are
+**surging**, which attacker **source IPs appeared for the first time**, and what
+**went quiet**. Like the report, it is pure offline math over the local alert
+history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/compare?hours=N` → the structured delta model **plus** rendered Markdown.
+- `GET /api/compare.md?hours=N` → the same comparison as a downloadable `.md` file.
+- `node src/index.ts --compare 24` (or `npm run compare`) → print the Markdown to stdout.
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
