@@ -1020,7 +1020,7 @@ async function showHosts() {
           <span class="muted" style="font-weight:400">· ${h.distinctPeers} peers · ↑${mb(h.bytesOut)} / ↓${mb(h.bytesIn)} · ${h.flows} flows</span></h3>
         <div style="margin-bottom:8px">${h.reasons.map(r=>`<span class="pill" style="border-color:${sevColor(h.score)}">${esc(r)}</span>`).join(" ")}</div>
         ${h.badOutbound.length?`<div class="muted">⚠️ Outbound to known-bad:</div>${h.badOutbound.map(b=>peerRow(b.ip,`${b.feeds.join(", ")} · ${b.flows} flows · ${mb(b.bytes)}`)).join("")}`:''}
-        ${h.beacons.length?`<div class="muted" style="margin-top:8px">📡 Beaconing:</div>${h.beacons.map(b=>peerRow(b.peer,`every ~${b.intervalSec}s · ${b.hits} hits`)).join("")}`:''}
+        ${h.beacons.length?`<div class="muted" style="margin-top:8px">📡 Beaconing:</div>${h.beacons.map(b=>peerRow(b.peer,`every ~${b.intervalSec}s · ${b.hits} hits${b.confidence==='sampled'?` · sampling-thinned (~${b.missedBeats} beat${b.missedBeats===1?'':'s'} dropped)`:''}`)).join("")}`:''}
         <div class="muted" style="margin-top:8px">Top peers:</div>${h.topPeers.map(p=>peerRow(p.ip,`${mb(p.bytes)} · ${p.flows} flows`)).join("")}
       </div>`).join("");
     document.querySelectorAll("#hostsBody .peerbtn").forEach(b=>b.onclick=async()=>{
