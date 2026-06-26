@@ -14,6 +14,8 @@
  *   GET  /api/campaigns?hours=N     -> cluster stored alerts by external attacker IP
  *   GET  /api/report?hours=N        -> offline incident report (model + Markdown)
  *   GET  /api/report.md?hours=N     -> the same report as a downloadable .md file
+ *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
+ *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
  *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
  *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
@@ -61,6 +63,7 @@ import { buildTrends } from "../analytics/trends.ts";
 import { buildCampaigns, type Campaign } from "../analytics/campaigns.ts";
 import { geolocate } from "../investigate/geo.ts";
 import { buildReport, reportFilename } from "../analytics/report.ts";
+import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
@@ -481,6 +484,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         });
         res.end(markdown);
         return;
+      }
+
+      // --- threat-intel exposure (known-bad IPs touching the network) ---
+      if (method === "GET" && path === "/api/intel") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildIntelReport(hours, Date.now()));
+      }
+      if (method === "GET" && path === "/api/intel/check") {
+        const ip = (url.searchParams.get("ip") ?? "").trim();
+        if (isIP(ip) === 0) return send(res, 400, { error: "Invalid or missing IP." });
+        return send(res, 200, checkIntelIp(ip));
       }
 
       // --- firewall blocklist ---

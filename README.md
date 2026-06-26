@@ -316,6 +316,20 @@ Spamhaus DROP), loads them into a `SECTOOL_FEED` ipset so known-bad IPs are
 ("on threat feeds: FireHOL level1"). A **highlighted changelog embed** is posted
 to Discord every 24h with per-feed counts and deltas. Run on demand: `--feeds`.
 
+### 🛡️ Intel page (feed exposure)
+
+The blocklists hold millions of indicators — the **🛡️ Intel** dashboard tab
+answers the question that actually matters: *which of those known-bad IPs are
+touching **my** network right now?* It cross-references the loaded feeds against
+your stored alert history **and** collected NetFlow, then ranks every flagged IP
+by worst severity and activity volume. Each row shows the **direction**
+(inbound = a flagged host reached in; outbound = an internal device contacted a
+flagged host — often the more urgent signal), alert/flow hit counts, bytes, how
+many distinct internal hosts were involved, and the listing feeds — with
+one-click **👁 Watch** / **🚫 Block**. A header **🔎 Check IP** box looks up any
+arbitrary address against the live feeds. Pure in-memory math over local data —
+no SSH required (`GET /api/intel?hours=N`, `GET /api/intel/check?ip=`).
+
 ## Autonomous response (`AUTORESPOND_*`)
 
 Optionally auto-blocks IPs when an alert **escalates** (damning VT/AbuseIPDB/feed
