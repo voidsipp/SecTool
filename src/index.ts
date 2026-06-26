@@ -10,6 +10,7 @@
  *   node src/index.ts --assets 24     # offline internal-asset exposure scoreboard (Markdown)
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
  *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
+ *   node src/index.ts --rhythm 168    # offline temporal activity rhythm report (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -36,6 +37,7 @@ import { buildProfile } from "./analytics/profile.ts";
 import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
 import { buildWatchlist } from "./analytics/watchlist.ts";
+import { buildRhythm } from "./analytics/rhythm.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -324,6 +326,34 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown watchlist activity report to stdout.
       console.log(buildWatchlist(hours, 100, Date.now()).markdown);
+      return;
+    }
+    const rhythmIdx = argv.findIndex((a) => a === "--rhythm" || a.startsWith("--rhythm="));
+    if (rhythmIdx !== -1) {
+      const inline = argv[rhythmIdx]!.split("=")[1];
+      const next = argv[rhythmIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --rhythm hours: "${raw}". Use e.g. --rhythm 168`);
+        process.exit(2);
+      }
+      // Optional `--tz <minutes>` to bucket the clock in local time (e.g. -300 = EST).
+      let tzOffsetMinutes = 0;
+      const tzIdx = argv.findIndex((a) => a === "--tz" || a.startsWith("--tz="));
+      if (tzIdx !== -1) {
+        const tzRaw = argv[tzIdx]!.split("=")[1] ?? argv[tzIdx + 1];
+        const tz = tzRaw !== undefined ? Number(tzRaw) : NaN;
+        if (!Number.isFinite(tz)) {
+          log.error(`Invalid --tz minutes: "${tzRaw}". Use UTC offset in minutes, e.g. --tz -300 (EST) or --tz 60 (CET).`);
+          process.exit(2);
+        }
+        tzOffsetMinutes = tz;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown activity rhythm report to stdout.
+      console.log(buildRhythm(hours, tzOffsetMinutes, Date.now()).markdown);
       return;
     }
     if (args.has("--web")) {

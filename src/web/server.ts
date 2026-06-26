@@ -24,6 +24,8 @@
  *   GET  /api/tuning.md?hours=N     -> the same tuning report as a downloadable .md file
  *   GET  /api/watchlist-activity?hours=N    -> per-watchlist-entry activity report (model + Markdown)
  *   GET  /api/watchlist-activity.md?hours=N -> the same watchlist activity report as a downloadable .md file
+ *   GET  /api/rhythm?hours=N&tz=M   -> temporal activity rhythm (hour/day heat-map; model + Markdown)
+ *   GET  /api/rhythm.md?hours=N&tz=M -> the same rhythm report as a downloadable .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -85,6 +87,7 @@ import { buildProfile, profileFilename } from "../analytics/profile.ts";
 import { buildAssets, assetsFilename } from "../analytics/assets.ts";
 import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
+import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -635,6 +638,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${watchlistFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- temporal activity rhythm (when does activity happen: hour × day) ---
+      if (method === "GET" && path === "/api/rhythm") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const tz = Number(url.searchParams.get("tz")) || 0;
+        return send(res, 200, buildRhythm(hours, tz, Date.now()));
+      }
+      if (method === "GET" && path === "/api/rhythm.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const tz = Number(url.searchParams.get("tz")) || 0;
+        const now = Date.now();
+        const { markdown } = buildRhythm(hours, tz, now);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${rhythmFilename(now)}"`,
         });
         res.end(markdown);
         return;

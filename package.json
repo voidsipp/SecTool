@@ -19,6 +19,7 @@
     "assets": "node src/index.ts --assets 24",
     "tuning": "node src/index.ts --tuning 168",
     "watchlist": "node src/index.ts --watchlist 24",
+    "rhythm": "node src/index.ts --rhythm 168",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
   },
