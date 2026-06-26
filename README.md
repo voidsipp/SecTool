@@ -301,6 +301,33 @@ no live gateway query**.
 In the dashboard it lives under the **🖥️ Assets** tab, with one-click **Watch** /
 **Safe** actions per host.
 
+## 🔧 Signature tuning (`GET /api/tuning[.md]`, `--tuning`)
+
+The reports above answer *"what happened?"*; this one answers the operational
+follow-up that fights **alert fatigue**: *"what can I safely silence so the
+signal stands out?"* For every distinct signature in the stored history it rolls
+up volume + a normalized **alerts/day** rate, the **severity ceiling** it ever
+reached, how many distinct hosts it touched, and the operator signals that prove
+value or the lack of it — how many of its alerts were **dismissed**, marked
+**false-positive**, left **open** in triage, or **resolved** as genuine
+incidents. From that it computes a **0-100 noise score** (high volume + low
+severity + dismissed/false-positive history push it up; medium+ severity, open
+triage and resolved-real incidents pull it down) and emits a conservative
+**recommendation** — `suppress` (safe to mute), `review` (probably noise, eyeball
+it first), or `keep` (carries signal, leave it). Each actionable row carries a
+**ready-to-apply suppression rule** whose `maxSeverity` is pinned to the observed
+ceiling, so a future escalation **above** that level still pages you. Pure
+offline math over the local alert history — **no SSH, no Claude, no live gateway
+query**.
+
+- `GET /api/tuning?hours=N` → the structured model **plus** rendered Markdown.
+- `GET /api/tuning.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --tuning 168` (or `npm run tuning`) → print the Markdown to stdout.
+
+In the dashboard it lives at the top of the **🔕 Suppressions** tab as a
+**Tuning recommendations** panel — each suggested rule has a one-click **Create
+rule** button that wires straight into the existing suppression engine.
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

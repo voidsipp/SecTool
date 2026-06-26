@@ -449,6 +449,28 @@
       </label>
     </div>
   </div>
+  <div class="section" id="tuningSection">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <h3 style="margin:0">🔧 Tuning recommendations</h3>
+      <span id="tuningMeta" class="muted" style="font-size:12px"></span>
+      <span class="spacer" style="flex:1"></span>
+      <label class="muted" style="font-size:12px">Window
+        <select id="tuningHours" style="margin-left:4px;font-family:var(--mono);font-size:13px;background:var(--panel2);color:var(--text);border:2px solid var(--border);padding:3px 6px;">
+          <option value="24">24h</option>
+          <option value="48">48h</option>
+          <option value="168" selected>7d</option>
+          <option value="720">30d</option>
+        </select>
+      </label>
+      <button id="tuningDownload" class="peerbtn">⬇ .md</button>
+    </div>
+    <div class="muted" style="font-size:13px;margin-bottom:8px">
+      SecTool scores every signature by noise vs. signal — high volume + low severity + dismissed/false-positive
+      history make a signature a suppression candidate, while medium+ severity or open triage keeps it safe. Each
+      suggested rule is pinned to the observed severity ceiling, so a future escalation above that level still pages you.
+    </div>
+    <div id="tuningBody"><div class="empty">Loading…</div></div>
+  </div>
   <div id="suppBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="trendsView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
@@ -1611,6 +1633,7 @@ async function showSupp(){
   $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#devicesView").style.display="none"; $("#searchView").style.display="none";
   $("#suppView").style.display="block";
   $("#suppBody").innerHTML='<div class="empty">Loading…</div>';
+  loadTuningRecs();
   try {
     const j = await api("/api/suppressions");
     $("#suppCount").textContent = "("+j.count+")";
@@ -1666,6 +1689,69 @@ async function addSuppFromForm(){
     $("#suppMaxSev").value = ""; $("#suppTtl").value = "0";
     showSupp(); loadStatus(); loadAlerts();
   } catch(e){ alert(e.message); }
+}
+const TUNE_REC = {
+  suppress: { label:"🔕 Suppress", color:"var(--low)" },
+  review:   { label:"👀 Review",   color:"var(--medium)" },
+  keep:     { label:"· Keep",      color:"var(--muted)" },
+};
+async function loadTuningRecs(){
+  const body = $("#tuningBody");
+  body.innerHTML='<div class="empty"><span class="spin"></span> Scoring signatures…</div>';
+  try {
+    const hours = $("#tuningHours").value;
+    const j = await api("/api/tuning?hours="+encodeURIComponent(hours));
+    const covered = j.alreadyCoveredAlerts ? ` · ${j.alreadyCoveredAlerts} already covered` : "";
+    $("#tuningMeta").textContent = `(last ${j.hours}h · ${j.signatureCount} sig${j.signatureCount===1?'':'s'} · ${j.totalAlerts} alert${j.totalAlerts===1?'':'s'}${covered})`;
+    const acts = (j.signatures||[]).filter(s=>s.recommendation==="suppress"||s.recommendation==="review");
+    if (!acts.length){
+      body.innerHTML = '<div class="empty">No tuning recommendations — your alert stream is already tight, or there isn\'t enough history yet in this window.</div>';
+      return;
+    }
+    const sevBadge = (s)=>`<span class="sevtag sev-${esc(s)}" style="display:inline-block;padding:2px 7px;border-radius:0;font-family:var(--pix);font-size:7px;color:#04121a;text-transform:uppercase">${esc(s)}</span>`;
+    const head = j.suppressCandidates
+      ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Applying the <b style="color:var(--low)">${j.suppressCandidates}</b> suppress recommendation${j.suppressCandidates===1?'':'s'} would mute ~<b style="color:var(--text)">${j.estimatedSilenced}</b> alert${j.estimatedSilenced===1?'':'s'} (<b style="color:var(--text)">${j.estimatedSilencedPct}%</b> of signed volume) with no loss of medium+ events.</div>`
+      : "";
+    body.innerHTML = head + acts.map(s=>{
+      const rm = TUNE_REC[s.recommendation] || TUNE_REC.keep;
+      const stats = [];
+      stats.push(`<b style="color:var(--text)">${s.count}</b> alert${s.count===1?'':'s'}`);
+      stats.push(`${s.perDay.toFixed(1)}/day`);
+      if (s.dismissedCount) stats.push(`${s.dismissedCount} dismissed`);
+      if (s.falsePositiveCount) stats.push(`<span style="color:var(--low)">${s.falsePositiveCount} false-pos</span>`);
+      stats.push(`${s.distinctSources} src / ${s.distinctDests} dst`);
+      stats.push(`last ${esc(ago(s.lastSeen))}`);
+      const rule = s.suggestedRule;
+      const btn = rule
+        ? `<button class="peerbtn tuneapply" data-sig="${esc(rule.signature)}" data-sev="${esc(rule.maxSeverity)}" data-reason="${esc(rule.reason)}" style="border-color:var(--low);color:var(--low)">＋ Create rule</button>`
+        : "";
+      return `<div class="section" style="padding:10px 12px;margin-bottom:8px;border-color:${rm.color}">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:5px">
+          <span style="font-family:var(--pix);font-size:8px;color:${rm.color};border:2px solid ${rm.color};padding:3px 7px">${esc(rm.label)}</span>
+          <span class="mono" style="font-size:14px;color:var(--text);word-break:break-all">${esc(s.signature)}</span>
+          ${sevBadge(s.severityMax)}
+          <span title="noise score" style="font-family:var(--pix);font-size:9px;color:${scoreColor(s.noiseScore)};border:2px solid ${scoreColor(s.noiseScore)};padding:3px 7px">NOISE ${s.noiseScore}</span>
+          <span class="spacer" style="flex:1"></span>
+          ${btn}
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:3px">${stats.join(" · ")}</div>
+        <div class="muted" style="font-size:12px">${esc(s.rationale)}</div>
+        ${rule?`<div class="meta" style="font-size:11px;margin-top:3px;color:var(--muted)">Rule: <span class="mono">sig~"${esc(rule.signature)}" &amp; sev&lt;=${esc(rule.maxSeverity)}</span></div>`:""}
+      </div>`;
+    }).join("");
+    document.querySelectorAll("#tuningBody .tuneapply").forEach(b=>b.onclick=async()=>{
+      const payload = { signature: b.dataset.sig, maxSeverity: b.dataset.sev || undefined, reason: b.dataset.reason || undefined };
+      b.disabled = true; b.textContent = "…";
+      try {
+        await api("/api/suppress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+        showSupp(); loadStatus(); loadAlerts();
+      } catch(e){ alert(e.message); b.disabled=false; b.textContent="＋ Create rule"; }
+    });
+  } catch(e){ body.innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+function downloadTuning(){
+  const hours = $("#tuningHours").value;
+  window.open("/api/tuning.md?hours="+encodeURIComponent(hours), "_blank");
 }
 function fmtBucket(ms){
   const d = new Date(ms);
@@ -2316,6 +2402,8 @@ $("#watchNote").addEventListener("keydown", e=>{ if(e.key==="Enter") addWatchFro
 $("#backAlerts5").onclick = showAlerts;
 $("#navSupp").onclick = showSupp;
 $("#suppAdd").onclick = addSuppFromForm;
+$("#tuningHours").onchange = loadTuningRecs;
+$("#tuningDownload").onclick = downloadTuning;
 $("#backAlerts6").onclick = showAlerts;
 $("#backAlerts").onclick = showAlerts;
 $("#backAlerts2").onclick = showAlerts;

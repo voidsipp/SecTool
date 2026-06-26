@@ -20,6 +20,8 @@
  *   GET  /api/profile.md?ip=&hours=N-> the same profile as a downloadable .md file
  *   GET  /api/assets?hours=N        -> internal-asset exposure scoreboard (model + Markdown)
  *   GET  /api/assets.md?hours=N     -> the same scoreboard as a downloadable .md file
+ *   GET  /api/tuning?hours=N        -> signature tuning / noise-reduction recommendations
+ *   GET  /api/tuning.md?hours=N     -> the same tuning report as a downloadable .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -79,6 +81,7 @@ import { buildReport, reportFilename } from "../analytics/report.ts";
 import { buildComparison, comparisonFilename } from "../analytics/compare.ts";
 import { buildProfile, profileFilename } from "../analytics/profile.ts";
 import { buildAssets, assetsFilename } from "../analytics/assets.ts";
+import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -589,6 +592,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${assetsFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- signature tuning: which noisy signatures are safe to suppress ---
+      if (method === "GET" && path === "/api/tuning") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 40;
+        return send(res, 200, buildTuning(hours, limit, Date.now()));
+      }
+      if (method === "GET" && path === "/api/tuning.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 40;
+        const now = Date.now();
+        const { markdown } = buildTuning(hours, limit, now);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${tuningFilename(now)}"`,
         });
         res.end(markdown);
         return;
