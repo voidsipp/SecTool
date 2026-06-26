@@ -894,6 +894,14 @@ export interface EgressAudit {
   /** Audited peers whose IP matches the operator's watchlist (IP or CIDR). */
   watchedCount?: number;
   /**
+   * Audited peers an authoritative reputation source (VirusTotal or AbuseIPDB)
+   * or a curated threat feed confirmed malicious. Distinct from `blockedCount`
+   * and `watchedCount` (operator decisions): this is external threat-intel, and
+   * can be the sole driver of `riskyCount`. Present (and > 0) only when at least
+   * one fired; see `note` for the named sources and offending addresses.
+   */
+  reputationFlaggedCount?: number;
+  /**
    * True when at least one authoritative reputation source (VirusTotal,
    * AbuseIPDB) was unavailable, so peers were scored only against the local
    * blocklist and keyless threat feeds. A low `riskyCount` is then a coverage
@@ -903,9 +911,11 @@ export interface EgressAudit {
   peers?: EgressPeer[];
   /**
    * Human-readable caveats over this audit, leading with the strongest signals:
-   * firewall-blocklist egress (a bypassed block), then suspicious outbound ports
-   * (naming the actual destination port numbers), then watchlist matches (naming
-   * the operator's own notes for *why* each address is watched), then result
+   * firewall-blocklist egress (a bypassed block), then reputation-confirmed
+   * malicious destinations (authoritative threat-intel verdicts / curated feeds,
+   * naming the sources and addresses), then suspicious outbound ports (naming the
+   * actual destination port numbers), then watchlist matches (naming the
+   * operator's own notes for *why* each address is watched), then result
    * truncation and/or degraded enrichment. Undefined when there is nothing to flag.
    */
   note?: string;
@@ -1081,6 +1091,17 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
   const blockedCount = peers.filter((p) => p.blocked).length;
   const watchedCount = peers.filter((p) => p.watched).length;
   const suspiciousPortCount = peers.filter((p) => p.suspiciousPorts.length > 0).length;
+  // Peers a reputation source (VirusTotal/AbuseIPDB) or a curated threat feed
+  // confirmed malicious. These can be the *sole* reason `riskyCount` is non-zero
+  // — none of the blocklist/watchlist/suspicious-port notes mention them — so
+  // without a dedicated line a reputation-driven risky count surfaces a number
+  // with no human-readable cause. Thresholds mirror the enrichment risk logic.
+  const reputationFlagged = peers.filter((p) => {
+    const vtBad = (p.virustotal?.malicious ?? 0) + (p.virustotal?.suspicious ?? 0);
+    const abuse = p.abuseipdb?.score ?? 0;
+    return vtBad > 0 || abuse >= 50 || p.feeds.length > 0;
+  });
+  const reputationFlaggedCount = reputationFlagged.length;
 
   const notes: string[] = [];
   // Lead with a blocklisted egress destination: the operator already decided
@@ -1091,6 +1112,27 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
       `${blockedCount} audited peer(s) are on the firewall blocklist — this host is still establishing ` +
         `connections to address(es) the firewall is meant to drop, so the block is being bypassed ` +
         `(an off-gateway path/VPN, or a rule not catching this traffic); review the flagged peers.`,
+    );
+  }
+  if (reputationFlaggedCount > 0) {
+    // Name which authoritative sources fired and the offending IPs (capped) so
+    // the takeaway is actionable without scanning the peer list. `peers` is sorted
+    // risk-first then by connection volume, so the first few flagged entries are
+    // the highest-signal ones to surface. A confirmed-malicious threat-intel
+    // verdict is the strongest egress signal after an address the operator has
+    // explicitly blocked, so this leads the reputation/behaviour notes.
+    const sources = new Set<string>();
+    for (const p of reputationFlagged) {
+      if ((p.virustotal?.malicious ?? 0) + (p.virustotal?.suspicious ?? 0) > 0) sources.add("VirusTotal");
+      if ((p.abuseipdb?.score ?? 0) >= 50) sources.add("AbuseIPDB");
+      if (p.feeds.length > 0) sources.add("threat feeds");
+    }
+    const shownIps = reputationFlagged.slice(0, 3).map((p) => p.ip);
+    const more = reputationFlaggedCount - shownIps.length;
+    notes.push(
+      `${reputationFlaggedCount} audited peer(s) matched threat intelligence (${[...sources].join(", ")}) — ` +
+        `${shownIps.join(", ")}${more > 0 ? `, +${more} more` : ""}; these are confirmed-malicious ` +
+        `destinations, review immediately.`,
     );
   }
   if (suspiciousPortCount > 0) {
@@ -1153,6 +1195,7 @@ export async function egressAudit(cfg: Config, host: string): Promise<EgressAudi
     riskyCount: peers.filter((p) => p.risk).length,
     blockedCount: blockedCount > 0 ? blockedCount : undefined,
     watchedCount: watchedCount > 0 ? watchedCount : undefined,
+    reputationFlaggedCount: reputationFlaggedCount > 0 ? reputationFlaggedCount : undefined,
     suspiciousPortCount: suspiciousPortCount > 0 ? suspiciousPortCount : undefined,
     reputationDegraded: degraded.length > 0,
     peers,
