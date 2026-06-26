@@ -32,6 +32,8 @@
  *   GET  /api/novelty.md?hours=N    -> the same novelty report as a downloadable .md file
  *   GET  /api/killchain?hours=N     -> kill-chain / attack-stage coverage + per-host progression (model + Markdown)
  *   GET  /api/killchain.md?hours=N  -> the same kill-chain report as a downloadable .md file
+ *   GET  /api/beacon?hours=N        -> beaconing / periodicity (regular-cadence src→dst pairs, i.e. C2; model + Markdown)
+ *   GET  /api/beacon.md?hours=N     -> the same beaconing report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -98,6 +100,7 @@ import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
 import { buildBacklog, backlogFilename } from "../analytics/backlog.ts";
 import { buildNovelty, noveltyFilename } from "../analytics/novelty.ts";
 import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
+import { buildBeacon, beaconFilename } from "../analytics/beacon.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -736,6 +739,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${killChainFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- beaconing / periodicity (regular-cadence src→dst pairs, i.e. C2) ---
+      if (method === "GET" && path === "/api/beacon") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minHits = Number(url.searchParams.get("minHits")) || 4;
+        return send(res, 200, buildBeacon(hours, { limit, minHits, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/beacon.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minHits = Number(url.searchParams.get("minHits")) || 4;
+        const now = Date.now();
+        const { markdown } = buildBeacon(hours, { limit, minHits, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${beaconFilename(now)}"`,
         });
         res.end(markdown);
         return;
