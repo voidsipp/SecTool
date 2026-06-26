@@ -760,7 +760,20 @@ export function flowsAround(timeMs: number, ips: string[], windowMinutes: number
   const store = getActiveFlowStore();
   const win = clamp(windowMinutes, 1, 720);
   if (!store) {
-    return { available: false, windowMinutes: win, count: 0, flows: [], note: "Flow collector is not enabled/running." };
+    // Collector-off branch: distinct from "ran but matched nothing" below. Name
+    // the remediation (the NETFLOW_ENABLED env var, mirroring device.ts) and the
+    // forward-only nature of collection, so the operator knows this is a config
+    // gap they can close — not evidence the host was quiet — and that enabling it
+    // captures traffic going forward, not retroactively for this past event.
+    return {
+      available: false,
+      windowMinutes: win,
+      count: 0,
+      flows: [],
+      note:
+        "Flow collector is not enabled/running, so no NetFlow was captured for this host — " +
+        "set NETFLOW_ENABLED=true and restart to begin forward-only collection (it won't recover traffic from before it was enabled).",
+    };
   }
   const lo = timeMs - win * 60_000;
   const hi = timeMs + win * 60_000;
