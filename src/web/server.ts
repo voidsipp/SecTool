@@ -14,6 +14,8 @@
  *   GET  /api/campaigns?hours=N     -> cluster stored alerts by external attacker IP
  *   GET  /api/report?hours=N        -> offline incident report (model + Markdown)
  *   GET  /api/report.md?hours=N     -> the same report as a downloadable .md file
+ *   GET  /api/compare?hours=N       -> period-over-period comparison vs the previous window
+ *   GET  /api/compare.md?hours=N    -> the same comparison as a downloadable .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -70,6 +72,7 @@ import { buildTrends } from "../analytics/trends.ts";
 import { buildCampaigns, type Campaign } from "../analytics/campaigns.ts";
 import { geolocate } from "../investigate/geo.ts";
 import { buildReport, reportFilename } from "../analytics/report.ts";
+import { buildComparison, comparisonFilename } from "../analytics/compare.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -522,6 +525,25 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${reportFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- period-over-period comparison (this window vs the previous one) ---
+      if (method === "GET" && path === "/api/compare") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildComparison(hours, 12, Date.now()));
+      }
+      // --- downloadable Markdown comparison ---
+      if (method === "GET" && path === "/api/compare.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const now = Date.now();
+        const { markdown } = buildComparison(hours, 12, now);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${comparisonFilename(now)}"`,
         });
         res.end(markdown);
         return;

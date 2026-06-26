@@ -26,6 +26,7 @@ import { startHoneypot } from "./deception/honeypot.ts";
 import { startBaselineMonitor } from "./anomaly/baseline.ts";
 import { startAgentDistServer } from "./agent/distServer.ts";
 import { runDigest } from "./digest/digest.ts";
+import { buildComparison } from "./analytics/compare.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -219,6 +220,22 @@ async function main(): Promise<void> {
       const cfg = loadConfig();
       setLogLevel(cfg.runtime.logLevel);
       await runDigest(cfg, raw ? Number(raw) || cfg.digest.periodHours : cfg.digest.periodHours, Date.now());
+      return;
+    }
+    const compareIdx = argv.findIndex((a) => a === "--compare" || a.startsWith("--compare="));
+    if (compareIdx !== -1) {
+      const inline = argv[compareIdx]!.split("=")[1];
+      const next = argv[compareIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --compare hours: "${raw}". Use e.g. --compare 24`);
+        process.exit(2);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: just print the Markdown comparison to stdout.
+      console.log(buildComparison(hours, 12, Date.now()).markdown);
       return;
     }
     if (args.has("--web")) {
