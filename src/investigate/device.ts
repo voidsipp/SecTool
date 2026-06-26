@@ -442,7 +442,9 @@ export interface ListenerAudit {
    * hardest internet-exposure signal; see `internetExposed`), then a summary of
    * all network-reachable sensitive services found (so the operator sees what to
    * lock down without scanning the list), and/or notes that the
-   * agent couldn't report bind addresses — in which case exposure is "unknown".
+   * agent couldn't report bind addresses — in which case exposure is "unknown" and
+   * the note suggests how to recover it (upgrade the agent, or, for a current agent
+   * hitting a platform limitation, a platform-appropriate on-host check command).
    * When bind data is missing, the note also reports what the gateway's NetFlow
    * could (or couldn't) corroborate about those ports' reachability, so an
    * "unknown" exposure still yields an actionable takeaway (see `agentVersion`
@@ -467,6 +469,28 @@ function versionLt(a: string, b: string): boolean {
     if (x > y) return false;
   }
   return false;
+}
+
+// Manual command an operator can run *on the host* to read each listener's bind
+// address directly, for the case where even a current agent's snapshot omits it (a
+// platform/socket-API limitation an upgrade won't fix). Keyed by the value the
+// agent's /health reports for `platform` (Node's process.platform). Falls back to a
+// portable suggestion for anything unrecognised so the note stays actionable.
+function manualBindCheckHint(platform: string | undefined): string {
+  switch (platform) {
+    case "win32":
+      return "run `netstat -ano` (or `Get-NetTCPConnection -State Listen`) on the host";
+    case "linux":
+      return "run `ss -tulpn` on the host";
+    case "darwin":
+      return "run `lsof -nP -iTCP -sTCP:LISTEN` (and `lsof -nP -iUDP`) on the host";
+    case "freebsd":
+    case "openbsd":
+    case "netbsd":
+      return "run `sockstat -l` on the host";
+    default:
+      return "run the host's socket-listing tool (e.g. `ss -tulpn` or `netstat -an`)";
+  }
 }
 
 // When no listener reported a bind address, exposure is shown as "unknown" and we
@@ -499,10 +523,20 @@ async function bindExposureNote(
     };
   }
   // A current-enough agent that still surfaced no bind address (e.g. a platform
-  // whose snapshot omits local addresses): report it without nagging to upgrade.
+  // whose snapshot omits local addresses): an upgrade won't fix this, so instead of
+  // a dead-end "unknown", point the operator at a direct on-host check — using the
+  // platform /health reports to name the exact command (mirroring how we name the
+  // exact version above so the note stays precise and actionable).
+  const platform =
+    h.ok && h.data && typeof (h.data as { platform?: unknown }).platform === "string"
+      ? (h.data as { platform: string }).platform
+      : undefined;
   return {
     agentVersion: version,
-    note: `Agent v${version} didn't report a bind address for any listener, so exposure is shown as "unknown" for this host.`,
+    note:
+      `Agent v${version} is current but didn't report a bind address for any listener — likely a ` +
+      `platform limitation an upgrade won't resolve — so exposure is shown as "unknown" for this host. ` +
+      `To confirm which ports face the network, ${manualBindCheckHint(platform)}.`,
   };
 }
 
