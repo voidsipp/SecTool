@@ -673,6 +673,59 @@ the local alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/coverage.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --coverage 168 [--limit 6]` (or `npm run coverage`) → print the Markdown to stdout (defaults to a 7-day window so retention and blind-spot signals reflect more than one shift).
 
+## 🧭 Traffic-direction / exposure report (`GET /api/direction[.md]`, `--direction`)
+
+Every other offline report treats an alert's two endpoints symmetrically — it
+ranks the worst *source*, the worst *destination*, or the worst source→dest
+*pair*. None of them asks the one question that flips an internal host from
+**victim** to **suspect**: *is that host the **target** of the alert, or the
+**source** of it?* That distinction is the sharpest compromise signal the data
+holds. An external IP tripping a rule against your server is the expected,
+all-day perimeter background; one of **your** hosts tripping a rule while
+reaching **out** to the internet — or pivoting **sideways** into another internal
+host — is the texture of a live compromise (C2 beaconing, exfil, east-west
+movement). A symmetric ranking buries those few alerts inside thousands of
+inbound ones; a directional split surfaces them as their own bucket with the
+responsible internal host named.
+
+Each stored alert is bucketed by the RFC1918 / loopback / link-local status of
+its two endpoints into one of five directions, in descending operational
+concern:
+
+- **outbound** (internal → external) — the highest-concern bucket: an internal
+  host is the one tripping the rule, reaching outward. Candidate C2 / exfil /
+  compromised-host beaconing.
+- **lateral** (internal → internal) — east-west movement; a foothold probing or
+  pivoting to neighbours. Rare in a healthy network, loud when real.
+- **inbound** (external → internal) — classic perimeter attacks; the normal,
+  high-volume background of an internet-facing gateway. Expected, not benign.
+- **external** (external → external) — neither endpoint is yours: spoofed
+  sources, transit, or mis-parsed lines. Usually noise, called out as such.
+- **unknown** — one or both endpoints missing / unparseable; excluded from the
+  verdict so it never inflates a concern bucket.
+
+Per bucket it shows volume and share, distinct sources and destinations, the
+blocked-vs-passed disposition split (reusing the efficacy report's classifier)
+and pass rate, the severe (≥ medium) count and the loudest signature. A high
+pass rate on the **outbound** bucket is the alarm worth the most: the gateway
+watched an internal host reach out and *let it through*. It then ranks the
+**internal hosts that are sourcing** outbound / lateral alerts — the nearest
+thing this dataset has to a "which of my machines is compromised?" list — by
+unmitigated outbound volume, with external-destination breadth, lateral-target
+count, peak severity, top signature and blocklist / watchlist / safelist flags.
+
+Honest about its limits: **direction is inferred, not observed** — it rests on
+RFC1918 classification, so NAT, VPN tunnels, asymmetric routing or carrier-grade
+NAT can mislabel a flow; a surprising outbound / lateral hit is a *lead to
+verify* (pull the host's egress in the live investigator), not a conviction.
+These are IPS **detections**, not full flows — a host beaconing over a channel
+that never trips a rule is invisible here. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/direction?hours=N[&limit=15]` → the structured model **plus** rendered Markdown (per-direction table, internal-source candidate-compromise ranking).
+- `GET /api/direction.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --direction 168 [--limit 15]` (or `npm run direction`) → print the Markdown to stdout (defaults to a 7-day window so outbound/lateral signals reflect more than one shift).
+
 ## 📈 Surge / burst report (`GET /api/surge[.md]`, `--surge`)
 
 Steady background noise is one thing; a sudden **storm** of alerts is another — and
