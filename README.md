@@ -243,6 +243,29 @@ RFC1918 ranges are ever scanned and the candidate count is hard-capped
 (`DISCOVERY_MAX_HOSTS`) so a wide netmask can't trigger a runaway sweep. Pass
 `?subnet=192.168.1.0/24` (or set `DISCOVERY_SUBNETS`) to target a specific range.
 
+### ⬇ Agent push-deploy (`DEPLOY_ENABLED`, `POST /api/discovery/deploy[-all]`)
+
+Once devices are discovered, the **⬇ Push agent** bar installs the endpoint agent
+on eligible hosts unattended — no need to touch each machine. SecTool flags every
+LAN host that isn't already running the agent and exposes a transport it can drive,
+then runs SecTool's own one-liner installer remotely (downloaded from the dist
+server, with the agent token/port baked in). Two transports cover the LAN:
+
+- **SSH** (`DEPLOY_SSH_*`) — Linux, macOS, and any host running an SSH server.
+  Key auth by default (reuses the UDM key or `DEPLOY_SSH_KEY`); password auth only
+  if `sshpass` is installed on the SecTool host.
+- **WinRM** (`DEPLOY_WINRM_*`) — the fallback for **Windows hosts that don't run
+  SSH**. SecTool's local PowerShell client opens a PSRemoting session (`:5985`, or
+  `:5986` with `DEPLOY_WINRM_USE_SSL=true`) and runs the same `/install.ps1`
+  one-liner. WinRM has no key auth, so enter a Windows admin password in the bar;
+  the target needs PSRemoting enabled (`Enable-PSRemoting -Force`). The target IP
+  is best-effort added to the client's `TrustedHosts` so IP + local-admin works.
+
+A mixed LAN deploys in one pass — **⬇ Push to all eligible** routes each host over
+its own transport. Pushing software onto other machines is sensitive, so the whole
+feature is opt-in (`DEPLOY_ENABLED=false` by default) and only ever targets RFC1918
+IPv4 hosts. Hosts with neither SSH nor WinRM are listed for the manual one-liner.
+
 ## 💬 Conversational analyst (dashboard "Ask", `POST /api/ask`)
 
 Ask plain-English questions and Claude answers by **querying your real telemetry**
@@ -364,6 +387,11 @@ All keys live in `.env`; see **`.env.example`** for the annotated list. Highligh
 | `DISCOVERY_ENABLED` | `true` | Active LAN device sweep (Devices → 🔍 Scan LAN). |
 | `DISCOVERY_MAX_HOSTS` | `1024` | Hard cap on hosts probed per sweep. |
 | `DISCOVERY_SUBNETS` | — | Override auto-detected subnet(s), e.g. `192.168.1.0/24`. |
+| `DEPLOY_ENABLED` | `false` | Agent push-deploy to discovered hosts (Devices → ⬇ Push). |
+| `DEPLOY_SSH_USER` | `root` | SSH login for the SSH transport (Linux/macOS). |
+| `DEPLOY_WINRM_ENABLED` | `true` | WinRM transport for SSH-less Windows hosts. |
+| `DEPLOY_WINRM_USER` | `Administrator` | WinRM admin login (needs a password in the UI). |
+| `DEPLOY_WINRM_USE_SSL` | `false` | Use HTTPS WinRM on `:5986` instead of `:5985`. |
 | `DRY_RUN` | `false` | `true` → log instead of posting to Discord. |
 
 ## Running as a background service (Windows)

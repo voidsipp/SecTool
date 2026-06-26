@@ -12,8 +12,8 @@
  *   POST /api/alerts/:id/surrounding-> all events/flows around the event
  *   GET  /api/trends?hours=N        -> aggregate stats from the stored alert history
  *   GET  /api/discovery[?subnet=]   -> active LAN sweep: all devices on the local network
- *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH)
- *   POST /api/discovery/deploy-all  -> push the agent to every SSH-eligible discovered host
+ *   POST /api/discovery/deploy      -> push the endpoint agent onto a discovered host (SSH or WinRM)
+ *   POST /api/discovery/deploy-all  -> push the agent to every eligible discovered host (SSH/WinRM)
  *   GET  /api/agents/traffic?host=  -> a device's flow footprint (peers/ports/alerts)
  *   GET  /api/agents/listeners?host=-> a device's listening sockets + owning process
  *   GET  /api/agents/egress?host=   -> a device's public peers + threat-intel reputation
@@ -174,15 +174,21 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         return send(res, r.ok ? 200 : 502, { ...r, deployEnabled: cfg.deploy.enabled, deployable });
       }
 
-      // --- push the endpoint agent onto a discovered host (over SSH) ---
+      // --- push the endpoint agent onto a discovered host (SSH, or WinRM if no SSH) ---
       if (method === "POST" && path === "/api/discovery/deploy") {
         const body = await readJson(req);
         const host = String(body["host"] ?? "").trim();
         if (isIP(host) === 0) return send(res, 400, { error: "Invalid or missing host IP." });
+        const str = (k: string) => (typeof body[k] === "string" && body[k] ? String(body[k]) : undefined);
+        const deployMethod = body["method"] === "winrm" ? "winrm" : body["method"] === "ssh" ? "ssh" : undefined;
         const r = await deployAgent(cfg, host, {
-          user: typeof body["user"] === "string" && body["user"] ? String(body["user"]) : undefined,
+          method: deployMethod,
+          user: str("user"),
           port: Number(body["port"]) || undefined,
-          password: typeof body["password"] === "string" && body["password"] ? String(body["password"]) : undefined,
+          password: str("password"),
+          winUser: str("winUser"),
+          winPassword: str("winPassword"),
+          winPort: Number(body["winPort"]) || undefined,
           force: body["force"] === true,
         });
         return send(res, r.ok ? 200 : 502, r);
@@ -191,12 +197,16 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       // --- push the agent to every eligible discovered host at once ---
       if (method === "POST" && path === "/api/discovery/deploy-all") {
         const body = await readJson(req);
+        const str = (k: string) => (typeof body[k] === "string" && body[k] ? String(body[k]) : undefined);
         const subnetRaw = String(body["subnet"] ?? "").trim();
         const r = await deployToAllEligible(cfg, {
           subnets: subnetRaw ? subnetRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
-          user: typeof body["user"] === "string" && body["user"] ? String(body["user"]) : undefined,
+          user: str("user"),
           port: Number(body["port"]) || undefined,
-          password: typeof body["password"] === "string" && body["password"] ? String(body["password"]) : undefined,
+          password: str("password"),
+          winUser: str("winUser"),
+          winPassword: str("winPassword"),
+          winPort: Number(body["winPort"]) || undefined,
         });
         return send(res, r.ok ? 200 : 502, r);
       }

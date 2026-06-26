@@ -87,17 +87,25 @@ function hasSshpass(): boolean {
 // Eligibility
 // ---------------------------------------------------------------------------
 
+/** Automated push transports, in preference order. */
+export type DeployMethod = "ssh" | "winrm";
+
 export interface DeployEligibility {
   eligible: boolean;
-  /** Transport we'd use. Only "ssh" is automated today. */
-  method: "ssh" | "manual" | "none";
+  /** Transport we'd use. "ssh"/"winrm" are automated; "manual"/"none" are not. */
+  method: DeployMethod | "manual" | "none";
   reason: string;
 }
 
 /**
  * Decide whether a discovered device supports an unattended agent push. A device
  * is eligible when it is a real LAN host, isn't this machine, isn't already
- * running the agent, and exposes the SSH port we deploy over.
+ * running the agent, and exposes a transport we can deploy over.
+ *
+ * SSH is preferred (cross-platform, key auth). For Windows hosts that don't run
+ * an SSH server we fall back to WinRM (PowerShell Remoting on :5985/:5986), which
+ * answers the common "device has no SSH" case — the dist server already serves a
+ * PowerShell one-liner (/install.ps1) we can run remotely.
  */
 export function assessDeploy(cfg: Config, d: DiscoveredDevice): DeployEligibility {
   if (d.isSelf) return { eligible: false, method: "none", reason: "this host" };
@@ -107,8 +115,12 @@ export function assessDeploy(cfg: Config, d: DiscoveredDevice): DeployEligibilit
   if (d.openPorts.includes(sshPort)) {
     return { eligible: true, method: "ssh", reason: `SSH reachable on :${sshPort}` };
   }
+  const winrmPort = cfg.deploy.winrmPort || 5985;
+  if (cfg.deploy.winrmEnabled && d.openPorts.includes(winrmPort)) {
+    return { eligible: true, method: "winrm", reason: `no SSH — WinRM reachable on :${winrmPort}` };
+  }
   if (d.alive) {
-    return { eligible: false, method: "manual", reason: `no SSH (:${sshPort}) — use the one-liner installer` };
+    return { eligible: false, method: "manual", reason: `no SSH/WinRM — use the one-liner installer` };
   }
   return { eligible: false, method: "none", reason: "host did not respond to the sweep" };
 }
@@ -126,7 +138,7 @@ export interface DeployStep {
 export interface DeployResult {
   ok: boolean;
   host: string;
-  method: "ssh";
+  method: DeployMethod;
   serverUrl?: string;
   user?: string;
   durationMs: number;
@@ -138,11 +150,17 @@ export interface DeployResult {
 }
 
 export interface DeployOptions {
+  /** Transport to use. Defaults to "ssh"; the web/batch layer derives it from assessDeploy. */
+  method?: DeployMethod;
   user?: string;
   port?: number;
-  /** Per-request password (only used if `sshpass` is installed locally). */
+  /** Per-request SSH password (only used if `sshpass` is installed locally). */
   password?: string;
-  /** Deploy even if SSH wasn't observed open during discovery. */
+  /** WinRM credentials (kept separate so a mixed LAN can carry both cred sets). */
+  winUser?: string;
+  winPassword?: string;
+  winPort?: number;
+  /** Deploy even if the transport's port wasn't observed open during discovery. */
   force?: boolean;
 }
 
@@ -239,10 +257,20 @@ async function verifyAgent(cfg: Config, host: string): Promise<string | undefine
 }
 
 /**
+ * Push the SecTool endpoint agent to a single discovered host. Dispatches to the
+ * requested transport (SSH by default; WinRM for Windows hosts without SSH) and
+ * returns a structured, UI-friendly result describing each step.
+ */
+export async function deployAgent(cfg: Config, host: string, opts: DeployOptions = {}): Promise<DeployResult> {
+  if (opts.method === "winrm") return deployWinrm(cfg, host, opts);
+  return deploySsh(cfg, host, opts);
+}
+
+/**
  * Push the SecTool endpoint agent to a single discovered host over SSH.
  * Returns a structured, UI-friendly result describing each step.
  */
-export async function deployAgent(cfg: Config, host: string, opts: DeployOptions = {}): Promise<DeployResult> {
+export async function deploySsh(cfg: Config, host: string, opts: DeployOptions = {}): Promise<DeployResult> {
   const startedAt = Date.now();
   const steps: DeployStep[] = [];
   const fail = (error: string): DeployResult => ({
@@ -336,6 +364,248 @@ export async function deployAgent(cfg: Config, host: string, opts: DeployOptions
 }
 
 // ---------------------------------------------------------------------------
+// WinRM transport (Windows hosts without SSH)
+// ---------------------------------------------------------------------------
+
+/** Locate a PowerShell client on this host to drive WinRM with (Windows or pwsh). */
+function resolvePwsh(): string | undefined {
+  for (const cmd of ["powershell", "pwsh"]) {
+    try {
+      const r = spawnSync(cmd, ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"], { stdio: "ignore" });
+      if (r.status === 0) return cmd;
+    } catch {
+      /* try next */
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The PowerShell script we feed (via stdin) to the local client. It opens a WinRM
+ * session to the target and runs the install one-liner the dist server serves.
+ *
+ * Connection details and credentials are passed through environment variables
+ * (SECTOOL_WINRM_*) rather than command-line args so the password never appears
+ * in the process table or the captured output. The remote scriptblock downloads
+ * and executes /install.ps1, which embeds the agent token/port and registers the
+ * SecToolAgent scheduled task (same payload the manual Windows one-liner uses).
+ *
+ * Before connecting we best-effort add the specific target IP to the local WinRM
+ * client's TrustedHosts. Negotiate/NTLM to a bare IP with a local admin account
+ * (the common workgroup case) otherwise fails with "cannot determine identity".
+ * We only append the one target — existing entries and any "*" are preserved —
+ * and swallow failures so a locked-down client still surfaces the real error.
+ */
+function winrmDriverScript(operationTimeoutMs: number): string {
+  const opTimeout = Math.max(30000, operationTimeoutMs);
+  return [
+    `$ErrorActionPreference = 'Stop'`,
+    `try {`,
+    `  $sec = ConvertTo-SecureString $env:SECTOOL_WINRM_PW -AsPlainText -Force`,
+    `  $cred = New-Object System.Management.Automation.PSCredential($env:SECTOOL_WINRM_USER, $sec)`,
+    `  if ($env:SECTOOL_WINRM_SSL -ne '1') {`,
+    `    try {`,
+    `      $th = Get-Item WSMan:\\localhost\\Client\\TrustedHosts -ErrorAction Stop`,
+    `      $cur = [string]$th.Value; $tgt = $env:SECTOOL_WINRM_HOST`,
+    `      if ([string]::IsNullOrWhiteSpace($cur)) {`,
+    `        Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value $tgt -Force -ErrorAction Stop`,
+    `      } elseif ($cur -ne '*' -and (($cur -split ',' | ForEach-Object { $_.Trim() }) -notcontains $tgt)) {`,
+    `        Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value ($cur + ',' + $tgt) -Force -ErrorAction Stop`,
+    `      }`,
+    `    } catch { }`,
+    `  }`,
+    `  $opt = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout ${opTimeout} -CancelTimeout 5000`,
+    `  $p = @{`,
+    `    ComputerName   = $env:SECTOOL_WINRM_HOST`,
+    `    Port           = [int]$env:SECTOOL_WINRM_PORT`,
+    `    Credential     = $cred`,
+    `    Authentication = 'Negotiate'`,
+    `    SessionOption  = $opt`,
+    `    ErrorAction    = 'Stop'`,
+    `  }`,
+    `  if ($env:SECTOOL_WINRM_SSL -eq '1') { $p['UseSSL'] = $true }`,
+    `  Invoke-Command @p -ArgumentList $env:SECTOOL_WINRM_URL -ScriptBlock {`,
+    `    param($url)`,
+    `    $ErrorActionPreference = 'Stop'`,
+    `    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+    `    $script = (New-Object Net.WebClient).DownloadString($url)`,
+    `    Invoke-Expression $script`,
+    `  }`,
+    `  Write-Output 'SECTOOL_WINRM_OK'`,
+    `} catch {`,
+    `  Write-Output ('SECTOOL_WINRM_ERR: ' + $_.Exception.Message)`,
+    `  exit 1`,
+    `}`,
+  ].join("\n");
+}
+
+function runWinrm(
+  cfg: Config,
+  pwsh: string,
+  host: string,
+  user: string,
+  password: string,
+  port: number,
+  url: string,
+): Promise<{ code: number | null; output: string }> {
+  const args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"];
+  const env = {
+    ...process.env,
+    SECTOOL_WINRM_HOST: host,
+    SECTOOL_WINRM_PORT: String(port),
+    SECTOOL_WINRM_USER: user,
+    SECTOOL_WINRM_PW: password,
+    SECTOOL_WINRM_URL: url,
+    SECTOOL_WINRM_SSL: cfg.deploy.winrmUseSsl ? "1" : "0",
+  };
+  return new Promise((resolve, reject) => {
+    let out = "";
+    const child = spawn(pwsh, args, { stdio: ["pipe", "pipe", "pipe"], env });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d: string) => (out += d));
+    child.stderr.on("data", (d: string) => (out += d));
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
+      resolve({ code: null, output: out + "\n[timed out]" });
+    }, cfg.deploy.timeoutMs);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, output: out });
+    });
+    // Feed the driver script over stdin so creds stay out of argv.
+    child.stdin.write(winrmDriverScript(cfg.deploy.timeoutMs));
+    child.stdin.end();
+  });
+}
+
+/**
+ * Push the SecTool endpoint agent to a single Windows host over WinRM (PowerShell
+ * Remoting) — the answer to "no SSH on the device". Requires a password (WinRM
+ * has no key auth) and a local PowerShell client to drive the session.
+ */
+export async function deployWinrm(cfg: Config, host: string, opts: DeployOptions = {}): Promise<DeployResult> {
+  const startedAt = Date.now();
+  const steps: DeployStep[] = [];
+  const fail = (error: string): DeployResult => ({
+    ok: false,
+    host,
+    method: "winrm",
+    durationMs: Date.now() - startedAt,
+    steps,
+    error,
+  });
+
+  if (isIP(host) !== 4 || !isPrivateV4(host)) {
+    return fail("Agent deployment is only allowed for private LAN IPv4 hosts.");
+  }
+  if (!cfg.deploy.enabled) {
+    return fail("Agent push-deploy is disabled. Set DEPLOY_ENABLED=true and restart SecTool.");
+  }
+  if (!cfg.deploy.winrmEnabled) {
+    return fail("WinRM push is disabled. Set DEPLOY_WINRM_ENABLED=true to deploy to SSH-less Windows hosts.");
+  }
+  if (!cfg.agent.enabled) {
+    return fail("The agent dist server is off. Set AGENT_ENABLED=true so devices have an installer to download.");
+  }
+
+  const pwsh = resolvePwsh();
+  if (!pwsh) {
+    return fail(
+      "WinRM deploy needs a local PowerShell client (powershell.exe on Windows, or pwsh). " +
+        "Run SecTool from a Windows host, or use the SSH transport instead.",
+    );
+  }
+
+  const user = (opts.winUser || opts.user || cfg.deploy.winrmUser || "Administrator").trim();
+  const password = opts.winPassword || opts.password || "";
+  if (!password) {
+    return fail("WinRM requires a password (it has no key auth). Enter the Windows admin password and retry.");
+  }
+  const port = opts.winPort && opts.winPort > 0 ? opts.winPort : cfg.deploy.winrmPort || 5985;
+  const serverIp = pickServerIp(cfg, host);
+  if (!serverIp) {
+    return fail("Could not determine a LAN IP for SecTool's dist server. Set DEPLOY_SERVER_IP=<this host's LAN IP>.");
+  }
+  const serverUrl = `http://${serverIp}:${cfg.agent.distPort}`;
+  const installUrl = `${serverUrl}/install.ps1`;
+  steps.push({
+    name: "plan",
+    ok: true,
+    detail: `winrm ${user}@${host}:${port}${cfg.deploy.winrmUseSsl ? " (ssl)" : ""} → install from ${serverUrl}`,
+  });
+
+  if (!cfg.agent.token) {
+    steps.push({ name: "token", ok: false, detail: "AGENT_TOKEN is not set — the agent API will be unauthenticated." });
+  }
+
+  log.info(`Deploying SecTool agent to ${user}@${host}:${port} over WinRM from ${serverUrl}`);
+  let run: { code: number | null; output: string };
+  try {
+    run = await runWinrm(cfg, pwsh, host, user, password, port, installUrl);
+  } catch (err) {
+    steps.push({ name: "winrm", ok: false, detail: (err as Error).message });
+    return {
+      ok: false,
+      host,
+      method: "winrm",
+      serverUrl,
+      user,
+      durationMs: Date.now() - startedAt,
+      steps,
+      error: `Could not run PowerShell: ${(err as Error).message}`,
+    };
+  }
+
+  const winOk = run.code === 0 && run.output.includes("SECTOOL_WINRM_OK");
+  steps.push({
+    name: "install",
+    ok: winOk,
+    detail: winOk
+      ? "installer completed over WinRM"
+      : run.code === null
+        ? "timed out"
+        : "WinRM/installer failed (is PowerShell Remoting enabled on the target? `Enable-PSRemoting -Force`)",
+  });
+
+  // Confirm the agent actually came up on the target's agent port.
+  const version = winOk ? await verifyAgent(cfg, host) : undefined;
+  if (winOk) {
+    steps.push({
+      name: "verify",
+      ok: !!version,
+      detail: version ? `agent v${version} responding on :${cfg.agent.port}` : "no /health response yet (it may still be starting)",
+    });
+  }
+
+  const ok = winOk && !!version;
+  return {
+    ok,
+    host,
+    method: "winrm",
+    serverUrl,
+    user,
+    durationMs: Date.now() - startedAt,
+    steps,
+    agentVersion: version,
+    output: tail(run.output),
+    error: ok
+      ? undefined
+      : winOk
+        ? "Installer ran but the agent didn't report healthy. Check that Node.js 18+ is installed on the target."
+        : "WinRM/installer failed — see output. Verify the admin credentials and that WinRM (PSRemoting) is enabled on the target.",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Batch deploy
 // ---------------------------------------------------------------------------
 
@@ -350,8 +620,10 @@ export interface DeployAllResult {
 }
 
 /**
- * Discover the LAN and push the agent to every eligible host. Eligible = SSH open,
- * not self, not already running the agent. Runs with bounded concurrency.
+ * Discover the LAN and push the agent to every eligible host. Eligible = a usable
+ * transport is open (SSH, or WinRM for SSH-less Windows hosts), not self, and not
+ * already running the agent. Each host is deployed over its own assessed transport.
+ * Runs with bounded concurrency.
  */
 export async function deployToAllEligible(
   cfg: Config,
@@ -365,11 +637,11 @@ export async function deployToAllEligible(
     return { ok: false, enabled: true, attempted: 0, succeeded: 0, skipped: [], results: [], error: disco.error };
   }
 
-  const eligible: DiscoveredDevice[] = [];
+  const eligible: Array<{ ip: string; method: DeployMethod }> = [];
   const skipped: Array<{ ip: string; reason: string }> = [];
   for (const d of disco.devices) {
     const a = assessDeploy(cfg, d);
-    if (a.eligible) eligible.push(d);
+    if (a.eligible && (a.method === "ssh" || a.method === "winrm")) eligible.push({ ip: d.ip, method: a.method });
     else if (a.method === "manual") skipped.push({ ip: d.ip, reason: a.reason });
   }
 
@@ -378,8 +650,10 @@ export async function deployToAllEligible(
   let idx = 0;
   const worker = async (): Promise<void> => {
     while (idx < eligible.length) {
-      const d = eligible[idx++]!;
-      results.push(await deployAgent(cfg, d.ip, opts));
+      const e = eligible[idx++]!;
+      // Each host uses its own transport; SSH ports/creds and WinRM creds are
+      // carried separately in opts, so a mixed LAN deploys in one pass.
+      results.push(await deployAgent(cfg, e.ip, { ...opts, method: e.method }));
     }
   };
   await Promise.all(Array.from({ length: limit }, worker));

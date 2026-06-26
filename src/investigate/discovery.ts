@@ -45,9 +45,10 @@ export interface DiscoveredDevice {
   /**
    * Whether the agent can be auto-pushed to this host (populated by the web layer
    * via assessDeploy in agentPush.ts). Optional so the core sweep stays decoupled
-   * from the deployment transport.
+   * from the deployment transport. "ssh"/"winrm" are automated; "manual" needs the
+   * one-liner; "none" is ineligible.
    */
-  deploy?: { eligible: boolean; method: "ssh" | "manual" | "none"; reason: string };
+  deploy?: { eligible: boolean; method: "ssh" | "winrm" | "manual" | "none"; reason: string };
 }
 
 export interface DiscoveryResult {
