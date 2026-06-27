@@ -60,6 +60,7 @@
  *   node src/index.ts --stability 168 # offline signature severity-stability / label-consistency audit (can you trust the severity field every report sorts on; per-signature spread + driver) report (Markdown)
  *   node src/index.ts --forecast 336  # offline threat-forecast / next-window projection (expected alert volume + severity for the coming hours; --horizon H) report (Markdown)
  *   node src/index.ts --silence 168   # offline silence / dormancy (gone-quiet) report: which established fixtures stopped firing — block confirmed working vs detection blind spot (--quiet H) (Markdown)
+ *   node src/index.ts --timeline 168  # offline daily timeline ledger: one chronological row per UTC day (volume, Δ, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (--bucket H) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -168,6 +169,7 @@ import { buildDrift } from "./analytics/drift.ts";
 import { buildStability } from "./analytics/stability.ts";
 import { buildForecast } from "./analytics/forecast.ts";
 import { buildSilence } from "./analytics/silence.ts";
+import { buildTimeline } from "./analytics/timeline.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
@@ -2428,6 +2430,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown silence report to stdout.
       console.log(buildSilence(hours, { limit, quietHours, minCount, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const timelineIdx = argv.findIndex((a) => a === "--timeline" || a.startsWith("--timeline="));
+    if (timelineIdx !== -1) {
+      const inline = argv[timelineIdx]!.split("=")[1];
+      const next = argv[timelineIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the daily ledger has a real run of days to walk.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --timeline hours: "${raw}". Use e.g. --timeline 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap how many (most-recent) ledger rows print.
+      let limit = 60;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--bucket H` (hours): bucket width (default 24 = UTC days).
+      let bucketHours: number | undefined;
+      const bucketIdx = argv.findIndex((a) => a === "--bucket" || a.startsWith("--bucket="));
+      if (bucketIdx !== -1) {
+        const v = argv[bucketIdx]!.split("=")[1] ?? argv[bucketIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) bucketHours = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown timeline ledger to stdout.
+      console.log(buildTimeline(hours, { limit, bucketHours, nowMs: Date.now() }).markdown);
       return;
     }
     const cohortIdx = argv.findIndex((a) => a === "--cohort" || a.startsWith("--cohort="));

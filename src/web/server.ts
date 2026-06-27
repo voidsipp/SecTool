@@ -146,6 +146,8 @@
  *   GET  /api/forecast.md?hours=N&horizon=H -> the same forecast report as a downloadable .md file
  *   GET  /api/silence?hours=N&quiet=H -> silence / dormancy (gone-quiet) report: established fixtures that stopped firing — block-confirmed vs detection blind spot (model + Markdown)
  *   GET  /api/silence.md?hours=N&quiet=H -> the same silence report as a downloadable .md file
+ *   GET  /api/timeline?hours=N&bucket=H -> daily timeline ledger: one chronological row per UTC day (volume, delta, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (model + Markdown)
+ *   GET  /api/timeline.md?hours=N&bucket=H -> the same timeline ledger as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/dismissals?hours=N    -> dismissal audit (did a hidden alert deserve to be hidden, and did the dismissed threat keep firing / escalate afterward; model + Markdown)
@@ -308,6 +310,7 @@ import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildStability, stabilityFilename } from "../analytics/stability.ts";
 import { buildForecast, forecastFilename } from "../analytics/forecast.ts";
 import { buildSilence, silenceFilename } from "../analytics/silence.ts";
+import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
@@ -2308,6 +2311,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${silenceFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- daily timeline ledger (chronological day-by-day: volume, delta, new attackers) ---
+      if (method === "GET" && path === "/api/timeline") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const bucketHours = Number(url.searchParams.get("bucket")) || undefined;
+        return send(res, 200, buildTimeline(hours, { limit, bucketHours, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/timeline.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const bucketHours = Number(url.searchParams.get("bucket")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildTimeline(hours, { limit, bucketHours, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${timelineFilename(now)}"`,
         });
         res.end(markdown);
         return;

@@ -255,6 +255,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Off-hours coverage gap", "How much attack pressure — and serious detect-only exposure — lands while no one is on shift."),
   entry("Temporal", "forecast", "--forecast", "/api/forecast", 336,
     "Threat forecast / next-window projection", "The one *forward*-looking volume report: projects expected alert load (and the high/critical share) for the coming hours from the historical hour-of-day × day-of-week rhythm plus a recent-trend multiplier, with per-hour/per-day expectations, a ~90% Poisson interval, the peak hour and the next busy stretch (--horizon H, --recent H) — the staffing/coverage twin of rhythm (backward heat-map), surge (past spikes) and momentum (per-source slope)."),
+  entry("Temporal", "timeline", "--timeline", "/api/timeline", 168,
+    "Daily timeline ledger", "Walk the calendar day by day: one chronological, gap-free row per UTC day (any width via --bucket H) — total alerts with a day-over-day Δ, serious (high+critical) count, unique sources/targets/signatures, first-seen new attackers, plus the busiest source, top signature and dominant category that day — with a window-wide volume sparkline, busiest/worst-day call-outs and a first-half→second-half trend. The absolute-timeline view that rhythm (cyclical heat-map), surge (sub-hour spikes) and compare (two-window diff) each deliberately leave out."),
 
   // --- Detection coverage ---------------------------------------------------
   entry("Detection coverage", "bruteforce", "--bruteforce", "/api/bruteforce", 168,
