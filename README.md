@@ -1056,6 +1056,47 @@ stores — **no SSH, no Claude, no live gateway query**.
 - `GET /api/safelist-audit.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --safelist 168 [--limit 100]` (or `npm run safelist`) → print the Markdown to stdout (defaults to a 7-day window so a slow-turning vendor IP has time to reveal post-vetting activity).
 
+## ⛔ Block-recommendation / candidate-blocklist worklist (`GET /api/blockplan[.md]`, `--blockplan`)
+
+Every enforcement report in SecTool points at a control that already **exists** —
+efficacy at per-*signature* gaps, recidivism at whether a **blocklist** entry held,
+hygiene at which existing blocks to *prune*, safelist at the **allow** side. None
+produces the single most operational artefact a defender wants from an alert
+stream: a **ranked, copy-pasteable list of new IPs to block**, with an honest
+estimate of what each block buys. A threat leaderboard (risk / focus) ranks danger
+but happily re-lists addresses you have already blocked, already vetted safe, or
+your own internal hosts — none of which belongs on a "block these next" worklist.
+This is the **add** side of the blocklist lifecycle, the mirror of hygiene.
+
+For every **external, routable** source that is **not already blocklisted and not
+safelisted**, it folds the windowed alerts into a severity-weighted **impact
+score** (info=1 · low=3 · medium=9 · high=27 · critical=81), counts the distinct
+internal hosts it reaches (hitting your assets outranks banging on a closed port),
+and assigns a one-word recommendation:
+
+- **⛔ block** — high/critical reaching an internal host, sustained severe (≥ medium)
+  volume, or a high impact score. The clear-cut worklist.
+- **🤔 consider** — medium severity, a notable score, or broad host reach (a scanner).
+  Worth a human glance before an edge block.
+- **👁 monitor** — low/info noise only; never recommended (a watchlist candidate instead).
+
+The crucial honesty axis is **preventability**: a source-level block drops
+*everything* at the edge, but the IPS may already drop some of it at the signature
+level. So the report separates the **let-through** alerts a block would *newly*
+prevent from the traffic already being dropped, and the headline sums only the
+genuine gain. **Already-blocklisted**, **safelisted**, and **internal** sources are
+deliberately excluded (the action is taken, vetted benign, or a compromise to
+isolate respectively) — each count is surfaced, never silently dropped — and a
+block-tier source already on the **watchlist** is flagged as the cleanest possible
+promotion. It is a **recommendation engine, not an actuator**: it never blocks
+anything (reactive/auto blocking lives in `respond/*`). Pure offline math over the
+local alert + block / safe / watch / triage stores — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/blockplan?hours=N[&limit=30&minAlerts=2]` → the structured model **plus** rendered Markdown (copy-paste worklist + impact-ranked candidate table + per-source detail).
+- `GET /api/blockplan.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --blockplan 168 [--limit 30]` (or `npm run blockplan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow attacker accrues enough impact to rank).
+
 ## 🔑 Credential-attack / brute-force report (`GET /api/bruteforce[.md]`, `--bruteforce`)
 
 Every other report treats the alert stream *generically* — it ranks a source by
