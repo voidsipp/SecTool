@@ -158,6 +158,8 @@
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/cwe?hours=N           -> CWE weakness-class coverage report (which software-weakness classes — SQLi/traversal/overflow/auth — are probed; family + per-CWE; model + Markdown)
  *   GET  /api/cwe.md?hours=N        -> the same CWE weakness-class report as a downloadable .md file
+ *   GET  /api/owasp?hours=N         -> OWASP Top 10 (2021) coverage report (which industry-standard web risk categories — A01-A10 — are probed; per-category + enforcement gap; model + Markdown)
+ *   GET  /api/owasp.md?hours=N      -> the same OWASP Top 10 report as a downloadable .md file
  *   GET  /metrics                   -> Prometheus / OpenMetrics scrape target (store saturation, last-alert age, severity/disposition/category splits, control-plane sizes, triage backlog)
  *   GET  /api/metrics               -> the same Prometheus exposition under the /api prefix
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -286,6 +288,7 @@ import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts"
 import { buildConvergence, convergenceFilename } from "../analytics/convergence.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildCwe, cweFilename } from "../analytics/cwe.ts";
+import { buildOwasp, owaspFilename } from "../analytics/owasp.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildMomentum, momentumFilename } from "../analytics/momentum.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
@@ -2068,6 +2071,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cweFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- OWASP Top 10 (2021) coverage (which industry-standard web risk categories the alert history targets) ---
+      if (method === "GET" && path === "/api/owasp") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const topSignatures = Number(url.searchParams.get("topSignatures")) || undefined;
+        return send(res, 200, buildOwasp(hours, { topSignatures, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/owasp.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const topSignatures = Number(url.searchParams.get("topSignatures")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildOwasp(hours, { topSignatures, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${owaspFilename(now)}"`,
         });
         res.end(markdown);
         return;
