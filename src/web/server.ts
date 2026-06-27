@@ -86,6 +86,8 @@
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
  *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
  *   GET  /api/concentration.md?hours=N -> the same concentration report as a downloadable .md file
+ *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
+ *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/suppaudit?hours=N     -> suppression-rule audit (which silence rules are effective / dead / shadowed / risky; model + Markdown)
  *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
@@ -183,6 +185,7 @@ import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
+import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
@@ -1432,6 +1435,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attacker cohort-retention / churn (revolving-door vs committed base) ---
+      if (method === "GET" && path === "/api/cohort") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const bucketHours = Number(url.searchParams.get("bucket")) || undefined;
+        return send(res, 200, buildCohort(hours, { limit, bucketHours, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/cohort.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const bucketHours = Number(url.searchParams.get("bucket")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildCohort(hours, { limit, bucketHours, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${cohortFilename(now)}"`,
         });
         res.end(markdown);
         return;
