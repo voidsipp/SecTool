@@ -144,6 +144,8 @@
  *   GET  /api/stability.md?hours=N  -> the same stability report as a downloadable .md file
  *   GET  /api/forecast?hours=N&horizon=H -> threat-forecast / next-window projection (expected alert volume + severity for the coming hours; model + Markdown)
  *   GET  /api/forecast.md?hours=N&horizon=H -> the same forecast report as a downloadable .md file
+ *   GET  /api/silence?hours=N&quiet=H -> silence / dormancy (gone-quiet) report: established fixtures that stopped firing — block-confirmed vs detection blind spot (model + Markdown)
+ *   GET  /api/silence.md?hours=N&quiet=H -> the same silence report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/dismissals?hours=N    -> dismissal audit (did a hidden alert deserve to be hidden, and did the dismissed threat keep firing / escalate afterward; model + Markdown)
@@ -305,6 +307,7 @@ import { buildHeat, heatFilename } from "../analytics/heat.ts";
 import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildStability, stabilityFilename } from "../analytics/stability.ts";
 import { buildForecast, forecastFilename } from "../analytics/forecast.ts";
+import { buildSilence, silenceFilename } from "../analytics/silence.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
@@ -2281,6 +2284,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${forecastFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- silence / dormancy (gone-quiet): established fixtures that stopped firing ---
+      if (method === "GET" && path === "/api/silence") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const quietHours = Number(url.searchParams.get("quiet")) || undefined;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        return send(res, 200, buildSilence(hours, { limit, quietHours, minCount, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/silence.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const quietHours = Number(url.searchParams.get("quiet")) || undefined;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildSilence(hours, { limit, quietHours, minCount, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${silenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
