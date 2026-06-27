@@ -181,6 +181,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Rarity / signal-surprise", "TF-IDF lens: which source fires signatures nobody else does — the bespoke needle vs the commodity-scan noise."),
   entry("Attacker / source", "bogon", "--bogon", "/api/bogon", 168,
     "Bogon / spoofed-source audit", "Classifies each source IP against the IANA special-use registry (RFC6890) — flags martian/bogon sources that cannot legitimately exist (a spoofing tell and edge-filter gap), separates internal/lateral sources from real public attackers, distinct from netblocks (CIDR rollup) and geo."),
+  entry("Attacker / source", "cloud", "--cloud", "/api/cloud", 168,
+    "Cloud / hosting-origin attribution", "Matches each public source IP (longest-prefix, offline) to the cloud/VPS/CDN provider that hosts it — AWS, GCP, Azure, Oracle, Alibaba, Tencent, DigitalOcean, Linode, Vultr, OVH, Hetzner, Scaleway, Cloudflare — separating rented hyperscaler/VPS scan infra (with per-provider abuse-desk contacts to report) from unclassified residential/ISP space; complements netblocks (CIDR rollup) and bogon (validity)."),
 
   // --- Target / exposure ----------------------------------------------------
   entry("Target / exposure", "assets", "--assets", "/api/assets", 24,

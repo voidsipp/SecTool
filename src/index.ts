@@ -74,6 +74,7 @@
  *   node src/index.ts --ruleset 168   # offline detection-rule (Suricata SID) inventory & ruleset-provenance (Snort/Talos vs local vs ET; revision-drift) report (Markdown)
  *   node src/index.ts --protocols 168 # offline protocol-mix / transport (TCP/UDP/ICMP) & application-layer breakdown (re-parsed from raw; tunnelling & amplification tells) report (Markdown)
  *   node src/index.ts --bogon 168     # offline bogon / special-use source-address audit (IANA RFC6890 spoofed/martian vs internal vs public; anti-spoofing & edge-filter gaps) report (Markdown)
+ *   node src/index.ts --cloud 168     # offline cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts) report (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -164,6 +165,7 @@ import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
 import { buildRuleset } from "./analytics/ruleset.ts";
 import { buildProtocols } from "./analytics/protocols.ts";
 import { buildBogon } from "./analytics/bogon.ts";
+import { buildCloud } from "./analytics/cloud.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -1429,6 +1431,32 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown bogon audit report to stdout.
       console.log(buildBogon(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Cloud / hosting-origin attribution — match public source IPs to cloud/VPS/CDN providers.
+    const cloudIdx = argv.findIndex((a) => a === "--cloud" || a.startsWith("--cloud="));
+    if (cloudIdx !== -1) {
+      const inline = argv[cloudIdx]!.split("=")[1];
+      const next = argv[cloudIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the provider mix reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --cloud hours: "${raw}". Use e.g. --cloud 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the offending-source table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown cloud-attribution report to stdout.
+      console.log(buildCloud(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     // Auto-block threshold simulator — sweep "block a source after N alerts" and find the knee.
