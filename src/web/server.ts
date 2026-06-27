@@ -88,6 +88,8 @@
  *   GET  /api/safelist-audit.md?hours=N -> the same safelist risk audit as a downloadable .md file
  *   GET  /api/blockplan?hours=N         -> block-recommendation / candidate-blocklist worklist (which un-blocked, un-safelisted sources to block next, ranked by preventable impact; model + Markdown)
  *   GET  /api/blockplan.md?hours=N      -> the same block-recommendation worklist as a downloadable .md file
+ *   GET  /api/briefing?hours=N          -> consolidated morning security briefing / SITREP (self-computed KPIs + trend + action items + bundled detail reports; model + Markdown)
+ *   GET  /api/briefing.md?hours=N       -> the same morning briefing as a downloadable .md file
  *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
  *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
@@ -214,6 +216,7 @@ import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts"
 import { buildMttb, mttbFilename } from "../analytics/mttb.ts";
 import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist.ts";
 import { buildBlockPlan, blockPlanFilename } from "../analytics/blockplan.ts";
+import { buildBriefing, briefingFilename, ALL_SECTION_KEYS, type BriefingSectionKey } from "../analytics/briefing.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1462,6 +1465,32 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-disposition": `attachment; filename="${blockPlanFilename(now)}"`,
         });
         res.end(markdown);
+        return;
+      }
+
+      // --- consolidated morning security briefing / SITREP (KPIs + trend + actions + bundled detail) ---
+      if (method === "GET" && (path === "/api/briefing" || path === "/api/briefing.md")) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        // Optional comma-separated `sections=` filter; unknown keys are dropped.
+        const rawSections = url.searchParams.get("sections");
+        let sections: BriefingSectionKey[] | undefined;
+        if (rawSections) {
+          const want = rawSections.split(",").map((s) => s.trim()).filter(Boolean);
+          const valid = want.filter((s): s is BriefingSectionKey =>
+            (ALL_SECTION_KEYS as string[]).includes(s),
+          );
+          if (valid.length) sections = valid;
+        }
+        const now = Date.now();
+        const report = buildBriefing(hours, { limit, sections, nowMs: now });
+        if (path === "/api/briefing") return send(res, 200, report);
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${briefingFilename(now)}"`,
+        });
+        res.end(report.markdown);
         return;
       }
 

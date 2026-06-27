@@ -1097,6 +1097,47 @@ gateway query**.
 - `GET /api/blockplan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --blockplan 168 [--limit 30]` (or `npm run blockplan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow attacker accrues enough impact to rank).
 
+## 📋 Morning security briefing / SITREP (`GET /api/briefing[.md]`, `--briefing`)
+
+SecTool has grown a deep catalogue of sharp, single-purpose reports, but none of
+them **composes**: an operator returning in the morning has to know which reports
+to run, run several, and stitch the headlines together in their head. This is the
+capstone that does it for them — the daily **SITREP** every SOC opens first,
+answering, in order, *what changed, how bad is it, and what do I do first* — then
+carrying the supporting detail underneath. It is deliberately **not** another
+analytic lens; it is a **consolidator**, and it works in three layers:
+
+- **Executive KPIs (self-computed).** A compact scorecard — total alerts, severe
+  (medium+) alerts, gateway **block rate**, **unblocked high/critical** exposure,
+  active sources, an unmitigated **risk weight** (Σ severity-weight × disposition-
+  factor, the same weighting `risk.ts` uses), and **new sources**. Every KPI is
+  paired with the **same KPI over the immediately preceding window of equal
+  length**, yielding a trend arrow and a percent change — because *is today worse
+  than yesterday?* matters more than any absolute.
+- **Prioritised action items (self-synthesised).** A deduplicated, severity-ranked
+  to-do list so the briefing is opinionated, not just descriptive: **🔴 URGENT** —
+  a *safelisted* (vetted-benign) IP firing severe alerts (a trusted address
+  behaving badly is the worst surprise); **🟠 HIGH** — sources landing **unblocked
+  high/critical** alerts (active threats reaching your hosts unblocked); **🟡
+  MEDIUM** — loud, persistent, un-blocked, un-safelisted repeat offenders. Each
+  item names the IP, cites the evidence, and surfaces block/watch/safe membership
+  so an already-handled IP isn't re-flagged.
+- **Bundled detail (composed).** The full Markdown of the "morning essential"
+  reports (risk → efficacy → blockplan → escalation → novelty → backlog by
+  default, selectable via `sections`) appended under a table of contents, each
+  guarded so one failing builder degrades to a noted stub instead of breaking the
+  whole briefing.
+
+Unlike the AI digest (`digest` / `insight`, which call Claude and a Discord
+webhook), the briefing is **pure, deterministic, offline** — no model, no network
+— so it runs identically anywhere, including a cron or an air-gapped review. Pure
+in-memory math over the local alert + block / watch / safe stores and the existing
+offline builders — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/briefing?hours=N[&limit=15&sections=risk,efficacy,...]` → the structured model (KPIs + trend + action items + bundled sections) **plus** rendered Markdown.
+- `GET /api/briefing.md?hours=N` → the same briefing as a downloadable `.md` file.
+- `node src/index.ts --briefing 24 [--limit 15] [--sections risk,blockplan]` (or `npm run briefing`) → print the Markdown to stdout (defaults to a 24-hour window — the SITREP you open in the morning).
+
 ## 🔑 Credential-attack / brute-force report (`GET /api/bruteforce[.md]`, `--bruteforce`)
 
 Every other report treats the alert stream *generically* — it ranks a source by
