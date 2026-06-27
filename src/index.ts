@@ -78,6 +78,7 @@
  *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
+ *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -172,6 +173,11 @@ import { buildProtocols } from "./analytics/protocols.ts";
 import { buildFwRules, parseFwDialect, renderFwScript } from "./analytics/fwrules.ts";
 import { buildBogon } from "./analytics/bogon.ts";
 import { buildCloud } from "./analytics/cloud.ts";
+import {
+  buildAlertFeed,
+  parseFeedFormat,
+  feedDocument,
+} from "./analytics/alertFeed.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -2569,6 +2575,44 @@ async function main(): Promise<void> {
       } else {
         process.stdout.write(model.json + "\n");
       }
+      return;
+    }
+    // Alert syndication feed (RSS 2.0 / Atom 1.0 / JSON Feed 1.1) for any feed reader.
+    const feedIdx = argv.findIndex((a) => a === "--feed" || a.startsWith("--feed="));
+    if (feedIdx !== -1) {
+      const inline = argv[feedIdx]!.split("=")[1];
+      const next = argv[feedIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a day — a feed is a recent view, not the archive.
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --feed hours: "${raw}". Use e.g. --feed 24`);
+        process.exit(2);
+      }
+      // Optional `--format rss|atom|json` — RSS by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const fmt = parseFeedFormat(fmtRaw);
+      // Optional `--min-severity info|low|medium|high|critical` (default: all).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--limit N` cap on emitted items (newest first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--base-url URL` to emit absolute self + per-item links.
+      const baseIdx = argv.findIndex((a) => a === "--base-url" || a.startsWith("--base-url="));
+      const baseUrl = baseIdx !== -1 ? (argv[baseIdx]!.split("=")[1] ?? argv[baseIdx + 1]) : undefined;
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the syndication feed in the chosen format.
+      const model = buildAlertFeed(hours, { minSeverity, limit, baseUrl, nowMs: Date.now() });
+      process.stdout.write(feedDocument(model, fmt) + "\n");
       return;
     }
     // Sigma detection-rule export (Splunk / Elastic / Sentinel / any SIEM via pySigma).

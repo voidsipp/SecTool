@@ -162,6 +162,8 @@
  *   GET  /api/sigma?hours=N         -> Sigma detection rules (per-indicator; ?consolidated=1 for a single list rule) for any SIEM via pySigma
  *   GET  /api/sigma.yml?hours=N     -> the same Sigma ruleset as a downloadable .yml file
  *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
+ *   GET  /api/feed[?format=]        -> alert syndication feed (RSS 2.0 default; format=atom|json) for any feed reader / Slack / Teams (?hours, ?minSeverity, ?limit)
+ *   GET  /api/feed.xml|.atom|.json  -> the same feed as a downloadable RSS / Atom / JSON Feed file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -303,6 +305,14 @@ import {
 } from "../analytics/iocExport.ts";
 import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
+import {
+  buildAlertFeed,
+  parseFeedFormat,
+  feedDocument,
+  feedContentType,
+  feedFilename,
+  type FeedFormat,
+} from "../analytics/alertFeed.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -2394,6 +2404,45 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         }
         res.writeHead(200, headers);
         res.end(model.yaml);
+        return;
+      }
+
+      // --- alert syndication feed (RSS 2.0 / Atom 1.0 / JSON Feed 1.1) ---
+      // Subscribe in any feed reader / Slack / Teams / Discord bot.
+      // ?hours=N · ?minSeverity=medium · ?limit=N · ?format=rss|atom|json
+      if (
+        method === "GET" &&
+        (path === "/api/feed" ||
+          path === "/api/feed.xml" ||
+          path === "/api/feed.rss" ||
+          path === "/api/feed.atom" ||
+          path === "/api/feed.json")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        // The path suffix picks the format; ?format= overrides the bare /api/feed.
+        let fmt: FeedFormat;
+        if (path === "/api/feed.atom") fmt = "atom";
+        else if (path === "/api/feed.json") fmt = "json";
+        else if (path === "/api/feed.xml" || path === "/api/feed.rss") fmt = "rss";
+        else fmt = parseFeedFormat(url.searchParams.get("format"));
+        // Absolute self/item links when the Host header is known.
+        const host = (req.headers.host ?? "").trim();
+        const baseUrl = host ? `http://${host}` : undefined;
+        const now = Date.now();
+        const model = buildAlertFeed(hours, { minSeverity, limit, baseUrl, nowMs: now });
+        const headers: Record<string, string> = {
+          "content-type": feedContentType(fmt),
+          "cache-control": "no-store",
+        };
+        // Suffixed paths are explicit downloads; bare /api/feed renders inline.
+        if (path !== "/api/feed") {
+          headers["content-disposition"] = `attachment; filename="${feedFilename(now, fmt)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(feedDocument(model, fmt));
         return;
       }
 
