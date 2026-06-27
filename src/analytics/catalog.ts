@@ -259,6 +259,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Priority inversion", "Did the gateway block the IDS engine's most-urgent verdicts, or pass them while blocking noise?"),
   entry("Controls / enforcement", "blockplan", "--blockplan", "/api/blockplan", 168,
     "Block worklist", "Which sources to block next, ranked by preventable impact."),
+  entry("Controls / enforcement", "autoblock", "--autoblock", "/api/autoblock", 168,
+    "Auto-block threshold simulator", "Sweep \"block a source after N alerts\": preventable-volume vs blocks-issued knee curve to tune the auto-block trigger."),
   entry("Controls / enforcement", "recidivism", "--recidivism", "/api/recidivism", 168,
     "Post-block recidivism", "Did the block actually stop the traffic, or is it still coming?"),
   entry("Controls / enforcement", "mttb", "--mttb", "/api/mttb", 168,
