@@ -56,6 +56,7 @@
     "blockplan": "node src/index.ts --blockplan 168",
     "briefing": "node src/index.ts --briefing 24",
     "repertoire": "node src/index.ts --repertoire 168",
+    "momentum": "node src/index.ts --momentum 168",
     "audience": "node src/index.ts --audience 168",
     "dwell": "node src/index.ts --dwell 168",
     "mitre": "node src/index.ts --mitre 168",

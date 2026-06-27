@@ -40,6 +40,7 @@
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
+ *   node src/index.ts --momentum 168  # offline attack-momentum / rate-trend (surging-vs-spent: who is ramping up right now) report (Markdown)
  *   node src/index.ts --audience 168  # offline signature-audience / spray-vs-snipe (background radiation vs targeted snipe per signature) report (Markdown)
  *   node src/index.ts --dwell 168     # offline source dwell-time / engagement-session (sustained camp vs transient probe) report (Markdown)
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
@@ -117,6 +118,7 @@ import { buildBurstiness } from "./analytics/burstiness.ts";
 import { buildConvergence } from "./analytics/convergence.ts";
 import { buildMitre } from "./analytics/mitre.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
+import { buildMomentum } from "./analytics/momentum.ts";
 import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
 import { buildCohort } from "./analytics/cohort.ts";
@@ -1514,6 +1516,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown repertoire report to stdout.
       console.log(buildRepertoire(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const momentumIdx = argv.findIndex((a) => a === "--momentum" || a.startsWith("--momentum="));
+    if (momentumIdx !== -1) {
+      const inline = argv[momentumIdx]!.split("=")[1];
+      const next = argv[momentumIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a slow ramp has room to reveal its slope.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --momentum hours: "${raw}". Use e.g. --momentum 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-alerts N` to drop one-off noise before fitting a trend.
+      let minAlerts: number | undefined;
+      const maIdx = argv.findIndex((a) => a === "--min-alerts" || a.startsWith("--min-alerts="));
+      if (maIdx !== -1) {
+        const v = argv[maIdx]!.split("=")[1] ?? argv[maIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      // Optional `--buckets N` to tune the time-bin granularity of the trend fit.
+      let buckets: number | undefined;
+      const bkIdx = argv.findIndex((a) => a === "--buckets" || a.startsWith("--buckets="));
+      if (bkIdx !== -1) {
+        const v = argv[bkIdx]!.split("=")[1] ?? argv[bkIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) buckets = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown momentum report to stdout.
+      console.log(buildMomentum(hours, { limit, minAlerts, buckets, nowMs: Date.now() }).markdown);
       return;
     }
     const dwellIdx = argv.findIndex((a) => a === "--dwell" || a.startsWith("--dwell="));
