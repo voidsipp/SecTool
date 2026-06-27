@@ -39,6 +39,7 @@
  *   node src/index.ts --recurrence 168 # offline recurrence / return-forecast (when each repeat attacker is due back) report (Markdown)
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
+ *   node src/index.ts --portsig 168   # offline port-signature scanner-fingerprint (which attacker toolkit each source's port-set betrays) report (Markdown)
  *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
  *   node src/index.ts --artifacts 168 # offline payload-artifact / embedded-IOC (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
@@ -120,6 +121,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildPortSig } from "./analytics/portsig.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
 import { buildArtifacts } from "./analytics/artifacts.ts";
 import { buildSrcPort } from "./analytics/srcport.ts";
@@ -1266,6 +1268,40 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Port-signature scanner-fingerprint — which attacker toolkit each source's port-set betrays.
+    const portsigIdx = argv.findIndex((a) => a === "--portsig" || a.startsWith("--portsig="));
+    if (portsigIdx !== -1) {
+      const inline = argv[portsigIdx]!.split("=")[1];
+      const next = argv[portsigIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a slow toolkit has time to reveal its full port-set.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --portsig hours: "${raw}". Use e.g. --portsig 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source and novel-combination tables.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-match N` to tune how many signature ports a source must hit.
+      let minMatch: number | undefined;
+      const mmIdx = argv.findIndex((a) => a === "--min-match" || a.startsWith("--min-match="));
+      if (mmIdx !== -1) {
+        const v = argv[mmIdx]!.split("=")[1] ?? argv[mmIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minMatch = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown port-signature report to stdout.
+      console.log(buildPortSig(hours, { limit, minMatch, nowMs: Date.now() }).markdown);
       return;
     }
     // Self-describing report catalog — no window, no alert data; lists every report.

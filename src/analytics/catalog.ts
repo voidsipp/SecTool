@@ -175,6 +175,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Fan-out / spread", "Scanning sources and sprayed targets ranked by distinct-destination reach."),
   entry("Attacker / source", "srcports", "--srcports", "/api/srcports", 168,
     "Source-port fingerprint", "Fixed-port tooling vs ephemeral stack; shared-port botnet correlation."),
+  entry("Attacker / source", "portsig", "--portsig", "/api/portsig", 168,
+    "Port-signature toolkit fingerprint", "Which attacker toolkit each source's destination-port set betrays — IoT-botnet, SMB/RDP lateral, database raid, web recon…"),
 
   // --- Target / exposure ----------------------------------------------------
   entry("Target / exposure", "assets", "--assets", "/api/assets", 24,
