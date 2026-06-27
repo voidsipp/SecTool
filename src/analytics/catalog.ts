@@ -197,6 +197,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Traffic direction", "Inbound vs outbound vs lateral exposure split."),
   entry("Target / exposure", "edges", "--edges", "/api/edges", 168,
     "Attack-edge graph", "Source→target edges and lateral-movement topology between hosts."),
+  entry("Target / exposure", "traffic", "--traffic", "/api/traffic", 168,
+    "Traffic / top-talkers", "Volumetric NetFlow view (not the alert stream): heaviest hosts, top conversations, outbound fan-out / exfil tell and the destination-service mix."),
 
   // --- Threat type / signature ----------------------------------------------
   entry("Threat type / signature", "classify", "--classify", "/api/classify", 168,
@@ -354,7 +356,8 @@ function renderMarkdown(m: CatalogReport): string {
   }
   lines.push("");
   lines.push(
-    `Every offline report runs purely over the stored alert history — no live gateway query, no Claude, no network. ` +
+    `Every offline report runs purely over stored history — the IPS alert store, or for \`traffic\` the NetFlow flow ` +
+      `store — with no live gateway query, no Claude and no network. ` +
       `Most accept a look-back window: on the CLI as the value after the flag (\`--scan 24\`), over HTTP as \`?hours=N\`. ` +
       `The **Window** column is each report's default. Reports with an API route also serve a downloadable Markdown ` +
       `twin at the same path with a \`.md\` suffix (shown as \`(+.md)\`).`,

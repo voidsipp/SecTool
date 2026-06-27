@@ -84,6 +84,8 @@
  *   GET  /api/portsig.md?hours=N    -> the same port-signature report as a downloadable .md file
  *   GET  /api/rarity?hours=N        -> rarity / signal-surprise report (TF-IDF which source fires signatures nobody else does; model + Markdown)
  *   GET  /api/rarity.md?hours=N     -> the same rarity report as a downloadable .md file
+ *   GET  /api/traffic?hours=N       -> NetFlow traffic / top-talkers report (heaviest hosts, conversations, outbound fan-out/exfil, service mix; model + Markdown)
+ *   GET  /api/traffic.md?hours=N    -> the same traffic report as a downloadable .md file
  *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
@@ -230,6 +232,7 @@ import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts"
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildRarity, rarityFilename } from "../analytics/rarity.ts";
+import { buildTraffic, trafficFilename } from "../analytics/traffic.ts";
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
@@ -1464,6 +1467,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${rarityFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- NetFlow traffic / top-talkers (volumetric, heaviest hosts & outbound fan-out) ---
+      if (method === "GET" && path === "/api/traffic") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        return send(res, 200, buildTraffic(hours, { limit, samplingRate: cfg.netflow.samplingRate, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/traffic.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const now = Date.now();
+        const { markdown } = buildTraffic(hours, { limit, samplingRate: cfg.netflow.samplingRate, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${trafficFilename(now)}"`,
         });
         res.end(markdown);
         return;

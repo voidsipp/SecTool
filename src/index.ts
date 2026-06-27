@@ -69,6 +69,7 @@
  *   node src/index.ts --briefing 24   # offline consolidated morning security briefing / SITREP (KPIs + trend + action items + bundled detail reports; Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  *   node src/index.ts --catalog       # offline self-describing report catalog / directory of every report (CLI flag, npm script, API route, window; Markdown)
+ *   node src/index.ts --traffic 168   # offline NetFlow traffic / top-talkers report (heaviest hosts, conversations, outbound fan-out/exfil, service mix; Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -124,6 +125,7 @@ import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
 import { buildRarity } from "./analytics/rarity.ts";
+import { buildTraffic } from "./analytics/traffic.ts";
 import { buildAutoblock } from "./analytics/autoblock.ts";
 import { buildPortSig } from "./analytics/portsig.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
@@ -1306,6 +1308,33 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown rarity report to stdout.
       console.log(buildRarity(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Traffic / top-talkers — volumetric NetFlow report (heaviest hosts, conversations, outbound fan-out).
+    const trafficIdx = argv.findIndex((a) => a === "--traffic" || a.startsWith("--traffic="));
+    if (trafficIdx !== -1) {
+      const inline = argv[trafficIdx]!.split("=")[1];
+      const next = argv[trafficIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so low-and-slow movers have time to accumulate volume.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --traffic hours: "${raw}". Use e.g. --traffic 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown traffic report to stdout. The
+      // sampling rate comes from config so volume estimates match the exporter.
+      console.log(buildTraffic(hours, { limit, samplingRate: cfg.netflow.samplingRate, nowMs: Date.now() }).markdown);
       return;
     }
     // Auto-block threshold simulator — sweep "block a source after N alerts" and find the knee.
