@@ -48,6 +48,7 @@
     "ports": "node src/index.ts --ports 168",
     "scan": "node src/index.ts --scan 168",
     "repertoire": "node src/index.ts --repertoire 168",
+    "dwell": "node src/index.ts --dwell 168",
     "mitre": "node src/index.ts --mitre 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
