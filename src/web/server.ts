@@ -82,6 +82,8 @@
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/srcports?hours=N      -> source-port fingerprint / tooling-artifact report (fixed-port tool vs ephemeral stack + shared-port botnet correlation; model + Markdown)
  *   GET  /api/srcports.md?hours=N   -> the same source-port fingerprint report as a downloadable .md file
+ *   GET  /api/services?hours=N      -> attack-surface-by-service-class report (remote-access/database/file-share/ICS-IoT roll-up + exposed crown-jewel worklist; model + Markdown)
+ *   GET  /api/services.md?hours=N   -> the same attack-surface report as a downloadable .md file
  *   GET  /api/audience?hours=N      -> signature-audience / spray-vs-snipe report (background radiation vs targeted snipe per signature; model + Markdown)
  *   GET  /api/audience.md?hours=N   -> the same signature-audience report as a downloadable .md file
  *   GET  /api/recidivism?hours=N    -> block-effectiveness / post-block recidivism audit (did the firewall block actually stop the traffic? clean vs stubborn vs leaking; model + Markdown)
@@ -210,6 +212,7 @@ import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts"
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
+import { buildServices, servicesFilename } from "../analytics/services.ts";
 import { buildAudience, audienceFilename } from "../analytics/audience.ts";
 import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts";
 import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts";
@@ -1424,6 +1427,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${srcportFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT roll-up + exposed crown-jewel worklist) ---
+      if (method === "GET" && path === "/api/services") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        return send(res, 200, buildServices(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/services.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const now = Date.now();
+        const { markdown } = buildServices(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${servicesFilename(now)}"`,
         });
         res.end(markdown);
         return;
