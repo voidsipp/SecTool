@@ -984,6 +984,55 @@ Claude, no live gateway query**.
 - `GET /api/bruteforce.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --bruteforce 168 [--limit 20] [--min-attempts 3]` (or `npm run bruteforce`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow guesser has time to reveal a run).
 
+## 🧬 Burstiness / temporal-texture report (`GET /api/burstiness[.md]`, `--burstiness`)
+
+Every attacker leaves a *timing texture*, and which one a source wears says more
+about *what it is* than its raw alert count does. A "1,000 alert" source that
+fired them all in one 8-second burst is one push of a button; the same 1,000
+spread evenly over a week is a persistent presence. This report measures that
+texture per source with two well-established network-science statistics computed
+over its inter-arrival gaps (the time between its consecutive alerts):
+
+- **Burstiness `B = (σ − μ) / (σ + μ)`** (Goh & Barabási, 2008) — bounded to
+  [−1, +1] and *scale-free* (independent of how *often* the source fires).
+  **`B → +1`** = extremely **bursty**: tight clusters separated by long silences —
+  the signature of scripted scanners / exploit tooling emptying a magazine.
+  **`B ≈ 0`** = **random / Poisson**: a memoryless drizzle (CV ≈ 1), i.e.
+  background internet weather. **`B → −1`** = perfectly **regular**: evenly spaced,
+  the metronome / beacon / cron shape.
+- **Memory coefficient `M`** — the lag-1 autocorrelation of the gap sequence: do
+  *long gaps follow long gaps*? `M > 0` means the cadence has momentum (slow and
+  fast phases cluster), the tell of an on/off **duty cycle** — a tool run
+  repeatedly on a loose schedule rather than one continuous run.
+
+Together `(B, M)` place every active source in a behavioural plane no other
+SecTool report draws. It is deliberately *not* the beaconing report: `beacon`
+flags a single src→dst *pair* at the `B → −1` corner (low jitter, C2 cadence);
+this scores *every* source across its whole footprint and is mostly interested in
+the opposite corner (`B → +1`), where automation lives. It is not `surge` (spikes
+in the *aggregate* stream), nor `dwell` (idle-gap *sessions*), nor
+`rhythm`/`patterns` (which fold onto hour-of-day axes, destroying the fine
+inter-arrival structure `B` measures). For each scored source it also reports the
+**tightest burst** — the most alerts seen inside any sliding window
+(`--burst-window`, default 60s) — turning the abstract `B` into a concrete
+"37 hits in 60s", plus the longest silence, distinct targets/signatures, peak
+severity and block share. Two tables: **burstiest first** (automation hunting),
+and **most regular** (beacon-adjacent, cross-checkable with `--beacon`).
+
+Honest about its limits: these are IPS **detections, not packets**, so the
+texture is the texture of *detections* — a burst can be a real machine-gun scan
+or a chatty rule firing many times on one flow (it ranks and classifies, it does
+not convict); syslog timestamps are **second-resolution**, so sub-second
+structure collapses to zero-length gaps (treated, correctly, as maximal
+burstiness); and `B` (and especially `M`) are unstable on a handful of gaps, so a
+source needs a minimum number of alerts (`--min-events`, default 6) to be scored.
+Pure offline math over the local alert history — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/burstiness?hours=N[&limit=20][&minEvents=6][&burstWindow=60]` → the structured model **plus** rendered Markdown (population-texture table + burstiest-sources table + most-regular-sources table).
+- `GET /api/burstiness.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --burstiness 168 [--limit 20] [--min-events 6] [--burst-window 60]` (or `npm run burstiness`) → print the Markdown to stdout (defaults to a 7-day window so an on/off duty cycle has several burst-then-sleep rounds to emerge).
+
 ## 🧠 Attacker repertoire / sophistication report (`GET /api/repertoire[.md]`, `--repertoire`)
 
 Almost every attacker-centric report ranks a source by *how much* it does:
