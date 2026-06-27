@@ -57,6 +57,7 @@
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
  *   node src/index.ts --heat 168      # offline current-heat / decay-weighted activity (what's hot right now, not loudest all-week) report (Markdown)
  *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
+ *   node src/index.ts --forecast 336  # offline threat-forecast / next-window projection (expected alert volume + severity for the coming hours; --horizon H) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -162,6 +163,7 @@ import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
 import { buildHeat } from "./analytics/heat.ts";
 import { buildDrift } from "./analytics/drift.ts";
+import { buildForecast } from "./analytics/forecast.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
@@ -2312,6 +2314,40 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown drift report to stdout.
       console.log(buildDrift(hours, { buckets, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const forecastIdx = argv.findIndex((a) => a === "--forecast" || a.startsWith("--forecast="));
+    if (forecastIdx !== -1) {
+      const inline = argv[forecastIdx]!.split("=")[1];
+      const next = argv[forecastIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to two weeks of baseline so each hour-of-day bucket has several
+      // samples to estimate the diurnal rhythm from.
+      const hours = raw ? Number(raw) : 336;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --forecast hours: "${raw}". Use e.g. --forecast 336`);
+        process.exit(2);
+      }
+      // Optional `--horizon H` for how far ahead to project (hours).
+      let horizonHours: number | undefined;
+      const horizonIdx = argv.findIndex((a) => a === "--horizon" || a.startsWith("--horizon="));
+      if (horizonIdx !== -1) {
+        const v = argv[horizonIdx]!.split("=")[1] ?? argv[horizonIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) horizonHours = n;
+      }
+      // Optional `--recent H` for the recent-trend window (hours).
+      let recentHours: number | undefined;
+      const recentIdx = argv.findIndex((a) => a === "--recent" || a.startsWith("--recent="));
+      if (recentIdx !== -1) {
+        const v = argv[recentIdx]!.split("=")[1] ?? argv[recentIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) recentHours = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown forecast report to stdout.
+      console.log(buildForecast(hours, { horizonHours, recentHours, nowMs: Date.now() }).markdown);
       return;
     }
     const cohortIdx = argv.findIndex((a) => a === "--cohort" || a.startsWith("--cohort="));
