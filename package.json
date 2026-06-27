@@ -54,6 +54,7 @@
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
     "noise": "node src/index.ts --noise 168",
+    "patterns": "node src/index.ts --patterns 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"

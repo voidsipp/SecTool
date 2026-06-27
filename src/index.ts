@@ -45,6 +45,7 @@
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
+ *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -107,6 +108,7 @@ import { buildConcentration } from "./analytics/concentration.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
+import { buildPatterns } from "./analytics/patterns.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1453,6 +1455,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown alert-noise report to stdout.
       console.log(buildNoise(hours, { limit, repeatThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const patternsIdx = argv.findIndex((a) => a === "--patterns" || a.startsWith("--patterns="));
+    if (patternsIdx !== -1) {
+      const inline = argv[patternsIdx]!.split("=")[1];
+      const next = argv[patternsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a daily working-hours rhythm has several days to emerge.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --patterns hours: "${raw}". Use e.g. --patterns 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each leaderboard / the timezone table.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min N`: minimum alerts for a source to be fingerprinted.
+      let minAlerts: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min" || a.startsWith("--min="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      // Optional `--midday H`: assumed local mid-activity hour for the TZ estimate.
+      let assumedMiddayHour: number | undefined;
+      const middayIdx = argv.findIndex((a) => a === "--midday" || a.startsWith("--midday="));
+      if (middayIdx !== -1) {
+        const v = argv[middayIdx]!.split("=")[1] ?? argv[middayIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n)) assumedMiddayHour = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown patterns-of-life report to stdout.
+      console.log(buildPatterns(hours, { limit, minAlerts, assumedMiddayHour, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
