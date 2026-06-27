@@ -301,6 +301,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "IOC export", "Threat-indicator export in firewall-ready formats (plain / json / csv).", false),
   entry("Quality / AI / ops", "stix", "--stix", "/api/stix", 168,
     "STIX 2.1 intel export", "OASIS STIX 2.1 bundle (Indicator + Identity SDOs with patterns, confidence and validity windows) for sharing into MISP / OpenCTI / a TAXII collection / any STIX-aware SIEM; deterministic UUIDv5 IDs keep re-published feeds idempotent. The interop sibling of iocs (SecTool-shaped) and fwrules (enforcement codegen)."),
+  entry("Quality / AI / ops", "sigma", "--sigma", "/api/sigma", 168,
+    "Sigma detection-rule export", "Vendor-neutral Sigma detection rules (per-indicator, or --consolidated single list rule) for any Sigma-aware SIEM — convert with pySigma to Splunk / Elastic / Sentinel / QRadar / Loki / Chronicle. Each rule matches the attacker IP as either endpoint (src or dst) with severity-mapped level and deterministic UUIDv5 ids for clean recurring-export diffs. The detection-content sibling of stix (intel interchange) and fwrules (perimeter codegen)."),
   entry("Quality / AI / ops", "metrics", "--metrics", "/api/metrics", null,
     "Prometheus metrics", "OpenMetrics exposition of live state (also served at GET /metrics).", false),
 ];

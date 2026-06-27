@@ -159,6 +159,9 @@
  *   GET  /api/stix?hours=N          -> OASIS STIX 2.1 threat-intel bundle (deterministic UUIDv5 Indicator+Identity SDOs) for MISP/OpenCTI/TAXII
  *   GET  /api/stix.json?hours=N     -> the same STIX bundle as a downloadable .json file
  *   GET  /api/stix.md?hours=N       -> a human Markdown review twin of the STIX bundle
+ *   GET  /api/sigma?hours=N         -> Sigma detection rules (per-indicator; ?consolidated=1 for a single list rule) for any SIEM via pySigma
+ *   GET  /api/sigma.yml?hours=N     -> the same Sigma ruleset as a downloadable .yml file
+ *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -299,6 +302,7 @@ import {
   type IocFormat,
 } from "../analytics/iocExport.ts";
 import { buildStix, stixFilename } from "../analytics/stix.ts";
+import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -2352,6 +2356,44 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         }
         res.writeHead(200, headers);
         res.end(model.json);
+        return;
+      }
+
+      // --- Sigma detection-rule export (Splunk / Elastic / Sentinel / any SIEM) ---
+      // ?hours=N · ?minSeverity=medium · ?limit=N · ?includeSafe=1 · ?consolidated=1
+      if (
+        method === "GET" &&
+        (path === "/api/sigma" || path === "/api/sigma.yml" || path === "/api/sigma.yaml" ||
+          path === "/api/sigma.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const consolidated = url.searchParams.get("consolidated") === "1";
+        const now = Date.now();
+        const model = buildSigma(hours, { minSeverity, limit, includeSafe, consolidated, nowMs: now });
+        if (path === "/api/sigma.md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${sigmaFilename(now).replace(/\.yml$/, ".md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        // /api/sigma and the .yml/.yaml variants return the ruleset itself (the
+        // deliverable); the suffixed variants add a download disposition.
+        const headers: Record<string, string> = {
+          "content-type": "application/yaml; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/sigma.yml" || path === "/api/sigma.yaml") {
+          headers["content-disposition"] = `attachment; filename="${sigmaFilename(now)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.yaml);
         return;
       }
 
