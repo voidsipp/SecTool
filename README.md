@@ -1019,6 +1019,46 @@ membership) — **no SSH, no Claude, no live gateway query**.
 - `GET /api/srcports.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --srcports 168 [--limit 20] [--min-alerts 4]` (or `npm run srcports`) → print the Markdown to stdout (defaults to a 7-day window so a slow tool has time to reveal its fixed-port habit).
 
+## 🎯 Attack-surface-by-service-class report (`GET /api/services[.md]`, `--services`)
+
+The port-exposure report ranks *individual* destination ports (3389, 445, 3306 …)
+and the asset report ranks *individual* internal hosts. Both are one level too low
+for the question a defender actually briefs upward: **what *kind* of service is
+under attack, and which crown-jewel classes are still being let through?** "Port
+3389 is hot" means nothing to a risk owner; "**remote-access services are the #1
+attacked surface and 18% of that traffic was allowed through**" is a decision.
+
+This report rolls the raw destination ports up into curated **service classes** —
+🖥️ Remote Access, 🌐 Web, 🗄️ Database, 📁 File Sharing, ✉️ Mail, 🔐 Directory/Auth,
+🔒 VPN, 📡 Network/Infra, 🏭 ICS/IoT/Camera, 🕳️ Proxy/Anonymiser, and a
+💣 Known-Bad/Exploit bucket — so `22+23+3389+5900` collapse into one **Remote
+Access** row. Two things this altitude captures that no per-port report can:
+
+- **ICMP / layer-3 traffic.** Every other destination report keys off a destination
+  *port* and therefore silently drops ICMP entirely — yet a flood of ICMP
+  echo/redirect is classic host-discovery recon. Here **ICMP is a first-class
+  service class**, so that reconnaissance is finally visible.
+- **"Should-never-be-exposed" exposure.** Six classes (remote-access, database,
+  file-share, directory, ICS/IoT, exploit) should never be internet-facing. The
+  report flags every such class whose alerts the gateway **let through** (passed,
+  not blocked) and lifts the specific exposed endpoints into a second,
+  **close-these-first worklist**.
+
+For each class it computes the **alert volume and share**, a **severity-weighted
+score**, **distinct attacking sources** and **internal targets**, the
+**blocked/passed/unknown** split and resulting **pass rate**, the **busiest concrete
+ports** inside the class, and the **top signature**. Classes rank most-dangerous
+first. Honest about its limits: ports are **re-parsed, not stored** (figures are a
+lower bound from alerts that still carried a flow tuple or `dest_port` field);
+**class membership is heuristic** (the per-class top-ports column lets the mapping
+be sanity-checked); a **passed** alert marks *exposure*, not a successful breach;
+these are IPS **detections**, not full flows. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/services?hours=N[&limit=20]` → the structured model **plus** rendered Markdown (service-class table + exposed-endpoint worklist).
+- `GET /api/services.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --services 168 [--limit 20]` (or `npm run services`) → print the Markdown to stdout (defaults to a 7-day window so the full service-class mix has time to accumulate).
+
 ## 📡 Signature-audience / spray-vs-snipe report (`GET /api/audience[.md]`, `--audience`)
 
 The threat-classification report tells you the threat *mix*, the tuning report
