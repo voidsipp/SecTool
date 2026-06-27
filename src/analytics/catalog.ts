@@ -177,6 +177,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Source-port fingerprint", "Fixed-port tooling vs ephemeral stack; shared-port botnet correlation."),
   entry("Attacker / source", "portsig", "--portsig", "/api/portsig", 168,
     "Port-signature toolkit fingerprint", "Which attacker toolkit each source's destination-port set betrays — IoT-botnet, SMB/RDP lateral, database raid, web recon…"),
+  entry("Attacker / source", "rarity", "--rarity", "/api/rarity", 168,
+    "Rarity / signal-surprise", "TF-IDF lens: which source fires signatures nobody else does — the bespoke needle vs the commodity-scan noise."),
 
   // --- Target / exposure ----------------------------------------------------
   entry("Target / exposure", "assets", "--assets", "/api/assets", 24,
