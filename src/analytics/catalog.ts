@@ -305,6 +305,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "STIX 2.1 intel export", "OASIS STIX 2.1 bundle (Indicator + Identity SDOs with patterns, confidence and validity windows) for sharing into MISP / OpenCTI / a TAXII collection / any STIX-aware SIEM; deterministic UUIDv5 IDs keep re-published feeds idempotent. The interop sibling of iocs (SecTool-shaped) and fwrules (enforcement codegen)."),
   entry("Quality / AI / ops", "sigma", "--sigma", "/api/sigma", 168,
     "Sigma detection-rule export", "Vendor-neutral Sigma detection rules (per-indicator, or --consolidated single list rule) for any Sigma-aware SIEM — convert with pySigma to Splunk / Elastic / Sentinel / QRadar / Loki / Chronicle. Each rule matches the attacker IP as either endpoint (src or dst) with severity-mapped level and deterministic UUIDv5 ids for clean recurring-export diffs. The detection-content sibling of stix (intel interchange) and fwrules (perimeter codegen)."),
+  entry("Quality / AI / ops", "cef", "--cef", "/api/cef", 168,
+    "CEF / LEEF event export", "Per-alert SIEM event-forwarding lines in CEF (ArcSight/Splunk/Sentinel) or LEEF (QRadar) — one normalized line per alert with mapped severity and re-parsed ports/protocol (--format cef|leef|json|md). The event-stream sibling of iocs (indicators), stix (intel) and sigma (detection rules).", false),
   entry("Quality / AI / ops", "metrics", "--metrics", "/api/metrics", null,
     "Prometheus metrics", "OpenMetrics exposition of live state (also served at GET /metrics).", false),
 ];

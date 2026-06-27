@@ -167,6 +167,8 @@
  *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
  *   GET  /api/feed[?format=]        -> alert syndication feed (RSS 2.0 default; format=atom|json) for any feed reader / Slack / Teams (?hours, ?minSeverity, ?limit)
  *   GET  /api/feed.xml|.atom|.json  -> the same feed as a downloadable RSS / Atom / JSON Feed file
+ *   GET  /api/cef[?format=]         -> CEF/LEEF SIEM event export, one line per alert (format=cef|leef|json|markdown) for ArcSight/Splunk/Sentinel/QRadar (?hours, ?limit)
+ *   GET  /api/cef.cef|.leef|.json|.md -> the same event export as a downloadable .cef / .leef / .json / .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -309,6 +311,13 @@ import {
 } from "../analytics/iocExport.ts";
 import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
+import {
+  buildCefExport,
+  renderCef,
+  cefFilename,
+  parseCefFormat,
+  type CefFormat,
+} from "../analytics/cefExport.ts";
 import {
   buildAlertFeed,
   parseFeedFormat,
@@ -2484,6 +2493,58 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         }
         res.writeHead(200, headers);
         res.end(feedDocument(model, fmt));
+        return;
+      }
+
+      // --- CEF / LEEF SIEM event export (one normalized line per alert) ---
+      // For ArcSight / Splunk / Sentinel (CEF) or QRadar (LEEF). ?hours=N · ?limit=N
+      // ?format=cef|leef|json|markdown, or the path suffix (.cef/.leef/.json/.md).
+      if (
+        method === "GET" &&
+        (path === "/api/cef" ||
+          path === "/api/cef.cef" ||
+          path === "/api/cef.leef" ||
+          path === "/api/cef.json" ||
+          path === "/api/cef.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        // The path suffix picks the format; ?format= overrides the bare /api/cef.
+        let format: CefFormat;
+        if (path === "/api/cef.leef") format = "leef";
+        else if (path === "/api/cef.json") format = "json";
+        else if (path === "/api/cef.md") format = "markdown";
+        else if (path === "/api/cef.cef") format = "cef";
+        else format = parseCefFormat(url.searchParams.get("format"));
+        const now = Date.now();
+        const model = buildCefExport(hours, { limit, nowMs: now });
+        if (format === "json") {
+          // Bare /api/cef?format=json returns the model inline; the .json suffix downloads it.
+          if (path === "/api/cef.json") {
+            res.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "content-disposition": `attachment; filename="${cefFilename(now, "json")}"`,
+            });
+            res.end(renderCef(model, "json"));
+            return;
+          }
+          return send(res, 200, model);
+        }
+        const body = renderCef(model, format);
+        const contentType =
+          format === "markdown" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8";
+        const headers: Record<string, string> = {
+          "content-type": contentType,
+          "cache-control": "no-store",
+        };
+        // Suffixed paths are explicit downloads; bare /api/cef renders inline.
+        if (path !== "/api/cef") {
+          headers["content-disposition"] = `attachment; filename="${cefFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(body);
         return;
       }
 
