@@ -303,6 +303,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
   // --- Quality / AI / ops ---------------------------------------------------
   entry("Quality / AI / ops", "coverage", "--coverage", "/api/coverage", 168,
     "Data coverage / integrity", "Can you trust the other reports? Truncation, gaps and parse health."),
+  entry("Quality / AI / ops", "stability", "--stability", "/api/stability", 168,
+    "Severity-stability audit", "Can you trust the severity field every other report sorts on? Per-signature it measures how self-consistent the *derived* severity is (distinct levels, min→max range, dominant share, entropy), classifies each stable / minor / unstable, and names the likely driver of any wobble (the block→high/detect→critical enforcement flip, a varying classification string, or unexplained priority/syslog variance) — headlined by a single severity-trust score (% of volume under always-one-severity signatures). The data-quality sibling of coverage (truncation/gaps) and drift (mix-over-time)."),
   entry("Quality / AI / ops", "insight", "--insight", "/api/insight", 168,
     "AI analyst digest", "Summary coverage, severity re-grading and the recommended-action rollup."),
   entry("Quality / AI / ops", "notify", "--notify", "/api/notify", 168,
