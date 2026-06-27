@@ -57,6 +57,7 @@
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
  *   node src/index.ts --heat 168      # offline current-heat / decay-weighted activity (what's hot right now, not loudest all-week) report (Markdown)
  *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
+ *   node src/index.ts --stability 168 # offline signature severity-stability / label-consistency audit (can you trust the severity field every report sorts on; per-signature spread + driver) report (Markdown)
  *   node src/index.ts --forecast 336  # offline threat-forecast / next-window projection (expected alert volume + severity for the coming hours; --horizon H) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
@@ -163,6 +164,7 @@ import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
 import { buildHeat } from "./analytics/heat.ts";
 import { buildDrift } from "./analytics/drift.ts";
+import { buildStability } from "./analytics/stability.ts";
 import { buildForecast } from "./analytics/forecast.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
@@ -2256,6 +2258,41 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown concentration report to stdout.
       console.log(buildConcentration(hours, { limit, quickWinLimit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const stabilityIdx = argv.findIndex(
+      (a) => a === "--stability" || a.startsWith("--stability="),
+    );
+    if (stabilityIdx !== -1) {
+      const inline = argv[stabilityIdx]!.split("=")[1];
+      const next = argv[stabilityIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so each signature has a chance to show both faces.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --stability hours: "${raw}". Use e.g. --stability 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the least-stable leaderboard.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-count N` to ignore rarely-seen signatures.
+      let minCount: number | undefined;
+      const mcIdx = argv.findIndex((a) => a === "--min-count" || a.startsWith("--min-count="));
+      if (mcIdx !== -1) {
+        const v = argv[mcIdx]!.split("=")[1] ?? argv[mcIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minCount = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown stability report to stdout.
+      console.log(buildStability(hours, { limit, minCount, nowMs: Date.now() }).markdown);
       return;
     }
     const heatIdx = argv.findIndex((a) => a === "--heat" || a.startsWith("--heat="));

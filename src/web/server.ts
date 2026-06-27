@@ -140,6 +140,8 @@
  *   GET  /api/heat.md?hours=N       -> the same heat report as a downloadable .md file
  *   GET  /api/drift?hours=N         -> severity-mix drift / threat-quality trend (is the average alert getting nastier over time, independent of volume; model + Markdown)
  *   GET  /api/drift.md?hours=N      -> the same drift report as a downloadable .md file
+ *   GET  /api/stability?hours=N     -> signature severity-stability / label-consistency audit (can you trust the severity field; per-signature spread + likely driver; model + Markdown)
+ *   GET  /api/stability.md?hours=N  -> the same stability report as a downloadable .md file
  *   GET  /api/forecast?hours=N&horizon=H -> threat-forecast / next-window projection (expected alert volume + severity for the coming hours; model + Markdown)
  *   GET  /api/forecast.md?hours=N&horizon=H -> the same forecast report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
@@ -301,6 +303,7 @@ import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
 import { buildHeat, heatFilename } from "../analytics/heat.ts";
 import { buildDrift, driftFilename } from "../analytics/drift.ts";
+import { buildStability, stabilityFilename } from "../analytics/stability.ts";
 import { buildForecast, forecastFilename } from "../analytics/forecast.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
@@ -2192,6 +2195,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- signature severity-stability / label-consistency audit ---
+      if (method === "GET" && path === "/api/stability") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        return send(res, 200, buildStability(hours, { limit, minCount, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/stability.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildStability(hours, { limit, minCount, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${stabilityFilename(now)}"`,
         });
         res.end(markdown);
         return;

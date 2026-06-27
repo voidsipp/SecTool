@@ -74,6 +74,7 @@
     "concentration": "node src/index.ts --concentration 168",
     "heat": "node src/index.ts --heat 168",
     "drift": "node src/index.ts --drift 168",
+    "stability": "node src/index.ts --stability 168",
     "forecast": "node src/index.ts --forecast 336",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
