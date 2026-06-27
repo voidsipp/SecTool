@@ -278,7 +278,12 @@ function fingerprint(srcIp: string | undefined, signature: string | undefined): 
   const ip = srcIp && isIP(srcIp) > 0 ? srcIp : undefined;
   const sig = (signature ?? "").trim();
   if (!ip || !sig) return null;
-  return `${ip} ${sig}`;
+  // A pipe never appears in a valid IP and is vanishingly unlikely in a signature,
+  // so the joined key is effectively collision-proof. (Do not use a raw NUL byte as
+  // the separator here: Node's type-stripping loader treats an embedded 0x00 as
+  // end-of-input and fails to parse this module, which aborts startup for the whole
+  // program — the bug this comment replaced.)
+  return `${ip}|${sig}`;
 }
 
 // ----- highlights ------------------------------------------------------------
