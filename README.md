@@ -1033,6 +1033,49 @@ gateway query**.
 - `GET /api/burstiness.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --burstiness 168 [--limit 20] [--min-events 6] [--burst-window 60]` (or `npm run burstiness`) → print the Markdown to stdout (defaults to a 7-day window so an on/off duty cycle has several burst-then-sleep rounds to emerge).
 
+## 🤝 Convergence / coordinated-strike report (`GET /api/convergence[.md]`, `--convergence`)
+
+The single most reliable tell of *coordination* is **simultaneity**: many
+unrelated source IPs converging on one target in the same handful of seconds. No
+human types from forty addresses at once — a tasked botnet, a stresser service,
+or a distributed password-spray does exactly that. The members of such a crowd
+are deliberately diverse (scattered across different netblocks, sometimes firing
+*different* signatures), so the only thing that binds them is the **clock** —
+precisely the axis the other reports throw away. This report localises the crowd
+in time: for every target it slides a `--window` (default 120s) across that
+target's alert timeline and records the **peak number of distinct sources** seen
+inside any single window, with the member IPs present at that peak. A target
+whose peak clears `--min-sources` (default 5) is a **convergence event** — a
+coordinated strike, not background drizzle. The same statistic is then computed
+per **signature** (many distinct sources firing one rule in one window — the
+mass-exploitation / single-CVE-campaign shape).
+
+This is *not* the toolkit-cluster report (`--clusters`), which groups sources by
+shared *signature set* and ignores timing; nor the netblock report
+(`--netblocks`), which groups by /24 CIDR; nor `surge`, which flags spikes in the
+*aggregate* stream without asking how many *distinct* sources made the storm; nor
+the single-source timeline reports (`burstiness`/`beacon`/`dwell`). It is the
+orthogonal question — *many sources, one instant*. Each convergence reports the
+peak distinct-source count and the seconds it spanned, a sample of the member
+IPs, the **convergence ratio** (peak-window distinct sources ÷ the target's total
+distinct sources — `100%` means every attacker landed in one window, a tightly
+synchronized strike), the external-source share, direction
+(ext→int / int→int / int→ext / ext→ext), peak severity and block share.
+
+Honest about its limits: these are IPS **detections, not packets**, at syslog
+**second-resolution**, so a true volumetric flood is under-counted (read counts
+as a floor) and sub-second ordering is lost; source addresses can be **spoofed**
+in volumetric attacks (it flags the crowd to investigate, it does not attribute);
+and on a very busy target unrelated sources can coincide by chance — the
+`--min-sources` floor and the convergence ratio separate a synchronized strike
+from background coincidence. Cross-check flagged crowds against `--clusters` and
+`--netblocks` for the *who*. Pure offline math over the local alert history —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/convergence?hours=N[&limit=20][&minSources=5][&window=120]` → the structured model **plus** rendered Markdown (coordinated-strikes-by-target table + coordinated-strikes-by-signature table).
+- `GET /api/convergence.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --convergence 168 [--limit 20] [--min-sources 5] [--window 120]` (or `npm run convergence`) → print the Markdown to stdout (defaults to a 7-day window so coordinated bursts have room to recur and stand out).
+
 ## 🧠 Attacker repertoire / sophistication report (`GET /api/repertoire[.md]`, `--repertoire`)
 
 Almost every attacker-centric report ranks a source by *how much* it does:
