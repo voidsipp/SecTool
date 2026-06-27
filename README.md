@@ -278,6 +278,38 @@ This complements **🔎 Search** (lists the matching alert *rows* — no roll-up
 scoring), **🎯 Campaigns** (clusters *all* attackers, not one entity), and the
 snapshot **Report** (a whole-window view, not scoped to one address).
 
+## 🔬 Detection dossier (`GET /api/detection[.md]`, `--detection`)
+
+The **signature-axis twin** of the entity profile. Where the profile answers *tell
+me everything about this one **address***, the detection dossier answers the
+equally-common mid-investigation question on the other axis: *tell me everything
+about this one **detection**.* You stare at a Suricata rule name in a Discord ping
+or another report and want — on one page — that signature's **volume** and active
+span, its **severity profile** (and a flag when the derived severity is *not*
+self-consistent), its **enforcement posture** (block rate over labelled
+dispositions, `unknown` excluded like **⚙️ Efficacy**), **every attacking source**
+and **every target** it hit, the **threat taxonomy** (categories / classifications)
+it rolls up to, any **CVE/CWE references** scraped from the rule text and raw
+detections, a volume **sparkline**, **representative raw detections**, and any
+stored **Claude summary** — plus a composite **0-100 threat score**. It is pure
+offline math over the local alert history — **no SSH, no Claude call, no live
+gateway query**.
+
+Matching is forgiving: the query is a **case-insensitive substring**, so
+`--detection mssql` resolves the long "ET SCAN … MSSQL …" rule. When the substring
+hits more than one signature it profiles the **busiest** match and lists the
+alternatives; when nothing matches it suggests the loudest signatures in the
+window.
+
+- `GET /api/detection?q=<substring>&hours=N` → the structured model **plus** rendered Markdown (`hours` optional; omit for the entire stored history).
+- `GET /api/detection.md?q=<substring>&hours=N` → the same dossier as a downloadable `.md` file.
+- `node src/index.ts --detection <substring> [--hours N]` (or `npm run detection -- <substring>`) → print the Markdown to stdout.
+
+This complements **🛠️ Tuning** (ranks *all* signatures for noise triage), **👥
+Audience** (who trips each signature, across the catalogue) and **⚙️ Efficacy**
+(fleet-wide enforcement gaps) — none of which drill into a single signature on
+demand.
+
 ## 🖥️ Asset exposure scoreboard (`GET /api/assets[.md]`, `--assets`)
 
 The exact mirror of **🎯 Campaigns**: where Campaigns groups alerts by the

@@ -8,6 +8,7 @@
  *   node src/index.ts --metrics       # print Prometheus/OpenMetrics exposition of current state (also at GET /metrics)
  *   node src/index.ts --compare 24    # offline period-over-period comparison (Markdown)
  *   node src/index.ts --profile <ip>  # offline single-IP profile report (Markdown)
+ *   node src/index.ts --detection <signature> [--hours N]  # offline single-signature dossier: volume, severity, enforcement, attackers, targets, CVE/CWE refs, samples (substring match; signature-axis twin of --profile) (Markdown)
  *   node src/index.ts --assets 24     # offline internal-asset exposure scoreboard (Markdown)
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
  *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
@@ -114,6 +115,7 @@ import { startAgentDistServer } from "./agent/distServer.ts";
 import { runDigest } from "./digest/digest.ts";
 import { buildComparison } from "./analytics/compare.ts";
 import { buildProfile } from "./analytics/profile.ts";
+import { buildDetection } from "./analytics/detection.ts";
 import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
 import { buildWatchlist } from "./analytics/watchlist.ts";
@@ -450,6 +452,39 @@ async function main(): Promise<void> {
         process.exit(2);
       }
       console.log(model.markdown);
+      return;
+    }
+    const detectionIdx = argv.findIndex((a) => a === "--detection" || a.startsWith("--detection="));
+    if (detectionIdx !== -1) {
+      const inline = argv[detectionIdx]!.split("=")[1];
+      // Everything after the flag, up to the next --flag, is the (possibly multi-word)
+      // signature query — so `--detection ET SCAN Nmap` works without quoting.
+      let query = inline ?? "";
+      if (!inline) {
+        const parts: string[] = [];
+        for (let i = detectionIdx + 1; i < argv.length; i++) {
+          const tok = argv[i]!;
+          if (tok.startsWith("--")) break;
+          parts.push(tok);
+        }
+        query = parts.join(" ");
+      }
+      query = query.trim();
+      if (!query) {
+        log.error('Usage: --detection <signature substring> [--hours N]   (e.g. --detection mssql)');
+        process.exit(2);
+      }
+      // Optional `--hours N` window; 0 / absent = entire stored history.
+      let hours = 0;
+      const hoursFlagIdx = argv.findIndex((a) => a === "--hours" || a.startsWith("--hours="));
+      if (hoursFlagIdx !== -1) {
+        const hi = argv[hoursFlagIdx]!.split("=")[1] ?? argv[hoursFlagIdx + 1];
+        hours = hi ? Number(hi) || 0 : 0;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown detection dossier to stdout.
+      console.log(buildDetection(query, hours, Date.now()).markdown);
       return;
     }
     const assetsIdx = argv.findIndex((a) => a === "--assets" || a.startsWith("--assets="));

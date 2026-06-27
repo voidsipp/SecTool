@@ -16,6 +16,7 @@
     "digest": "node src/index.ts --digest 24",
     "compare": "node src/index.ts --compare 24",
     "profile": "node src/index.ts --profile",
+    "detection": "node src/index.ts --detection",
     "assets": "node src/index.ts --assets 24",
     "tuning": "node src/index.ts --tuning 168",
     "watchlist": "node src/index.ts --watchlist 24",

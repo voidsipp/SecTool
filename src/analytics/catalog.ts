@@ -209,6 +209,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Traffic / top-talkers", "Volumetric NetFlow view (not the alert stream): heaviest hosts, top conversations, outbound fan-out / exfil tell and the destination-service mix."),
 
   // --- Threat type / signature ----------------------------------------------
+  entry("Threat type / signature", "detection", "--detection", "/api/detection", null,
+    "Single-signature dossier", "Deep dive on ONE detection (signature-axis twin of --profile): type --detection <substring> and get that signature's volume, severity profile + consistency, enforcement posture (block rate, unknown excluded), every attacking source and target, threat taxonomy, scraped CVE/CWE refs, a volume sparkline, representative raw detections and any stored AI summary. Forgiving substring match; profiles the busiest hit and lists alternatives (needs a signature query, ?q=)."),
   entry("Threat type / signature", "classify", "--classify", "/api/classify", 168,
     "Threat-class mix", "How volume divides across Suricata's own taxonomy (recon vs trojan vs policy…)."),
   entry("Threat type / signature", "tuning", "--tuning", "/api/tuning", 168,
