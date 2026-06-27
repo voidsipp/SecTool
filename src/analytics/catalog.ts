@@ -189,6 +189,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Internal-asset exposure", "Scoreboard of which of your own hosts is hit hardest."),
   entry("Target / exposure", "targets", "--targets", "/api/targets", 168,
     "Victim exposure", "Which assets attract the most — and the worst — traffic."),
+  entry("Target / exposure", "exposure", "--exposure", "/api/exposure", 168,
+    "Exposure breadth / hardening priority", "The defender-side mirror of repertoire (attacker breadth): ranks each host by the *variety* of attack converging on it — distinct service classes, signatures, threat classes, kill-chain stages and adversaries — not raw volume, separating systemically-exposed hosts that need a hardening program (🎯 broad) from single-door targets one control shuts (• pinpoint). Surfaces the quietly, broadly-surveyed crown jewel that volume rankings (assets, targets) bury."),
   entry("Target / exposure", "ports", "--ports", "/api/ports", 168,
     "Service / port exposure", "Which destination service/port is attacked, and which host exposes it."),
   entry("Target / exposure", "services", "--services", "/api/services", 168,

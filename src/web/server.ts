@@ -146,6 +146,8 @@
  *   GET  /api/forecast.md?hours=N&horizon=H -> the same forecast report as a downloadable .md file
  *   GET  /api/silence?hours=N&quiet=H -> silence / dormancy (gone-quiet) report: established fixtures that stopped firing — block-confirmed vs detection blind spot (model + Markdown)
  *   GET  /api/silence.md?hours=N&quiet=H -> the same silence report as a downloadable .md file
+ *   GET  /api/exposure?hours=N      -> target exposure-breadth / hardening-priority: ranks hosts by VARIETY of attack (distinct service classes, signatures, threat classes, kill-chain stages, sources), not volume — systemic-hardening vs single-point-fix (model + Markdown)
+ *   GET  /api/exposure.md?hours=N   -> the same exposure-breadth report as a downloadable .md file
  *   GET  /api/timeline?hours=N&bucket=H -> daily timeline ledger: one chronological row per UTC day (volume, delta, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (model + Markdown)
  *   GET  /api/timeline.md?hours=N&bucket=H -> the same timeline ledger as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
@@ -310,6 +312,7 @@ import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildStability, stabilityFilename } from "../analytics/stability.ts";
 import { buildForecast, forecastFilename } from "../analytics/forecast.ts";
 import { buildSilence, silenceFilename } from "../analytics/silence.ts";
+import { buildExposure, exposureFilename } from "../analytics/exposure.ts";
 import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
@@ -2375,6 +2378,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${dismissalsFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- target exposure-breadth / hardening-priority: variety of attack per host ---
+      if (method === "GET" && path === "/api/exposure") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minCount")) || undefined;
+        return send(res, 200, buildExposure(hours, { limit, minAlerts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/exposure.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minCount")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildExposure(hours, { limit, minAlerts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${exposureFilename(now)}"`,
         });
         res.end(markdown);
         return;

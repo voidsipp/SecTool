@@ -60,6 +60,7 @@
  *   node src/index.ts --stability 168 # offline signature severity-stability / label-consistency audit (can you trust the severity field every report sorts on; per-signature spread + driver) report (Markdown)
  *   node src/index.ts --forecast 336  # offline threat-forecast / next-window projection (expected alert volume + severity for the coming hours; --horizon H) report (Markdown)
  *   node src/index.ts --silence 168   # offline silence / dormancy (gone-quiet) report: which established fixtures stopped firing — block confirmed working vs detection blind spot (--quiet H) (Markdown)
+ *   node src/index.ts --exposure 168  # offline target exposure-breadth / hardening-priority report: ranks hosts by VARIETY of attack (distinct service classes, signatures, threat classes, kill-chain stages, sources), not volume — systemic-hardening vs single-point-fix (--limit, --min-count) (Markdown)
  *   node src/index.ts --timeline 168  # offline daily timeline ledger: one chronological row per UTC day (volume, Δ, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (--bucket H) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
@@ -169,6 +170,7 @@ import { buildDrift } from "./analytics/drift.ts";
 import { buildStability } from "./analytics/stability.ts";
 import { buildForecast } from "./analytics/forecast.ts";
 import { buildSilence } from "./analytics/silence.ts";
+import { buildExposure } from "./analytics/exposure.ts";
 import { buildTimeline } from "./analytics/timeline.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
@@ -2430,6 +2432,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown silence report to stdout.
       console.log(buildSilence(hours, { limit, quietHours, minCount, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const exposureIdx = argv.findIndex((a) => a === "--exposure" || a.startsWith("--exposure="));
+    if (exposureIdx !== -1) {
+      const inline = argv[exposureIdx]!.split("=")[1];
+      const next = argv[exposureIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a host's full variety of attackers has time to show.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --exposure hours: "${raw}". Use e.g. --exposure 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-target table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-count N` for how many alerts a host needs before it's profiled.
+      let minAlerts: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min-count" || a.startsWith("--min-count="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown exposure-breadth report to stdout.
+      console.log(buildExposure(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
       return;
     }
     const timelineIdx = argv.findIndex((a) => a === "--timeline" || a.startsWith("--timeline="));
