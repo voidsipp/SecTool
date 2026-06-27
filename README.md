@@ -845,6 +845,47 @@ local alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/surge.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --surge 168 [--limit 25] [--bucket-minutes 15] [--factor 3] [--min-count 5]` (or `npm run surge`) → print the Markdown to stdout (defaults to a 7-day window so a quiet baseline is visible and overnight storms surface).
 
+## 🔌 Service / port-exposure report (`GET /api/ports[.md]`, `--ports`)
+
+Every other offline report pivots on an *entity* (source IP, destination host,
+source→dest pair, netblock), a *signature*, a *time axis*, a *direction*, a
+*severity magnitude*, or the *enforcement* split. None of them ask the question a
+firewall administrator asks first: *which destination **port / service** is being
+attacked — and which of my hosts is exposing it?* That is the most directly
+**actionable** axis the data holds. Knowing a single IP is loud tells you who to
+block; knowing that **port 3389 (RDP)** is your busiest attacked service, exposed
+by one internal host and mostly *let through*, tells you what to **close** — a far
+more durable fix than chasing scanners, who rotate IPs by the thousand while the
+service they hunt for stays put.
+
+The destination port and protocol aren't stored as first-class columns, so the
+report **re-parses** them from each alert's raw line using the same flow-tuple /
+JSON shapes the live detector understands (`{TCP} 1.2.3.4:51000 -> 10.0.0.5:3389`
+or a Suricata JSON `dest_port`). Alerts whose raw line carries no recoverable port
+are counted as *unparsed* and never silently dropped. Per attacked port it shows
+volume and share, a well-known-port → **service name** mapping (22→SSH, 3389→RDP,
+445→SMB, 3306→MySQL …), the dominant protocol, a **⚠️ remote-admin / data-store
+exposure flag** for ports that should almost never face the internet, distinct
+external attackers and distinct internal hosts exposing it, the blocked-vs-passed
+disposition split (reusing the efficacy report's classifier) and pass rate, a
+severe (≥ medium) count, and a **severity-weighted score** (reusing the risk
+report's weights) used for ranking so a few critical hits outrank a flood of
+scans. It then rolls the data up by **internal host**, ranking the hosts that
+expose the widest set of attacked ports — your largest attack surface — with
+blocklist / watchlist / safelist flags.
+
+Honest about its limits: ports are **re-parsed, not stored** (the *unparsed* count
+is shown so low coverage is visible, not mistaken for "few ports attacked"); a
+destination port is the *attacked service* only when the destination is one of
+your hosts, so the exposing-host roll-up counts internal destinations only; these
+are IPS **detections**, not full flows — a port scanned without tripping a rule is
+invisible. Pure offline math over the local alert history (plus blocklist /
+watchlist / safelist membership) — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/ports?hours=N[&limit=20]` → the structured model **plus** rendered Markdown (per-port table with service names / risk flags, internal-host attack-surface ranking).
+- `GET /api/ports.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --ports 168 [--limit 20]` (or `npm run ports`) → print the Markdown to stdout (defaults to a 7-day window so the attacked-service mix reflects more than one shift).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
