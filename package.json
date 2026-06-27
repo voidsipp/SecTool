@@ -77,6 +77,7 @@
     "stability": "node src/index.ts --stability 168",
     "forecast": "node src/index.ts --forecast 336",
     "silence": "node src/index.ts --silence 168",
+    "exposure": "node src/index.ts --exposure 168",
     "timeline": "node src/index.ts --timeline 168",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
