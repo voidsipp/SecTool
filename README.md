@@ -886,6 +886,50 @@ watchlist / safelist membership) — **no SSH, no Claude, no live gateway query*
 - `GET /api/ports.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --ports 168 [--limit 20]` (or `npm run ports`) → print the Markdown to stdout (defaults to a 7-day window so the attacked-service mix reflects more than one shift).
 
+## 🛰️ Scan-shape / reconnaissance-pattern report (`GET /api/scan[.md]`, `--scan`)
+
+The fan-out report ranks a source by how many *hosts* it touches but is blind to
+ports; the port-exposure report ranks the *service* under fire but pivots on the
+port, not the attacker. Neither answers the question that decides your response:
+***how* is each attacker probing — sweeping one service across the whole network,
+or enumerating one host end-to-end?* The shape of a probe is one of the most
+diagnostic things the IPS stream holds, because each classic recon pattern demands
+a different fix:
+
+- **↔ Horizontal** — *few ports, many hosts*: hunting one service everywhere
+  (SMB/445 across the subnet). Fix at the **edge for the whole subnet**, not the
+  one host that alerted.
+- **↕ Vertical** — *many ports, few hosts*: enumerating one **target's** whole
+  surface. That box is being singled out — harden and watch it.
+- **▦ Sweep** — *many of both*: full-spectrum reconnaissance (a mass scanner /
+  toolkit cataloguing the network). The broadest and noisiest.
+- **• Targeted** — *narrow*: exploitation against a known service, or noise — not
+  recon-shaped, never ranked above genuine scanning.
+
+For every source it folds the windowed alerts and computes **host breadth**
+(distinct `dstIp`) × **port breadth** (distinct destination ports, re-parsed from
+the raw line via the same parser the port-exposure report uses), classifies the
+shape against tunable thresholds (`≥3` hosts / `≥3` ports = "many" by default),
+and ranks by total breadth — for a *recon* report reach is the signal, so a loud
+info-level sweep ranks above a quiet exploit. It flags **internal** sources that
+are themselves scanning (a lateral-movement / compromise tell, not an inbound
+attacker), the blocked-vs-passed split (recon that is *let through* is succeeding),
+high-risk admin/data-store ports, and blocklist / watchlist / safelist membership.
+A companion **most-hunted services** roll-up ranks ports by how many *distinct
+sources* converge on them — the single service most attackers are after.
+
+Honest about its limits: probe **shape is a heuristic** over the host/port
+thresholds (the raw counts are always shown so the call can be second-guessed);
+ports are **re-parsed, not stored**, so port breadth is a lower bound when alerts
+omit the flow tuple (host breadth is unaffected); these are IPS **detections**,
+not full flows, so a surgical scanner can read as "targeted". Pure offline math
+over the local alert history (plus blocklist / watchlist / safelist membership) —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/scan?hours=N[&limit=20][&minHosts=3][&minPorts=3]` → the structured model **plus** rendered Markdown (per-source shape table, most-hunted-services ranking).
+- `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

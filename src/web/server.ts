@@ -78,6 +78,8 @@
  *   GET  /api/recurrence.md?hours=N -> the same return-forecast report as a downloadable .md file
  *   GET  /api/ports?hours=N         -> service / port-exposure report (which destination port/service is attacked + which host exposes it; model + Markdown)
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
+ *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
+ *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -166,6 +168,7 @@ import { buildClusters, clustersFilename } from "../analytics/cluster.ts";
 import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
+import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1302,6 +1305,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${portsFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep per source) ---
+      if (method === "GET" && path === "/api/scan") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const hostThreshold = Number(url.searchParams.get("minHosts")) || undefined;
+        const portThreshold = Number(url.searchParams.get("minPorts")) || undefined;
+        return send(res, 200, buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/scan.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const hostThreshold = Number(url.searchParams.get("minHosts")) || undefined;
+        const portThreshold = Number(url.searchParams.get("minPorts")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${scanFilename(now)}"`,
         });
         res.end(markdown);
         return;
