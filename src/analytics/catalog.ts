@@ -207,6 +207,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Stream redundancy", "De-dup / suppression candidates in the alert firehose."),
   entry("Threat type / signature", "cve", "--cve", "/api/cve", 168,
     "CVE exposure", "Exploited-vulnerability patch worklist mapped from signatures."),
+  entry("Threat type / signature", "artifacts", "--artifacts", "/api/artifacts", 168,
+    "Payload artifacts / IOCs", "Domains, URLs, file hashes, CVEs and tool user-agents mined from raw payloads."),
   entry("Threat type / signature", "mitre", "--mitre", "/api/mitre", 168,
     "MITRE ATT&CK coverage", "Tactic/technique coverage mapped from the firing signatures."),
   entry("Threat type / signature", "killchain", "--killchain", "/api/killchain", 168,

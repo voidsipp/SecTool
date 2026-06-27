@@ -82,6 +82,8 @@
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
  *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
+ *   GET  /api/artifacts?hours=N     -> payload-artifact / embedded-IOC report (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads; model + Markdown)
+ *   GET  /api/artifacts.md?hours=N  -> the same payload-artifact report as a downloadable .md file
  *   GET  /api/catalog[?q=&category=] -> self-describing report catalog (every report's flag, npm script, API route, window + purpose; model + Markdown)
  *   GET  /api/catalog.md            -> the same report catalog as a downloadable .md file
  *   GET  /api/srcports?hours=N      -> source-port fingerprint / tooling-artifact report (fixed-port tool vs ephemeral stack + shared-port botnet correlation; model + Markdown)
@@ -216,6 +218,7 @@ import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts"
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
+import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
 import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
 import { buildServices, servicesFilename } from "../analytics/services.ts";
@@ -1433,6 +1436,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cotargetFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- payload-artifact / embedded-IOC extraction (domains, URLs, hashes, CVEs, user-agents mined from raw payloads) ---
+      if (method === "GET" && path === "/api/artifacts") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        return send(res, 200, buildArtifacts(hours, { limit, minCount, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/artifacts.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildArtifacts(hours, { limit, minCount, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${artifactsFilename(now)}"`,
         });
         res.end(markdown);
         return;
