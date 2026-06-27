@@ -60,6 +60,7 @@
  *   node src/index.ts --mttb 168      # offline detection-to-mitigation latency / Mean-Time-To-Block (how fast did we contain each attacker?) report (Markdown)
  *   node src/index.ts --safelist 168  # offline safelist / allowlist risk audit (is a vetted-benign IP still attacking? Markdown)
  *   node src/index.ts --blockplan 168 # offline block-recommendation / candidate-blocklist worklist (which sources to block next, ranked by preventable impact; Markdown)
+ *   node src/index.ts --priority 168  # offline priority-inversion / IDS-urgency-vs-enforcement audit (did the gateway block the engine's most-urgent verdicts, or pass them?) report (Markdown)
  *   node src/index.ts --briefing 24   # offline consolidated morning security briefing / SITREP (KPIs + trend + action items + bundled detail reports; Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  *   node src/index.ts --catalog       # offline self-describing report catalog / directory of every report (CLI flag, npm script, API route, window; Markdown)
@@ -120,6 +121,7 @@ import { buildScan } from "./analytics/scan.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
 import { buildArtifacts } from "./analytics/artifacts.ts";
 import { buildSrcPort } from "./analytics/srcport.ts";
+import { buildPriority } from "./analytics/priority.ts";
 import { buildServices } from "./analytics/services.ts";
 import { buildAudience } from "./analytics/audience.ts";
 import { buildBruteforce } from "./analytics/bruteforce.ts";
@@ -1314,6 +1316,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown source-port fingerprint report.
       console.log(buildSrcPort(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const priorityIdx = argv.findIndex((a) => a === "--priority" || a.startsWith("--priority="));
+    if (priorityIdx !== -1) {
+      const inline = argv[priorityIdx]!.split("=")[1];
+      const next = argv[priorityIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a representative urgency-vs-enforcement mix accumulates.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --priority hours: "${raw}". Use e.g. --priority 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each worklist table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--urgent-max N` to tune the priority cut that counts as "urgent".
+      let urgentMax: number | undefined;
+      const umIdx = argv.findIndex((a) => a === "--urgent-max" || a.startsWith("--urgent-max="));
+      if (umIdx !== -1) {
+        const v = argv[umIdx]!.split("=")[1] ?? argv[umIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) urgentMax = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown priority-inversion report.
+      console.log(buildPriority(hours, { limit, urgentMax, nowMs: Date.now() }).markdown);
       return;
     }
     const servicesIdx = argv.findIndex((a) => a === "--services" || a.startsWith("--services="));

@@ -247,6 +247,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
   // --- Controls / enforcement -----------------------------------------------
   entry("Controls / enforcement", "efficacy", "--efficacy", "/api/efficacy", 168,
     "IPS enforcement gap", "Serious traffic that was detected but never actually blocked."),
+  entry("Controls / enforcement", "priority", "--priority", "/api/priority", 168,
+    "Priority inversion", "Did the gateway block the IDS engine's most-urgent verdicts, or pass them while blocking noise?"),
   entry("Controls / enforcement", "blockplan", "--blockplan", "/api/blockplan", 168,
     "Block worklist", "Which sources to block next, ranked by preventable impact."),
   entry("Controls / enforcement", "recidivism", "--recidivism", "/api/recidivism", 168,
