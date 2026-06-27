@@ -64,6 +64,7 @@
  *   node src/index.ts --exposure 168  # offline target exposure-breadth / hardening-priority report: ranks hosts by VARIETY of attack (distinct service classes, signatures, threat classes, kill-chain stages, sources), not volume — systemic-hardening vs single-point-fix (--limit, --min-count) (Markdown)
  *   node src/index.ts --timeline 168  # offline daily timeline ledger: one chronological row per UTC day (volume, Δ, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (--bucket H) (Markdown)
  *   node src/index.ts --vector 168    # offline entry-vector / first-contact (foot-in-the-door): what fresh attackers try FIRST + the opener→escalation funnel (esc rate, median warning lead, one-and-done, opened-hot) (--limit) (Markdown)
+ *   node src/index.ts --potency 168   # offline threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) — quiet-but-deadly snipers vs loud-but-harmless floods (4 quadrants, %volume↔%weight gap) (--limit, --min N) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -176,6 +177,7 @@ import { buildForecast } from "./analytics/forecast.ts";
 import { buildSilence } from "./analytics/silence.ts";
 import { buildExposure } from "./analytics/exposure.ts";
 import { buildTimeline } from "./analytics/timeline.ts";
+import { buildPotency } from "./analytics/potency.ts";
 import { buildVector } from "./analytics/vector.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
@@ -2603,6 +2605,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown entry-vector report to stdout.
       console.log(buildVector(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const potencyIdx = argv.findIndex((a) => a === "--potency" || a.startsWith("--potency="));
+    if (potencyIdx !== -1) {
+      const inline = argv[potencyIdx]!.split("=")[1];
+      const next = argv[potencyIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a real population of sources can sort into quadrants.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --potency hours: "${raw}". Use e.g. --potency 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap how many (highest-density) source rows print.
+      let limit = 30;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min N` (alerts): the volume floor to qualify for the ranking.
+      let minAlerts: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min" || a.startsWith("--min="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown threat-potency report to stdout.
+      console.log(buildPotency(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
       return;
     }
     const cohortIdx = argv.findIndex((a) => a === "--cohort" || a.startsWith("--cohort="));

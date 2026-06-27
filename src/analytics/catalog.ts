@@ -275,6 +275,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Risk index / posture", "Severity-weighted risk index and overall threat posture."),
   entry("Detection coverage", "focus", "--focus", "/api/focus", 168,
     "Threat focus", "Pareto concentration: where to spend defensive effort first."),
+  entry("Detection coverage", "potency", "--potency", "/api/potency", 168,
+    "Threat potency / severity-density", "Ranks sources by punch-per-alert (mean risk weight = severity × disposition, the risk ladder) instead of volume, sorting them into four triage quadrants: 🎯 sniper (quiet but deadly — few alerts, every one matters, the find volume rankings bury), 🔴 brawler (loud and lethal — block first), 📢 flood (loud but harmless commodity scan-noise — safe to mute) and · background. Prints the punch-line %volume↔%weight gap per quadrant and holds thin-sample singletons (< --min N) out of the ranking. The quality-over-quantity twin of risk (summed magnitude), focus (volume Pareto) and heat (recency)."),
   entry("Detection coverage", "concentration", "--concentration", "/api/concentration", 168,
     "Concentration (Gini)", "Distribution shape: block-a-handful-and-win vs diffuse storm."),
   entry("Detection coverage", "heat", "--heat", "/api/heat", 168,
