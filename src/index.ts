@@ -70,6 +70,7 @@
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  *   node src/index.ts --catalog       # offline self-describing report catalog / directory of every report (CLI flag, npm script, API route, window; Markdown)
  *   node src/index.ts --traffic 168   # offline NetFlow traffic / top-talkers report (heaviest hosts, conversations, outbound fan-out/exfil, service mix; Markdown)
+ *   node src/index.ts --ruleset 168   # offline detection-rule (Suricata SID) inventory & ruleset-provenance (Snort/Talos vs local vs ET; revision-drift) report (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -156,6 +157,7 @@ import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./anal
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { buildMetrics } from "./web/metrics.ts";
 import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
+import { buildRuleset } from "./analytics/ruleset.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -1335,6 +1337,40 @@ async function main(): Promise<void> {
       // Offline, deterministic: print the Markdown traffic report to stdout. The
       // sampling rate comes from config so volume estimates match the exporter.
       console.log(buildTraffic(hours, { limit, samplingRate: cfg.netflow.samplingRate, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Detection-rule (Suricata SID) inventory & ruleset-provenance report.
+    const rulesetIdx = argv.findIndex((a) => a === "--ruleset" || a.startsWith("--ruleset="));
+    if (rulesetIdx !== -1) {
+      const inline = argv[rulesetIdx]!.split("=")[1];
+      const next = argv[rulesetIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so slow-firing rules and revision drift have time to show.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --ruleset hours: "${raw}". Use e.g. --ruleset 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-rule inventory table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-hits N` to drop one-off rules from the inventory table.
+      let minHits: number | undefined;
+      const mhIdx = argv.findIndex((a) => a === "--min-hits" || a.startsWith("--min-hits="));
+      if (mhIdx !== -1) {
+        const v = argv[mhIdx]!.split("=")[1] ?? argv[mhIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minHits = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown ruleset report to stdout.
+      console.log(buildRuleset(hours, { limit, minHits, nowMs: Date.now() }).markdown);
       return;
     }
     // Auto-block threshold simulator — sweep "block a source after N alerts" and find the knee.
