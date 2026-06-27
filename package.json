@@ -80,6 +80,7 @@
     "silence": "node src/index.ts --silence 168",
     "exposure": "node src/index.ts --exposure 168",
     "timeline": "node src/index.ts --timeline 168",
+    "vector": "node src/index.ts --vector 168",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
     "dismissals": "node src/index.ts --dismissals 168",
