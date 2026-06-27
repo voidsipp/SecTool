@@ -930,6 +930,48 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 🚫 Block-effectiveness / post-block recidivism audit (`GET /api/recidivism[.md]`, `--recidivism`)
+
+Every IP SecTool (or you) blocks at the firewall is stamped with a *block time*.
+No other report reads that timestamp — yet it answers the one question that proves
+an enforcement action worked: **after I blocked this IP, did the traffic actually
+stop?** The efficacy report scores the gateway's per-alert disposition across the
+whole stream but has no notion of *when* a source was blocked; the persistence /
+recurrence reports rank repeat offenders but treat a source we've *already
+contained* identically to a fresh enforcement gap.
+
+This audit takes every IP on the blocklist, folds the windowed alerts whose source
+is that IP, and splits them on the block timestamp — `time < at` is the pre-block
+activity that *led to* the block, `time >= at` is the **recidivism** signal. The
+post-block alerts are then split by the gateway's own disposition into a three-way
+verdict:
+
+- **🟢 clean** — no alerts since the block: it held (or the attacker moved on).
+- **🟡 stubborn** — re-tripping rules but *every* post-block hit was dropped:
+  enforcement is working, the attacker just won't quit. Noise, not exposure.
+- **🔴 leaking** — at least one post-block alert was *let through*: the block
+  exists in the list but traffic is still reaching you. The headline finding — the
+  ipset/iptables DROP may not have applied, the rule may be detection-only, or the
+  block was never pushed. Re-apply it and confirm enforcement.
+
+A separate **cleanup roll-up** flags *stale* blocks — IPs silent for the entire
+window despite predating it — as safe candidates to retire so the active blocklist
+(and the ipset behind it) stays lean. Contradictory controls (an IP that is both
+blocked and marked *safe*) are surfaced too.
+
+Honest about its limits: alerts are matched to a block by **source address**
+(blocks target attacker sources); these are IPS **detections**, not full flows, so
+an *effective* firewall block produces no detections and correctly reads as
+**clean** ("clean" = "no detections since the block"). The block timestamp is not
+windowed (every current block is audited regardless of age), but post-block
+*activity* older than the look-back can be missed. Pure offline math over the local
+alert + block history (plus watchlist / safelist membership) — **no SSH, no Claude,
+no live gateway query**.
+
+- `GET /api/recidivism?hours=N[&limit=30]` → the structured model **plus** rendered Markdown (per-block recidivism table + stale-block cleanup roll-up).
+- `GET /api/recidivism.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --recidivism 168 [--limit 30]` (or `npm run recidivism`) → print the Markdown to stdout (defaults to a 7-day window so a slow re-offender has time to show post-block activity).
+
 ## 🔑 Credential-attack / brute-force report (`GET /api/bruteforce[.md]`, `--bruteforce`)
 
 Every other report treats the alert stream *generically* — it ranks a source by

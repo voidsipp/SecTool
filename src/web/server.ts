@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/recidivism?hours=N    -> block-effectiveness / post-block recidivism audit (did the firewall block actually stop the traffic? clean vs stubborn vs leaking; model + Markdown)
+ *   GET  /api/recidivism.md?hours=N -> the same block-effectiveness audit as a downloadable .md file
  *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
  *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
@@ -202,6 +204,7 @@ import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
+import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1362,6 +1365,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- block-effectiveness / post-block recidivism (did the block actually stop the traffic?) ---
+      if (method === "GET" && path === "/api/recidivism") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        return send(res, 200, buildRecidivism(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/recidivism.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const now = Date.now();
+        const { markdown } = buildRecidivism(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${recidivismFilename(now)}"`,
         });
         res.end(markdown);
         return;
