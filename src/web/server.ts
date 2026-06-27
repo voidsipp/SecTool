@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
+ *   GET  /api/repertoire.md?hours=N -> the same repertoire report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -169,6 +171,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1329,6 +1332,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attacker repertoire / sophistication (toolkit-operator vs one-trick probe per source) ---
+      if (method === "GET" && path === "/api/repertoire") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        return send(res, 200, buildRepertoire(hours, { limit, minAlerts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/repertoire.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildRepertoire(hours, { limit, minAlerts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${repertoireFilename(now)}"`,
         });
         res.end(markdown);
         return;

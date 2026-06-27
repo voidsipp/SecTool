@@ -38,6 +38,7 @@
  *   node src/index.ts --recurrence 168 # offline recurrence / return-forecast (when each repeat attacker is due back) report (Markdown)
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
+ *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -93,6 +94,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1204,6 +1206,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const repertoireIdx = argv.findIndex((a) => a === "--repertoire" || a.startsWith("--repertoire="));
+    if (repertoireIdx !== -1) {
+      const inline = argv[repertoireIdx]!.split("=")[1];
+      const next = argv[repertoireIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a low-and-slow operator has time to reveal breadth.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --repertoire hours: "${raw}". Use e.g. --repertoire 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-alerts N` to drop one-off noise before profiling.
+      let minAlerts: number | undefined;
+      const maIdx = argv.findIndex((a) => a === "--min-alerts" || a.startsWith("--min-alerts="));
+      if (maIdx !== -1) {
+        const v = argv[maIdx]!.split("=")[1] ?? argv[maIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown repertoire report to stdout.
+      console.log(buildRepertoire(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
