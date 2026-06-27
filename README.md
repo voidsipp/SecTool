@@ -1122,6 +1122,56 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/concentration.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --concentration 168 [--limit 15] [--quick-wins 10]` (or `npm run concentration`) → print the Markdown to stdout (defaults to a 7-day window so the distribution shape reflects more than one shift).
 
+## 🔁 Attacker cohort-retention / churn report (`GET /api/cohort[.md]`, `--cohort`)
+
+This is **product-style retention analytics applied to attackers.** A growth team
+never asks only "how many users this week"; it asks how many are *new*, how many
+*stayed*, how many *came back*, how many *churned out*, and tracks each cohort's
+retention curve. That same decomposition is exactly what a defender wants for the
+attacker population — and **no other report computes it**. `--persist` ranks the
+single most entrenched IPs (a leaderboard), `--novelty` surfaces first-seen leads
+(but never follows them forward), `--compare` diffs two windows as aggregate
+totals, and `--lifecycle` measures a *signature's* shape — none build a cohort
+triangle or a population retention curve.
+
+The distinction is strategic. Two networks with identical alert volume can have
+opposite threat surfaces: a **🌀 churny** revolving door where almost every source
+appears once and never returns (internet background radiation — blocklisting
+individuals buys nothing durable; reach for category / geo / ASN policy), or a
+**🪨 sticky** committed base where attackers come back day after day (someone has
+*chosen* you — the persistent core is a small, concrete, blockable set worth
+escalating). The retention *curve* is the single number that separates those
+worlds, and it is invisible in every volume- or leaderboard-shaped report.
+
+For each equal-width **time bucket** (default one UTC day) the report decomposes the
+external source population into:
+
+- **new** — first appearance in the window here.
+- **retained** — active here *and* the immediately previous bucket (stayed).
+- **resurrected** — back after a quiet bucket (returned after a gap).
+- **churned** — active the previous bucket, absent here (left).
+
+It then groups each bucket's first-timers into a **cohort**, builds the cohort
+retention triangle and the population-average **retention curve** (lag-1 = the
+probability an active attacker returns the next bucket), profiles **stickiness**
+(how many buckets each source spans), surfaces the **sticky core** (persistent
+returners, flagged ⛔ blocked / 👁 watched / ✅ safelisted / 🆕 new — so the
+unblocked rows are your durable blocklist targets), and splits the window's
+attackers into brand-new-to-history vs. returning-from-before faces.
+
+Honest about its limits: cohorts are built from source IPs **as the IPS logged
+them** — NAT / shared egress collapses many real attackers into one address
+(over-stating stickiness) and a rotating botnet inflates the newcomer count
+(over-stating churn); retention reflects **address** reuse, not human intent.
+"New to history" is bounded by the rolling alert store, so a long look-back that
+hits the store cap clips the oldest buckets. Pure offline math over the local alert
+history (plus blocklist / watchlist / safelist flags) — **no SSH, no Claude, no
+live gateway query**.
+
+- `GET /api/cohort?hours=N[&limit=15][&bucket=24]` → the structured model **plus** rendered Markdown (the population scoreboard, per-bucket flow, retention curve, cohort triangle, stickiness histogram and the sticky-core table).
+- `GET /api/cohort.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --cohort 168 [--limit 15] [--bucket 24]` (or `npm run cohort`) → print the Markdown to stdout (defaults to a 7-day window with daily buckets, so the retention curve has seven points to work with).
+
 ## 🔕 Suppression-rule audit report (`GET /api/suppaudit[.md]`, `--suppaudit`)
 
 SecTool lets you silence noisy detections with **suppression rules** (match on
