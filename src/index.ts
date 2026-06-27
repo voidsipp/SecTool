@@ -48,6 +48,7 @@
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
  *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
  *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
+ *   node src/index.ts --convergence 168 # offline temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash-crowd) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -105,6 +106,7 @@ import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
 import { buildBruteforce } from "./analytics/bruteforce.ts";
 import { buildBurstiness } from "./analytics/burstiness.ts";
+import { buildConvergence } from "./analytics/convergence.ts";
 import { buildMitre } from "./analytics/mitre.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildDwell } from "./analytics/dwell.ts";
@@ -1574,6 +1576,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown burstiness report to stdout.
       console.log(buildBurstiness(hours, { limit, minEvents, burstWindowSec, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const convergenceIdx = argv.findIndex((a) => a === "--convergence" || a.startsWith("--convergence="));
+    if (convergenceIdx !== -1) {
+      const inline = argv[convergenceIdx]!.split("=")[1];
+      const next = argv[convergenceIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so coordinated bursts have room to recur and stand out.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --convergence hours: "${raw}". Use e.g. --convergence 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each (target / signature) table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-sources N`: distinct sources in one window to flag a convergence.
+      let minSources: number | undefined;
+      const msIdx = argv.findIndex((a) => a === "--min-sources" || a.startsWith("--min-sources="));
+      if (msIdx !== -1) {
+        const v = argv[msIdx]!.split("=")[1] ?? argv[msIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minSources = n;
+      }
+      // Optional `--window S`: sliding-window width (seconds) for the convergence sweep.
+      let windowSec: number | undefined;
+      const wIdx = argv.findIndex((a) => a === "--window" || a.startsWith("--window="));
+      if (wIdx !== -1) {
+        const v = argv[wIdx]!.split("=")[1] ?? argv[wIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) windowSec = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown convergence report to stdout.
+      console.log(buildConvergence(hours, { limit, minSources, windowSec, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

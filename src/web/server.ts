@@ -98,6 +98,8 @@
  *   GET  /api/patterns.md?hours=N   -> the same patterns-of-life report as a downloadable .md file
  *   GET  /api/burstiness?hours=N    -> burstiness / temporal-texture report (per-source Goh-Barabási B + memory coeff: bursty tooling vs Poisson drizzle vs metronome cadence; model + Markdown)
  *   GET  /api/burstiness.md?hours=N -> the same burstiness report as a downloadable .md file
+ *   GET  /api/convergence?hours=N   -> temporal-convergence / coordinated-strike report (peak distinct sources per target/signature in one window: botnet / DDoS / distributed-spray flash crowd; model + Markdown)
+ *   GET  /api/convergence.md?hours=N -> the same convergence report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -191,6 +193,7 @@ import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts";
 import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts";
+import { buildConvergence, convergenceFilename } from "../analytics/convergence.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
@@ -1583,6 +1586,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${burstinessFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash crowd) ---
+      if (method === "GET" && path === "/api/convergence") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minSources = Number(url.searchParams.get("minSources")) || undefined;
+        const windowSec = Number(url.searchParams.get("window")) || undefined;
+        return send(res, 200, buildConvergence(hours, { limit, minSources, windowSec, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/convergence.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minSources = Number(url.searchParams.get("minSources")) || undefined;
+        const windowSec = Number(url.searchParams.get("window")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildConvergence(hours, { limit, minSources, windowSec, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${convergenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
