@@ -46,6 +46,7 @@
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
+ *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -101,6 +102,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildBruteforce } from "./analytics/bruteforce.ts";
 import { buildMitre } from "./analytics/mitre.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildDwell } from "./analytics/dwell.ts";
@@ -1220,6 +1222,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const bruteforceIdx = argv.findIndex((a) => a === "--bruteforce" || a.startsWith("--bruteforce="));
+    if (bruteforceIdx !== -1) {
+      const inline = argv[bruteforceIdx]!.split("=")[1];
+      const next = argv[bruteforceIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a low-and-slow guesser has time to reveal a run.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --bruteforce hours: "${raw}". Use e.g. --bruteforce 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-target and per-source tables.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-attempts N` to drop one-off login noise before analysis.
+      let minAttempts: number | undefined;
+      const maIdx = argv.findIndex((a) => a === "--min-attempts" || a.startsWith("--min-attempts="));
+      if (maIdx !== -1) {
+        const v = argv[maIdx]!.split("=")[1] ?? argv[maIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAttempts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown credential-attack report.
+      console.log(buildBruteforce(hours, { limit, minAttempts, nowMs: Date.now() }).markdown);
       return;
     }
     const repertoireIdx = argv.findIndex((a) => a === "--repertoire" || a.startsWith("--repertoire="));

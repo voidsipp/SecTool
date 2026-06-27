@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
+ *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
  *   GET  /api/repertoire.md?hours=N -> the same repertoire report as a downloadable .md file
  *   GET  /api/dwell?hours=N         -> source dwell-time / engagement-session report (sustained camp vs transient probe per source; model + Markdown)
@@ -185,6 +187,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
@@ -1353,6 +1356,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- credential-attack / brute-force (login surfaces + spray/brute/distributed sources) ---
+      if (method === "GET" && path === "/api/bruteforce") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAttempts = Number(url.searchParams.get("minAttempts")) || undefined;
+        return send(res, 200, buildBruteforce(hours, { limit, minAttempts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/bruteforce.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAttempts = Number(url.searchParams.get("minAttempts")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildBruteforce(hours, { limit, minAttempts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${bruteforceFilename(now)}"`,
         });
         res.end(markdown);
         return;
