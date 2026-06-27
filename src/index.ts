@@ -42,6 +42,7 @@
  *   node src/index.ts --dwell 168     # offline source dwell-time / engagement-session (sustained camp vs transient probe) report (Markdown)
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
+ *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -101,6 +102,7 @@ import { buildMitre } from "./analytics/mitre.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
+import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1346,6 +1348,41 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown concentration report to stdout.
       console.log(buildConcentration(hours, { limit, quickWinLimit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const suppAuditIdx = argv.findIndex(
+      (a) => a === "--suppaudit" || a.startsWith("--suppaudit="),
+    );
+    if (suppAuditIdx !== -1) {
+      const inline = argv[suppAuditIdx]!.split("=")[1];
+      const next = argv[suppAuditIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so dormant-but-proven rules are judged on more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --suppaudit hours: "${raw}". Use e.g. --suppaudit 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the rule detail table.
+      let limit = 100;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--grace N` (hours): a rule younger than this with no data is "untested".
+      let graceHours: number | undefined;
+      const graceIdx = argv.findIndex((a) => a === "--grace" || a.startsWith("--grace="));
+      if (graceIdx !== -1) {
+        const v = argv[graceIdx]!.split("=")[1] ?? argv[graceIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n >= 0) graceHours = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown suppression-audit report to stdout.
+      console.log(buildSuppressionAudit(hours, { limit, graceHours, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

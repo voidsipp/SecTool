@@ -1122,6 +1122,49 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/concentration.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --concentration 168 [--limit 15] [--quick-wins 10]` (or `npm run concentration`) → print the Markdown to stdout (defaults to a 7-day window so the distribution shape reflects more than one shift).
 
+## 🔕 Suppression-rule audit report (`GET /api/suppaudit[.md]`, `--suppaudit`)
+
+SecTool lets you silence noisy detections with **suppression rules** (match on
+signature / category / src / dst / max-severity; matched alerts are still recorded
+but skip summarization + the Discord page). Over time a rule set rots in three
+quiet, dangerous ways, and **no other report looks at the rules themselves** —
+`--tuning` does the opposite job (it *proposes new* suppressions), and the snapshot
+report only prints a rule count. This report audits the silences you already have:
+
+- **Dead weight** — a rule whose signature/scanner is long gone. It matches nothing
+  but still sits in the evaluation path and clutters the config.
+- **Shadowing** — two rules overlap, so one silently covers everything the other
+  does. The shadowed rule is redundant and lies about why alerts are quiet.
+- **Over-broad silence** — the worst failure mode. A rule written to mute `info`
+  scan chatter is loose enough (e.g. `cat=IDS/IPS` with no severity ceiling) to now
+  swallow **medium / high / critical** detections too. You think you're quiet
+  because nothing is wrong; in fact the page was muted. A suppression that hides a
+  real incident costs far more than the noise it was meant to remove.
+
+For every rule it replays the stored alert history through the *same match
+predicate the live engine uses* and reports the rule's **standalone** reach, its
+**first-match-effective** credit (non-double-counted, mirroring the live
+first-match-wins evaluation), the **worst severity** it silences, and its **live
+hit counters** (so a rule that worked *before* the store's retention window is not
+mislabelled dead). Each rule earns a one-word **verdict** and a recommended action:
+🚨 **risky** (silences medium+ signal — review) · 🔁 **shadowed** (redundant) ·
+🌐 **broad** (no signature/IP anchor) · 💀 **dead** (no matches, no live hits —
+prune) · 🌙 **quiet** (dormant but proven) · 🌱 **untested** (too new) · ✅
+**effective** (muting noise cleanly). The summary headlines the overall
+noise-reduction the rule set delivers and the count of medium+ detections it is
+silencing — the number you most want to be zero.
+
+Honest about its limits: standalone/effective counts only see alerts still in the
+rolling store (the verdict weighs live hit counters to avoid a false "dead");
+"risky" means a rule *can* silence a medium+ **detection**, not that it was a true
+positive — but a silence broad enough to swallow high/critical signal deserves a
+human look. Pure offline math over the local alert history + suppression store —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/suppaudit?hours=N[&limit=100][&grace=24]` → the structured per-rule model **plus** rendered Markdown (the scoreboard and the verdict-ranked rule table).
+- `GET /api/suppaudit.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --suppaudit 168 [--limit 100] [--grace 24]` (or `npm run suppaudit`) → print the Markdown to stdout (defaults to a 7-day window so dormant-but-proven rules are judged on more than one shift).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

@@ -86,6 +86,8 @@
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
  *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
  *   GET  /api/concentration.md?hours=N -> the same concentration report as a downloadable .md file
+ *   GET  /api/suppaudit?hours=N     -> suppression-rule audit (which silence rules are effective / dead / shadowed / risky; model + Markdown)
+ *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -181,6 +183,7 @@ import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
+import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1429,6 +1432,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- suppression-rule audit / silence-effectiveness & risk ---
+      if (method === "GET" && path === "/api/suppaudit") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const graceHours = Number(url.searchParams.get("grace")) || undefined;
+        return send(res, 200, buildSuppressionAudit(hours, { limit, graceHours, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/suppaudit.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const graceHours = Number(url.searchParams.get("grace")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildSuppressionAudit(hours, { limit, graceHours, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${suppressionAuditFilename(now)}"`,
         });
         res.end(markdown);
         return;
