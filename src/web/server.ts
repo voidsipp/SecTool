@@ -18,6 +18,8 @@
  *   GET  /api/compare.md?hours=N    -> the same comparison as a downloadable .md file
  *   GET  /api/profile?ip=&hours=N   -> single-entity deep-dive for one IP (model + Markdown)
  *   GET  /api/profile.md?ip=&hours=N-> the same profile as a downloadable .md file
+ *   GET  /api/detection?q=&hours=N  -> single-signature dossier: volume, severity, enforcement, attackers, targets, CVE/CWE refs, samples (substring match)
+ *   GET  /api/detection.md?q=&hours=N -> the same detection dossier as a downloadable .md file
  *   GET  /api/assets?hours=N        -> internal-asset exposure scoreboard (model + Markdown)
  *   GET  /api/assets.md?hours=N     -> the same scoreboard as a downloadable .md file
  *   GET  /api/tuning?hours=N        -> signature tuning / noise-reduction recommendations
@@ -247,6 +249,7 @@ import { geolocate } from "../investigate/geo.ts";
 import { buildReport, reportFilename } from "../analytics/report.ts";
 import { buildComparison, comparisonFilename } from "../analytics/compare.ts";
 import { buildProfile, profileFilename } from "../analytics/profile.ts";
+import { buildDetection, detectionFilename } from "../analytics/detection.ts";
 import { buildAssets, assetsFilename } from "../analytics/assets.ts";
 import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
@@ -867,6 +870,25 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             "content-type": "text/markdown; charset=utf-8",
             "cache-control": "no-store",
             "content-disposition": `attachment; filename="${profileFilename(ip, now)}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        return send(res, 200, model);
+      }
+
+      // --- single-signature dossier: everything about one detection, offline ---
+      if (method === "GET" && (path === "/api/detection" || path === "/api/detection.md")) {
+        const query = (url.searchParams.get("q") ?? url.searchParams.get("signature") ?? "").trim();
+        if (!query) return send(res, 400, { error: "Missing signature query (use ?q=...)." });
+        const hours = Number(url.searchParams.get("hours")) || 0; // 0 = entire history
+        const now = Date.now();
+        const model = buildDetection(query, hours, now);
+        if (path === "/api/detection.md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${detectionFilename(query, now)}"`,
           });
           res.end(model.markdown);
           return;
