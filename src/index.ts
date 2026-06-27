@@ -52,6 +52,7 @@
  *   node src/index.ts --recidivism 168 # offline block-effectiveness / post-block recidivism (did the block actually stop the traffic?) audit (Markdown)
  *   node src/index.ts --mttb 168      # offline detection-to-mitigation latency / Mean-Time-To-Block (how fast did we contain each attacker?) report (Markdown)
  *   node src/index.ts --safelist 168  # offline safelist / allowlist risk audit (is a vetted-benign IP still attacking? Markdown)
+ *   node src/index.ts --blockplan 168 # offline block-recommendation / candidate-blocklist worklist (which sources to block next, ranked by preventable impact; Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -121,6 +122,7 @@ import { buildPatterns } from "./analytics/patterns.ts";
 import { buildRecidivism } from "./analytics/recidivism.ts";
 import { buildMttb } from "./analytics/mttb.ts";
 import { buildSafelistAudit } from "./analytics/safelist.ts";
+import { buildBlockPlan } from "./analytics/blockplan.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1322,6 +1324,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown safelist / allowlist risk audit.
       console.log(buildSafelistAudit(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const blockplanIdx = argv.findIndex((a) => a === "--blockplan" || a.startsWith("--blockplan="));
+    if (blockplanIdx !== -1) {
+      const inline = argv[blockplanIdx]!.split("=")[1];
+      const next = argv[blockplanIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a low-and-slow attacker accrues enough impact to rank.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --blockplan hours: "${raw}". Use e.g. --blockplan 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the candidate table.
+      let limit = 30;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic, read-only: print the Markdown block-recommendation worklist.
+      console.log(buildBlockPlan(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const bruteforceIdx = argv.findIndex((a) => a === "--bruteforce" || a.startsWith("--bruteforce="));

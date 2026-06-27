@@ -86,6 +86,8 @@
  *   GET  /api/mttb.md?hours=N       -> the same MTTB report as a downloadable .md file
  *   GET  /api/safelist-audit?hours=N    -> safelist / allowlist risk audit (is a vetted-benign IP still attacking after vetting? dangerous/suspect/benign/dormant; model + Markdown)
  *   GET  /api/safelist-audit.md?hours=N -> the same safelist risk audit as a downloadable .md file
+ *   GET  /api/blockplan?hours=N         -> block-recommendation / candidate-blocklist worklist (which un-blocked, un-safelisted sources to block next, ranked by preventable impact; model + Markdown)
+ *   GET  /api/blockplan.md?hours=N      -> the same block-recommendation worklist as a downloadable .md file
  *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
  *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
@@ -211,6 +213,7 @@ import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
 import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
 import { buildMttb, mttbFilename } from "../analytics/mttb.ts";
 import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist.ts";
+import { buildBlockPlan, blockPlanFilename } from "../analytics/blockplan.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1435,6 +1438,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${safelistAuditFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- block-recommendation / candidate-blocklist worklist (which sources to block next?) ---
+      if (method === "GET" && path === "/api/blockplan") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        return send(res, 200, buildBlockPlan(hours, { limit, minAlerts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/blockplan.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildBlockPlan(hours, { limit, minAlerts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${blockPlanFilename(now)}"`,
         });
         res.end(markdown);
         return;
