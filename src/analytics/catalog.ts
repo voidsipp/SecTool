@@ -299,6 +299,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Blocklist hygiene", "Stale IOCs: which blocks to keep versus prune."),
   entry("Controls / enforcement", "fwrules", "--fwrules", "/api/fwrules", null,
     "Firewall-rule export", "Renders the enforced blocklist into ready-to-apply config for 10 firewall dialects (ipset/iptables/nftables/UFW/pf/Cisco/MikroTik/EdgeRouter-VyOS-UniFi/Windows/plain CIDR); safelisted IPs excluded by default, advisory CIDR-rollup hints. The codegen step after the iocs IP list."),
+  entry("Controls / enforcement", "abuse", "--abuse", "/api/abuse", 168,
+    "Abuse-report generator", "Drafts ready-to-send abuse complaints for the worst public attacking sources, grouped by hosting-provider abuse desk (reusing cloud's attribution + contacts), each pre-filled with UTC timestamps, event counts, top signatures and sample raw detections (--min-count N, --org \"Name\"). The human-action / upstream-takedown sibling of fwrules (perimeter codegen) and blockplan (which to block) — get the attacker removed at the source, not just deflected; unattributed sources degrade to whois guidance, safelisted sources excluded."),
   entry("Controls / enforcement", "suppaudit", "--suppaudit", "/api/suppaudit", 168,
     "Suppression audit", "Are your alert-suppression rules effective — and are they hiding anything live?"),
   entry("Controls / enforcement", "dismissals", "--dismissals", "/api/dismissals", 168,

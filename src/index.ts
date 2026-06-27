@@ -85,6 +85,7 @@
  *   node src/index.ts --protocols 168 # offline protocol-mix / transport (TCP/UDP/ICMP) & application-layer breakdown (re-parsed from raw; tunnelling & amplification tells) report (Markdown)
  *   node src/index.ts --bogon 168     # offline bogon / special-use source-address audit (IANA RFC6890 spoofed/martian vs internal vs public; anti-spoofing & edge-filter gaps) report (Markdown)
  *   node src/index.ts --cloud 168     # offline cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts) report (Markdown)
+ *   node src/index.ts --abuse 168     # offline abuse-report / upstream-takedown generator: drafts ready-to-send abuse complaints for the worst public sources, grouped by provider abuse desk (--min-count N, --org "Name") (Markdown)
  *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
@@ -194,6 +195,7 @@ import { buildProtocols } from "./analytics/protocols.ts";
 import { buildFwRules, parseFwDialect, renderFwScript } from "./analytics/fwrules.ts";
 import { buildBogon } from "./analytics/bogon.ts";
 import { buildCloud } from "./analytics/cloud.ts";
+import { buildAbuse } from "./analytics/abuse.ts";
 import {
   buildAlertFeed,
   parseFeedFormat,
@@ -1518,6 +1520,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown cloud-attribution report to stdout.
       console.log(buildCloud(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Abuse-report / upstream-takedown generator — drafts ready-to-send abuse complaints.
+    const abuseIdx = argv.findIndex((a) => a === "--abuse" || a.startsWith("--abuse="));
+    if (abuseIdx !== -1) {
+      const inline = argv[abuseIdx]!.split("=")[1];
+      const next = argv[abuseIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a complaint reflects sustained, not one-shift, abuse.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --abuse hours: "${raw}". Use e.g. --abuse 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap how many complaints are drafted.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-count N` evidence floor — a source must be this loud to report.
+      let minCount: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min-count" || a.startsWith("--min-count="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minCount = n;
+      }
+      // Optional `--org "Name"` to brand the drafted complaints with your org.
+      let org: string | undefined;
+      const orgIdx = argv.findIndex((a) => a === "--org" || a.startsWith("--org="));
+      if (orgIdx !== -1) {
+        const v = argv[orgIdx]!.split("=")[1] ?? argv[orgIdx + 1];
+        if (typeof v === "string" && v.trim()) org = v.trim();
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown abuse-report worklist to stdout.
+      console.log(buildAbuse(hours, { limit, minCount, org, nowMs: Date.now() }).markdown);
       return;
     }
     // Auto-block threshold simulator — sweep "block a source after N alerts" and find the knee.

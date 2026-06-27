@@ -94,6 +94,8 @@
  *   GET  /api/bogon.md?hours=N      -> the same bogon audit report as a downloadable .md file
  *   GET  /api/cloud?hours=N         -> cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts; model + Markdown)
  *   GET  /api/cloud.md?hours=N      -> the same cloud-attribution report as a downloadable .md file
+ *   GET  /api/abuse?hours=N&minCount=M&org=Name -> abuse-report / upstream-takedown generator: ready-to-send complaints per worst public source, grouped by provider abuse desk (model + Markdown)
+ *   GET  /api/abuse.md?hours=N&minCount=M&org=Name -> the same abuse-report worklist as a downloadable .md file
  *   GET  /api/fwrules               -> firewall-rule export: the enforced blocklist rendered into 10 firewall dialects (ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows/plain; model + Markdown)
  *   GET  /api/fwrules.md            -> the same firewall-rule export as a downloadable .md file
  *   GET  /api/fwrules.txt?dialect=X -> just one dialect's ready-to-apply script as text/plain (curl-and-pipe)
@@ -281,6 +283,7 @@ import { buildRuleset, rulesetFilename } from "../analytics/ruleset.ts";
 import { buildProtocols, protocolsFilename } from "../analytics/protocols.ts";
 import { buildBogon, bogonFilename } from "../analytics/bogon.ts";
 import { buildCloud, cloudFilename } from "../analytics/cloud.ts";
+import { buildAbuse, abuseFilename } from "../analytics/abuse.ts";
 import {
   buildFwRules,
   fwRulesFilename,
@@ -1651,6 +1654,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cloudFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- abuse-report / upstream-takedown generator (ready-to-send complaints per source) ---
+      if (method === "GET" && path === "/api/abuse") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        const org = url.searchParams.get("org") ?? undefined;
+        return send(res, 200, buildAbuse(hours, { limit, minCount, org, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/abuse.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minCount = Number(url.searchParams.get("minCount")) || undefined;
+        const org = url.searchParams.get("org") ?? undefined;
+        const now = Date.now();
+        const { markdown } = buildAbuse(hours, { limit, minCount, org, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${abuseFilename(now)}"`,
         });
         res.end(markdown);
         return;
