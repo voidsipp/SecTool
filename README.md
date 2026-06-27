@@ -1430,6 +1430,56 @@ watchlist / safelist membership) — **no SSH, no Claude, no live gateway query*
 - `GET /api/repertoire.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --repertoire 168 [--limit 20] [--min-alerts 2]` (or `npm run repertoire`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow operator has time to reveal breadth).
 
+## 🚀 Attack-momentum / rate-trend report (`GET /api/momentum[.md]`, `--momentum`)
+
+Every source-centric report measures a *static* property of an attacker — how
+much, how varied, how clustered — but not the one thing morning triage most
+needs: **direction**. A source that fired 200 alerts is interesting; a source
+that fired 10 yesterday and 190 in the last hour is an *incident in progress*,
+and a flat "top sources by count" ranking buries it. The neighbouring temporal
+reports each look elsewhere: the surge report flags **global** volume spikes (not
+a single source's own slope), the escalation report tracks rising **severity**
+(not volume), and the burstiness report measures **clumpiness** (scale-free, by
+construction blind to whether the clumps are growing). None of them fit a *trend
+line to each source's own volume-over-time*.
+
+This report does. It slices the window into equal time bins (default 12, anchored
+to the absolute window so "recent" means the same for every source), counts each
+source's alerts per bin, and fits an ordinary **least-squares line** to those
+counts. The slope is normalised into a scale-free **trend** in roughly [−1, +1]
+(so it is comparable across sources of wildly different volume) and turned into a
+0–100 **momentum score** (50 = flat) — **volume is deliberately excluded**, so a
+small fast riser outranks a steady flood. A one-word **direction** is assigned:
+
+- **🚀 surging** (trend ≥ +0.6) — heavily back-loaded, rate climbing fast.
+- **📈 rising** (≥ +0.2) — clearly trending up.
+- **➡️ steady** (|trend| < 0.2) — roughly constant rate.
+- **📉 fading** (≤ −0.2) — winding down.
+- **💤 spent** (≤ −0.6) — front-loaded, effectively gone quiet.
+- **⚡ spike** — all activity in a *single* bin: a one-off burst with no trend.
+
+Each row carries a unicode **sparkline** (▁▂▃▄▅▆▇█ over the bins, oldest left) so
+a low-confidence fit is never hidden behind its label, the fit **R²** (trend
+confidence), recency (share of the source's alerts in the back half), worst
+severity, the blocked-vs-passed split (a *surging* source whose traffic is *let
+through* is the worst case), the top signature, and blocklist / watchlist /
+safelist membership. **Internal** sources trending **up** are flagged — a rising
+rate from one of your own boxes is a beaconing / exfil / worm ramp, not an
+inbound probe.
+
+Honest about its limits: **a trend is a description, not a forecast** (a surging
+source may stop the moment you read this; use momentum as a triage *order*); a
+noisy, humped or U-shaped timeline can wear a weak slope label, so R² and the
+sparkline are always shown; the result is bin-width sensitive (tune with
+`--buckets`); these are IPS **detections**, not flows, and a long look-back can
+hit the store's history cap and clip the early bins, flattering the trend upward.
+Pure offline math over the local alert history (plus blocklist / watchlist /
+safelist membership) — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/momentum?hours=N[&limit=20][&minAlerts=3][&buckets=12]` → the structured model **plus** rendered Markdown (per-source momentum table with sparklines).
+- `GET /api/momentum.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --momentum 168 [--limit 20] [--min-alerts 3] [--buckets 12]` (or `npm run momentum`) → print the Markdown to stdout (defaults to a 7-day window so a slow ramp has room to reveal its slope).
+
 ## 🕒 Source dwell-time & engagement-session report (`GET /api/dwell[.md]`, `--dwell`)
 
 Every *temporal* report already exists — the [rhythm report](#-temporal-activity-rhythm-report)

@@ -96,6 +96,8 @@
  *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
  *   GET  /api/repertoire.md?hours=N -> the same repertoire report as a downloadable .md file
+ *   GET  /api/momentum?hours=N      -> attack-momentum / rate-trend report (surging-vs-spent: who is ramping up right now per source; model + Markdown)
+ *   GET  /api/momentum.md?hours=N   -> the same momentum report as a downloadable .md file
  *   GET  /api/dwell?hours=N         -> source dwell-time / engagement-session report (sustained camp vs transient probe per source; model + Markdown)
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
  *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
@@ -211,6 +213,7 @@ import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts"
 import { buildConvergence, convergenceFilename } from "../analytics/convergence.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
+import { buildMomentum, momentumFilename } from "../analytics/momentum.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
@@ -1596,6 +1599,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${repertoireFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attack-momentum / rate-trend (surging-vs-spent: who is ramping up right now per source) ---
+      if (method === "GET" && path === "/api/momentum") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        const buckets = Number(url.searchParams.get("buckets")) || undefined;
+        return send(res, 200, buildMomentum(hours, { limit, minAlerts, buckets, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/momentum.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        const buckets = Number(url.searchParams.get("buckets")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildMomentum(hours, { limit, minAlerts, buckets, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${momentumFilename(now)}"`,
         });
         res.end(markdown);
         return;
