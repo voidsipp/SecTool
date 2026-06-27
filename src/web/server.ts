@@ -92,6 +92,8 @@
  *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
  *   GET  /api/noise?hours=N         -> alert-noise / stream-redundancy report (repeated event tuples, compression ratio, de-dup / suppression candidates; model + Markdown)
  *   GET  /api/noise.md?hours=N      -> the same alert-noise report as a downloadable .md file
+ *   GET  /api/patterns?hours=N      -> attacker patterns-of-life / operating-hours report (bot-vs-human-shift clock fingerprint + timezone attribution; model + Markdown)
+ *   GET  /api/patterns.md?hours=N   -> the same patterns-of-life report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -190,6 +192,7 @@ import { buildConcentration, concentrationFilename } from "../analytics/concentr
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
+import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1504,6 +1507,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${noiseFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attacker patterns-of-life / operating-hours (bot vs human shift + TZ) ---
+      if (method === "GET" && path === "/api/patterns") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const minAlerts = Number(url.searchParams.get("min")) || undefined;
+        const assumedMiddayHour = Number(url.searchParams.get("midday")) || undefined;
+        return send(res, 200, buildPatterns(hours, { limit, minAlerts, assumedMiddayHour, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/patterns.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const minAlerts = Number(url.searchParams.get("min")) || undefined;
+        const assumedMiddayHour = Number(url.searchParams.get("midday")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildPatterns(hours, { limit, minAlerts, assumedMiddayHour, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${patternsFilename(now)}"`,
         });
         res.end(markdown);
         return;
