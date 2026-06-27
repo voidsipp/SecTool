@@ -207,6 +207,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Signature tuning", "Which rules are loud, low-value chatter worth suppressing or re-tuning."),
   entry("Threat type / signature", "ruleset", "--ruleset", "/api/ruleset", 168,
     "Rule (SID) inventory & provenance", "Which Suricata rules fire, keyed by the stable gid:sid: source feed (Snort/Talos vs your local rules vs Emerging Threats) and mid-window revision drift."),
+  entry("Threat type / signature", "protocols", "--protocols", "/api/protocols", 168,
+    "Protocol mix (transport & L7)", "How traffic divides across transport (TCP/UDP/ICMP/…) and application (http/dns/tls/…) protocol — the port-independent axis that surfaces ICMP recon, UDP amplification and GRE/ESP tunnelling at the edge."),
   entry("Threat type / signature", "lifecycle", "--lifecycle", "/api/lifecycle", 168,
     "Signature lifecycle", "Chronic background signatures vs acute, newly spiking ones."),
   entry("Threat type / signature", "audience", "--audience", "/api/audience", 168,

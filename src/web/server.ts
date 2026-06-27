@@ -88,6 +88,8 @@
  *   GET  /api/traffic.md?hours=N    -> the same traffic report as a downloadable .md file
  *   GET  /api/ruleset?hours=N       -> detection-rule (Suricata SID) inventory & ruleset provenance (Snort/Talos vs local vs ET; revision drift; model + Markdown)
  *   GET  /api/ruleset.md?hours=N    -> the same ruleset report as a downloadable .md file
+ *   GET  /api/protocols?hours=N     -> protocol-mix / transport (TCP/UDP/ICMP) & application-layer breakdown (re-parsed from raw; tunnelling & amplification tells; model + Markdown)
+ *   GET  /api/protocols.md?hours=N  -> the same protocol-mix report as a downloadable .md file
  *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
@@ -236,6 +238,7 @@ import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildRarity, rarityFilename } from "../analytics/rarity.ts";
 import { buildTraffic, trafficFilename } from "../analytics/traffic.ts";
 import { buildRuleset, rulesetFilename } from "../analytics/ruleset.ts";
+import { buildProtocols, protocolsFilename } from "../analytics/protocols.ts";
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
@@ -1512,6 +1515,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${rulesetFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- protocol-mix: transport (TCP/UDP/ICMP) & application-layer breakdown, re-parsed from raw ---
+      if (method === "GET" && path === "/api/protocols") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        return send(res, 200, buildProtocols(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/protocols.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const now = Date.now();
+        const { markdown } = buildProtocols(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${protocolsFilename(now)}"`,
         });
         res.end(markdown);
         return;
