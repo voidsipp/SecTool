@@ -418,6 +418,28 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/iocs?hours=N&format=json|csv|plain|markdown&minSeverity=medium[&includeSafe=1]` → the export in the requested format (`json` returns the structured model inline; the others download as a file).
 - `node src/index.ts --iocs 168 [--format plain] [--min-severity medium]` (or `npm run iocs`) → print the export to stdout (defaults to a 7-day window and the `plain` blocklist format, ideal for piping into `ipset restore`).
 
+## 🧾 CEF / LEEF SIEM event export (`GET /api/cef`, `--cef`)
+
+Where `iocs` (indicators), `stix` (intel objects) and `sigma` (detection rules)
+all describe *what to look for*, this export carries *what was seen* — the **raw
+events themselves**, one normalized line per alert, in the two log-forwarding
+syntaxes legacy SIEMs speak natively: **CEF** (ArcSight Common Event Format — a
+first-class ingest format for Micro Focus ArcSight, Splunk and Microsoft
+Sentinel) and **LEEF** (IBM QRadar's Log Event Extended Format). It is the
+"forward my IPS log into the SIEM" primitive the other three exports assume has
+already happened. For every stored alert in the window it recovers a normalized
+record — severity folded onto the CEF/LEEF **0–10 scale**, the stable Suricata
+`gid:sid` as the signature/event id, source/destination IPs, and (re-parsed from
+each alert's raw line, since the store keeps no port/protocol column) the
+source/destination **ports, transport and application protocol**, the gateway
+disposition, and the **inbound/outbound/lateral** traffic direction — then
+serializes it with full, spec-correct escaping (CEF header `\`/`|`, CEF
+extension `\`/`=`/newline; LEEF tab/newline). Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/cef?hours=N&format=cef|leef|json|markdown&limit=N` → the event stream in the requested format (`json` returns the structured model inline; `.cef` / `.leef` / `.json` / `.md` path suffixes download as a file).
+- `node src/index.ts --cef 168 [--format leef] [--limit 500]` (or `npm run cef`) → print the event stream to stdout (defaults to a 7-day window and the `cef` line format, ready to pipe into a CEF/Syslog collector).
+
 ## 📈 Prometheus / OpenMetrics endpoint (`GET /metrics`, `--metrics`)
 
 Every other surface answers a question **after the fact** — a Markdown report you

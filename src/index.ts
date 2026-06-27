@@ -80,6 +80,7 @@
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
+ *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -180,6 +181,7 @@ import {
   parseFeedFormat,
   feedDocument,
 } from "./analytics/alertFeed.ts";
+import { buildCefExport, renderCef, parseCefFormat } from "./analytics/cefExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -2646,6 +2648,37 @@ async function main(): Promise<void> {
       // Offline, deterministic: print the syndication feed in the chosen format.
       const model = buildAlertFeed(hours, { minSeverity, limit, baseUrl, nowMs: Date.now() });
       process.stdout.write(feedDocument(model, fmt) + "\n");
+      return;
+    }
+    // CEF / LEEF SIEM event export (one normalized line per alert for ArcSight/Splunk/Sentinel/QRadar).
+    const cefIdx = argv.findIndex((a) => a === "--cef" || a.startsWith("--cef="));
+    if (cefIdx !== -1) {
+      const inline = argv[cefIdx]!.split("=")[1];
+      const next = argv[cefIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --cef hours: "${raw}". Use e.g. --cef 168`);
+        process.exit(2);
+      }
+      // Optional `--format cef|leef|json|md` — CEF line stream by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseCefFormat(fmtRaw);
+      // Optional `--limit N` cap on emitted events (newest first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested event-export serialization to stdout.
+      const model = buildCefExport(hours, { limit, nowMs: Date.now() });
+      const out = renderCef(model, format);
+      process.stdout.write(out.endsWith("\n") ? out : out + "\n");
       return;
     }
     // Sigma detection-rule export (Splunk / Elastic / Sentinel / any SIEM via pySigma).
