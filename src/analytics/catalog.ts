@@ -221,6 +221,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Payload artifacts / IOCs", "Domains, URLs, file hashes, CVEs and tool user-agents mined from raw payloads."),
   entry("Threat type / signature", "mitre", "--mitre", "/api/mitre", 168,
     "MITRE ATT&CK coverage", "Tactic/technique coverage mapped from the firing signatures."),
+  entry("Threat type / signature", "cwe", "--cwe", "/api/cwe", 168,
+    "CWE weakness-class coverage", "Which classes of software weakness (SQLi, traversal, overflow, broken auth…) the traffic targets — the AppSec/hardening view, orthogonal to cve (specific bugs) and mitre (adversary behaviour)."),
   entry("Threat type / signature", "killchain", "--killchain", "/api/killchain", 168,
     "Kill-chain stages", "Distribution of activity across attack stages."),
   entry("Threat type / signature", "cooccur", "--cooccur", "/api/cooccur", 168,

@@ -51,6 +51,7 @@
  *   node src/index.ts --audience 168  # offline signature-audience / spray-vs-snipe (background radiation vs targeted snipe per signature) report (Markdown)
  *   node src/index.ts --dwell 168     # offline source dwell-time / engagement-session (sustained camp vs transient probe) report (Markdown)
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
+ *   node src/index.ts --cwe 168       # offline CWE weakness-class coverage (which software-weakness classes are being probed/exploited; SQLi/traversal/overflow/auth…) report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
@@ -140,6 +141,7 @@ import { buildBruteforce } from "./analytics/bruteforce.ts";
 import { buildBurstiness } from "./analytics/burstiness.ts";
 import { buildConvergence } from "./analytics/convergence.ts";
 import { buildMitre } from "./analytics/mitre.ts";
+import { buildCwe } from "./analytics/cwe.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildMomentum } from "./analytics/momentum.ts";
 import { buildDwell } from "./analytics/dwell.ts";
@@ -2027,6 +2029,32 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown MITRE ATT&CK report to stdout.
       console.log(buildMitre(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // CWE weakness-class coverage — which software-weakness classes the traffic targets.
+    const cweIdx = argv.findIndex((a) => a === "--cwe" || a.startsWith("--cwe="));
+    if (cweIdx !== -1) {
+      const inline = argv[cweIdx]!.split("=")[1];
+      const next = argv[cweIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the weakness mix reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --cwe hours: "${raw}". Use e.g. --cwe 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-CWE table.
+      let limit = 30;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown CWE weakness-class report to stdout.
+      console.log(buildCwe(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const concentrationIdx = argv.findIndex(

@@ -144,6 +144,8 @@
  *   GET  /api/convergence.md?hours=N -> the same convergence report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
+ *   GET  /api/cwe?hours=N           -> CWE weakness-class coverage report (which software-weakness classes — SQLi/traversal/overflow/auth — are probed; family + per-CWE; model + Markdown)
+ *   GET  /api/cwe.md?hours=N        -> the same CWE weakness-class report as a downloadable .md file
  *   GET  /metrics                   -> Prometheus / OpenMetrics scrape target (store saturation, last-alert age, severity/disposition/category splits, control-plane sizes, triage backlog)
  *   GET  /api/metrics               -> the same Prometheus exposition under the /api prefix
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -252,6 +254,7 @@ import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts"
 import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts";
 import { buildConvergence, convergenceFilename } from "../analytics/convergence.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
+import { buildCwe, cweFilename } from "../analytics/cwe.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildMomentum, momentumFilename } from "../analytics/momentum.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
@@ -1885,6 +1888,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${mitreFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- CWE weakness-class coverage (which software-weakness classes the alert history targets) ---
+      if (method === "GET" && path === "/api/cwe") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        return send(res, 200, buildCwe(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/cwe.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 30;
+        const now = Date.now();
+        const { markdown } = buildCwe(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${cweFilename(now)}"`,
         });
         res.end(markdown);
         return;
