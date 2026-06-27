@@ -68,6 +68,7 @@
     "audience": "node src/index.ts --audience 168",
     "dwell": "node src/index.ts --dwell 168",
     "mitre": "node src/index.ts --mitre 168",
+    "cwe": "node src/index.ts --cwe 168",
     "concentration": "node src/index.ts --concentration 168",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",

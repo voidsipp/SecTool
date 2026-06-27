@@ -1835,6 +1835,52 @@ the local alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/mitre.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --mitre 168 [--limit 30]` (or `npm run mitre`) → print the Markdown to stdout (defaults to a 7-day window so the technique mix reflects more than one shift).
 
+## 🧬 CWE weakness-class coverage report (`GET /api/cwe[.md]`, `--cwe`)
+
+The third leg of SecTool's standards-mapping trio, deliberately orthogonal to the
+other two. The [CVE report](#-cve-exposure-report-get-apicvemd---cve) maps
+signatures to **specific, already-patched vulnerabilities** — a *patch worklist*.
+The [MITRE ATT&CK report](#️-mitre-attck-coverage-report-get-apimitremd---mitre)
+maps alerts to adversary **behaviour** — a *detection-coverage matrix*. This one
+maps each alert to a **CWE weakness class** (MITRE's Common Weakness Enumeration) —
+the **category of software flaw** the traffic is trying to exercise: SQL injection
+(CWE-89), path traversal (CWE-22), a memory-safety overflow (CWE-787), broken
+authentication (CWE-287)… A CVE tells you to patch *one* bug; a CWE tells you a
+*whole class* of bug is being hunted on your edge, which drives durable hardening
+no single patch delivers (a WAF injection ruleset, input validation for traversal,
+an auth-rate limit, compiler memory-safety mitigations). It is the language an
+OWASP-aligned AppSec program, a SAST/DAST report and a secure-development lifecycle
+all share.
+
+Each stored alert is mapped to **one** CWE by a first-match-wins heuristic over its
+`classification` / `signature` / `category` text, then rolled up two ways:
+
+- **Weakness-family coverage** — per family (Injection, Memory Safety, Access
+  Control, …, in canonical order, observed cells only): distinct CWEs fired, alert
+  volume and share, distinct attacker sources and internal hosts, severity ceiling,
+  blocked-vs-detected split, the busiest CWE, and an ASCII coverage bar. Each
+  highlight carries a durable **hardening hint** for the class.
+- **Per-CWE detail** — every observed weakness ranked by a severity-weighted score:
+  CWE-ID + name + family, volume, distinct sources and targets, severity ceiling,
+  disposition split, the dominant signature, a **🏠 internal-source** flag (an
+  inside host *probing* a weakness is a pivot / compromise tell), and a **🚩
+  control-gap** flag for medium-or-worse classes mostly *detected, not blocked* —
+  the virtual-patch candidates.
+
+Honest about its limits: CWE mapping is a **heuristic** over free-text Suricata
+fields, not a curated rule→CWE table. Each alert is attributed to a **single**
+best-match weakness; recon, scanning, C2 and policy chatter exercise *no* software
+weakness, so they legitimately land in the honest **unmapped** bucket (counted,
+never silently dropped) — a large unmapped share is expected, not a defect. A CWE
+here means the weakness was **targeted**, not that the asset is **vulnerable** —
+this is exposure pressure, not a vulnerability scan, so pair it with the `cve` patch
+worklist and `mitre` behaviour view. Pure offline math over the local alert history
+— **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/cwe?hours=N[&limit=30]` → the structured model **plus** rendered Markdown (family-coverage table + per-CWE ranking).
+- `GET /api/cwe.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --cwe 168 [--limit 30]` (or `npm run cwe`) → print the Markdown to stdout (defaults to a 7-day window so the weakness mix reflects more than one shift).
+
 ## 📊 Threat-concentration / Pareto-Gini report (`GET /api/concentration[.md]`, `--concentration`)
 
 Every other attacker report hands you a *leaderboard* — the worst source, the
