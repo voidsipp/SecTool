@@ -750,6 +750,21 @@ function metaFor(key: string): { label: string; kind: ProviderKind; abuse: strin
     : { label: key, kind: "unclassified", abuse: "", hint: "" };
 }
 
+/**
+ * Public lookup of a provider's display metadata (label, kind, abuse contact and
+ * response hint) from the key returned by {@link classifyProvider}. Sibling
+ * reports — e.g. the abuse-report generator (`abuse.ts`) — reuse this so the
+ * provider table (and its abuse desks) lives in exactly one place. Returns
+ * `null` for a key that is neither a known provider nor the unclassified bucket.
+ */
+export function providerInfo(
+  key: string,
+): { label: string; kind: ProviderKind; abuse: string; hint: string } | null {
+  if (key === UNCLASSIFIED.key) return { ...UNCLASSIFIED };
+  const p = PROVIDERS[key];
+  return p ? { label: p.label, kind: p.kind, abuse: p.abuse, hint: p.hint } : null;
+}
+
 function finalizeProvider(key: string, acc: ProviderAcc, publicTotal: number): CloudProviderEntry {
   const meta = metaFor(key);
   const actioned = acc.blocked + acc.passed;

@@ -1381,6 +1381,58 @@ query**.
 - `GET /api/autoblock.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --autoblock 168 [--limit 20] [--thresholds 1,2,5,10]` (or `npm run autoblock`) → print the Markdown to stdout (defaults to a 7-day window so the source-volume distribution has time to take shape).
 
+## 📮 Abuse-report / upstream-takedown generator (`GET /api/abuse[.md]`, `--abuse`)
+
+Every other source-side report stops one step short of the action you can take
+against an *external* attacker. You cannot patch a stranger's botnet, and a
+perimeter block (`fwrules`, `blockplan`, `autoblock`) only stops that IP from
+reaching **you** — the host keeps scanning the rest of the internet. The one
+lever that removes the attacker rather than deflecting it is **reporting the
+source to the network responsible for it**: a hosting provider terminates an
+abusive instance, an ISP nudges a compromised customer. That lever is rarely
+pulled, for a boring reason — hand-writing a credible abuse complaint (correct
+desk, UTC timestamps, concrete evidence, a sober tone) is tedious.
+
+This report removes the friction. For the worst public attacking sources in the
+window it produces, per IP, a **ready-to-send abuse complaint** — addressed to
+the right desk, pre-filled with the evidence an abuse team needs, and grouped by
+provider so a week's complaints can be batch-sent. It is the **human-action**
+sibling of the machine feeds and the perimeter codegen:
+
+- It reuses the [`cloud`](#) report's offline provider attribution and
+  abuse-desk table (AWS, GCP, Azure, DigitalOcean, OVH, Hetzner, …) — so the
+  contact list lives in exactly one place — and turns each match into the actual
+  complaint text with evidence attached.
+- Where `fwrules` is the *defensive* codegen (keep the attacker off your edge),
+  this is the *upstream-disclosure* counterpart (get the attacker removed at the
+  origin); `blockplan` ranks which sources to **block**, this ranks which are
+  worth the effort of **reporting** — a higher bar, because abuse desks ignore
+  low-signal noise.
+
+**Selection & ranking.** Only **public IPv4** sources are eligible — RFC1918 /
+loopback / CGN / bogon space and IPv6 are excluded. **Safelisted** (vetted-benign)
+sources are excluded outright (and the skipped count surfaced), so you never file
+against a partner's scanner. A source must clear a `--min-count` evidence floor
+(default 5 alerts), then survivors are ranked by a **severity-weighted impact
+score** (the same weights `risk` / `efficacy` / `cloud` use), so a few critical
+exploit attempts outrank a flood of probes; the top `--limit` (default 20) become
+complaints.
+
+Each complaint carries the **attack window in UTC** (first→last seen), the event
+count, distinct internal targets, the top signatures, a few sanitised sample raw
+detections, the gateway's own enforcement disposition (so you can say *"we already
+block this and it's still trying"*), and the provider attribution + abuse desk.
+Sources whose provider can't be matched degrade gracefully to `whois <ip>` →
+`abuse-c` / `OrgAbuseEmail` guidance instead of inventing a contact. The drafts
+are deliberately **factual and non-accusatory** — an abuse report is a good-faith
+notice built from IPS *detections*, not an adjudication, and source identity can
+be borrowed (NAT, rotating botnets, spoofed non-TCP sources). Pure offline,
+deterministic: no SSH, no Claude, no network.
+
+- `GET /api/abuse?hours=N[&limit=20&minCount=5&org=Acme]` → the structured model **plus** rendered Markdown (send-queue summary + per-complaint evidence and draft).
+- `GET /api/abuse.md?hours=N` → the same worklist as a downloadable `.md` file.
+- `node src/index.ts --abuse 168 [--limit 20] [--min-count 5] [--org "Acme Corp"]` (or `npm run abuse`) → print the Markdown to stdout (defaults to a 7-day window so a complaint reflects sustained, not one-shift, abuse).
+
 ## 🎚️ Priority-inversion / IDS-urgency-vs-enforcement audit (`GET /api/priority[.md]`, `--priority`)
 
 Suricata stamps every alert with a numeric **priority** (`[Priority: 1]` …, where

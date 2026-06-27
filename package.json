@@ -91,6 +91,7 @@
     "protocols": "node src/index.ts --protocols 168",
     "bogon": "node src/index.ts --bogon 168",
     "cloud": "node src/index.ts --cloud 168",
+    "abuse": "node src/index.ts --abuse 168",
     "fwrules": "node src/index.ts --fwrules",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "stix": "node src/index.ts --stix 168",
