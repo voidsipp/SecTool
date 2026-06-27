@@ -51,6 +51,7 @@
     "dwell": "node src/index.ts --dwell 168",
     "mitre": "node src/index.ts --mitre 168",
     "concentration": "node src/index.ts --concentration 168",
+    "suppaudit": "node src/index.ts --suppaudit 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
