@@ -84,6 +84,8 @@
  *   GET  /api/portsig.md?hours=N    -> the same port-signature report as a downloadable .md file
  *   GET  /api/rarity?hours=N        -> rarity / signal-surprise report (TF-IDF which source fires signatures nobody else does; model + Markdown)
  *   GET  /api/rarity.md?hours=N     -> the same rarity report as a downloadable .md file
+ *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
+ *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
  *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
  *   GET  /api/artifacts?hours=N     -> payload-artifact / embedded-IOC report (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads; model + Markdown)
@@ -228,6 +230,7 @@ import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts"
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildRarity, rarityFilename } from "../analytics/rarity.ts";
+import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
 import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
@@ -285,6 +288,16 @@ function chatSessionId(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const s = raw.trim();
   return s && s.length <= 128 && /^[A-Za-z0-9_-]+$/.test(s) ? s : undefined;
+}
+
+/** Parse a `?thresholds=1,2,5,10` query param into a positive-integer ladder. */
+function parseThresholds(raw: string | null): number[] | undefined {
+  if (!raw) return undefined;
+  const parsed = raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return parsed.length ? parsed : undefined;
 }
 
 function send(res: ServerResponse, status: number, body: unknown, type = "application/json"): void {
@@ -1451,6 +1464,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${rarityFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- auto-block threshold simulator (sweep "block a source after N alerts"; knee curve) ---
+      if (method === "GET" && path === "/api/autoblock") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const thresholds = parseThresholds(url.searchParams.get("thresholds"));
+        return send(res, 200, buildAutoblock(hours, { limit, thresholds, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/autoblock.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const thresholds = parseThresholds(url.searchParams.get("thresholds"));
+        const now = Date.now();
+        const { markdown } = buildAutoblock(hours, { limit, thresholds, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${autoblockFilename(now)}"`,
         });
         res.end(markdown);
         return;

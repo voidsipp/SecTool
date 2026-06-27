@@ -41,6 +41,7 @@
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --portsig 168   # offline port-signature scanner-fingerprint (which attacker toolkit each source's port-set betrays) report (Markdown)
  *   node src/index.ts --rarity 168    # offline rarity / signal-surprise (TF-IDF which source fires signatures nobody else does — needle vs commodity noise) report (Markdown)
+ *   node src/index.ts --autoblock 168 # offline auto-block threshold simulator (sweep "block a source after N alerts"; preventable-volume vs blocks-issued knee curve) report (Markdown)
  *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
  *   node src/index.ts --artifacts 168 # offline payload-artifact / embedded-IOC (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
@@ -123,6 +124,7 @@ import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
 import { buildRarity } from "./analytics/rarity.ts";
+import { buildAutoblock } from "./analytics/autoblock.ts";
 import { buildPortSig } from "./analytics/portsig.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
 import { buildArtifacts } from "./analytics/artifacts.ts";
@@ -1304,6 +1306,45 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown rarity report to stdout.
       console.log(buildRarity(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Auto-block threshold simulator — sweep "block a source after N alerts" and find the knee.
+    const autoblockIdx = argv.findIndex((a) => a === "--autoblock" || a.startsWith("--autoblock="));
+    if (autoblockIdx !== -1) {
+      const inline = argv[autoblockIdx]!.split("=")[1];
+      const next = argv[autoblockIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the source-volume distribution has time to take shape.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --autoblock hours: "${raw}". Use e.g. --autoblock 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the would-be-blocked source table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--thresholds 1,2,5,10` to override the swept threshold ladder.
+      let thresholds: number[] | undefined;
+      const thIdx = argv.findIndex((a) => a === "--thresholds" || a.startsWith("--thresholds="));
+      if (thIdx !== -1) {
+        const tv = argv[thIdx]!.split("=")[1] ?? argv[thIdx + 1];
+        if (tv) {
+          const parsed = tv
+            .split(",")
+            .map((s) => Number(s.trim()))
+            .filter((n) => Number.isFinite(n) && n > 0);
+          if (parsed.length) thresholds = parsed;
+        }
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown auto-block simulator report to stdout.
+      console.log(buildAutoblock(hours, { limit, thresholds, nowMs: Date.now() }).markdown);
       return;
     }
     // Port-signature scanner-fingerprint — which attacker toolkit each source's port-set betrays.

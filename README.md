@@ -1320,6 +1320,45 @@ gateway query**.
 - `GET /api/blockplan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --blockplan 168 [--limit 30]` (or `npm run blockplan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow attacker accrues enough impact to rank).
 
+## 🚧 Auto-block threshold simulator / preventable-volume curve (`GET /api/autoblock[.md]`, `--autoblock`)
+
+`blockplan` answers *which IPs* to block; this answers the question one level up —
+**at what volume should an auto-block fire at all?** A threshold of 1 blocks every
+source the instant it trips a rule (maximal prevention, an exploding firewall table
+full of one-shot scanners and a real false-positive risk); a threshold of 50 only
+ever stops the relentless hammerers (tiny blast radius, but a mountain of mid-volume
+noise gets through). The right answer is **deployment-specific** — it depends on the
+actual shape of your source-volume distribution, which only your stored history
+knows.
+
+This report draws that curve. Over the candidate population — every **external,
+routable, non-safelisted** source in the window — it sweeps a ladder of thresholds
+`N` (default `1,2,3,4,5,7,10,15,20,30,50,100`) and, for each: **sources blocked**
+(the cost — every one is a firewall entry and a potential false positive),
+**alerts prevented** = Σ `max(0, alerts − N)` (the noise a block removes, since it
+fires *on* the N-th alert and everything after is dropped at the edge), **prevented
+%**, **leverage** (prevention per block — efficiency), and how many blocked sources
+ever sent medium-or-worse traffic. It then recommends the **knee** of the curve —
+the threshold nearest the ideal corner of *(0 blocks, 100% prevented)* — and lists
+exactly which sources that policy would block, flagged with their current control
+state (a source it would block that you have **already** blocklisted is confirmation
+the threshold is calibrated; a brand-new one is a candidate; a **watchlisted** one
+is the cleanest possible promotion).
+
+It is a **counterfactual on fixed arrivals**: it replays the alerts that landed and
+assumes the attacker keeps the same source IP — a rotator defeats any volume
+threshold, so prevention is an upper bound for rotators and an honest estimate for
+the commodity scanners that dominate the volume. **One-shot sources** (seen once)
+are structurally unreachable by any threshold ≥ 2 and their count is surfaced;
+**safelisted and internal** sources are excluded from candidacy (you never
+auto-block a vetted-benign IP or one of your own hosts). Pure offline math over the
+local alert + block / safe / watch stores — **no SSH, no Claude, no live gateway
+query**.
+
+- `GET /api/autoblock?hours=N[&limit=20&thresholds=1,2,5,10]` → the structured model **plus** rendered Markdown (swept threshold curve + would-be-blocked source table).
+- `GET /api/autoblock.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --autoblock 168 [--limit 20] [--thresholds 1,2,5,10]` (or `npm run autoblock`) → print the Markdown to stdout (defaults to a 7-day window so the source-volume distribution has time to take shape).
+
 ## 🎚️ Priority-inversion / IDS-urgency-vs-enforcement audit (`GET /api/priority[.md]`, `--priority`)
 
 Suricata stamps every alert with a numeric **priority** (`[Priority: 1]` …, where
