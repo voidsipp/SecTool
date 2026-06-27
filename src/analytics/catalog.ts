@@ -215,6 +215,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Kill-chain stages", "Distribution of activity across attack stages."),
   entry("Threat type / signature", "cooccur", "--cooccur", "/api/cooccur", 168,
     "Signature co-occurrence", "Which signatures fire together — attack-chain pairs."),
+  entry("Threat type / signature", "sequence", "--sequence", "/api/sequence", 168,
+    "Attack sequences / playbooks", "Ordered A→B signature transitions, escalation early-warning edges and recurring 3-step playbooks."),
 
   // --- Temporal -------------------------------------------------------------
   entry("Temporal", "rhythm", "--rhythm", "/api/rhythm", 168,

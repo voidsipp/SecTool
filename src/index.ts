@@ -54,6 +54,7 @@
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
  *   node src/index.ts --offhours 168  # offline off-hours / defender coverage-gap (attack pressure + unattended detect-only exposure outside staffed hours) report (Markdown)
+ *   node src/index.ts --sequence 168  # offline attack-sequence / signature-transition (ordered A→B playbooks + escalation early-warning edges) report (Markdown)
  *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
  *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
  *   node src/index.ts --convergence 168 # offline temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash-crowd) report (Markdown)
@@ -136,6 +137,7 @@ import { buildConcentration } from "./analytics/concentration.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
+import { buildSequence } from "./analytics/sequence.ts";
 import { buildPatterns } from "./analytics/patterns.ts";
 import { buildOffHours } from "./analytics/offhours.ts";
 import { buildRecidivism } from "./analytics/recidivism.ts";
@@ -1955,6 +1957,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown alert-noise report to stdout.
       console.log(buildNoise(hours, { limit, repeatThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const sequenceIdx = argv.findIndex((a) => a === "--sequence" || a.startsWith("--sequence="));
+    if (sequenceIdx !== -1) {
+      const inline = argv[sequenceIdx]!.split("=")[1];
+      const next = argv[sequenceIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so ordered transitions have enough events to chain.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --sequence hours: "${raw}". Use e.g. --sequence 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--gap H`: session-gap bound (hours) within which steps chain.
+      let maxGapHours: number | undefined;
+      const gapIdx = argv.findIndex((a) => a === "--gap" || a.startsWith("--gap="));
+      if (gapIdx !== -1) {
+        const v = argv[gapIdx]!.split("=")[1] ?? argv[gapIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) maxGapHours = n;
+      }
+      // Optional `--support N`: minimum occurrences for an early-warning edge.
+      let minSupport: number | undefined;
+      const supIdx = argv.findIndex((a) => a === "--support" || a.startsWith("--support="));
+      if (supIdx !== -1) {
+        const v = argv[supIdx]!.split("=")[1] ?? argv[supIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n >= 2) minSupport = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown attack-sequence report to stdout.
+      console.log(buildSequence(hours, { limit, maxGapHours, minSupport, nowMs: Date.now() }).markdown);
       return;
     }
     const patternsIdx = argv.findIndex((a) => a === "--patterns" || a.startsWith("--patterns="));

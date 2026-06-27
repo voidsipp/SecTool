@@ -1886,6 +1886,49 @@ gateway query**.
 - `GET /api/noise.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --noise 168 [--limit 20] [--repeat 5]` (or `npm run noise`) → print the Markdown to stdout (defaults to a 7-day window so repetition is measured over more than one shift).
 
+## 🔀 Attack-sequence / signature-transition (playbook) report (`GET /api/sequence[.md]`, `--sequence`)
+
+Several reports look at *which* signatures a source uses, but every one of them
+throws away **order** — the most operationally useful dimension. `--cooccur` pairs
+signatures that fire *together* (symmetric, unordered — it can't say A comes *before*
+B); `--killchain` buckets each alert into a *fixed* stage taxonomy; `--repertoire`
+counts the *breadth* of a source's signature set. None of them learn the directed
+edge **A → B**: "this source fired A and then, soon after, fired a different
+signature B".
+
+This report orders each source's alerts by time, collapses runs of the same
+signature (`A,A,A,B` is one `A→B` step), and emits an ordered transition on each
+signature change — **unless** the gap exceeds the session bound (default 6h), in
+which case the chain is cut so a day-old A is never chained onto B. Folding every
+source's transitions together yields a directed weighted graph of attacker behaviour:
+
+- 🚨 **Early-warning edges** — escalating transitions whose *destination* reaches
+  high/critical and whose conditional probability `P(B | A)` is high with real
+  support. The actionable gold: *"when you see A, the serious step B usually follows
+  within ~M — alert or auto-block on A."* The **median lead time** is the warning
+  window you have.
+- 🛤️ **Most-walked transitions** — the busiest A→B edges, with how many *distinct
+  sources* repeat each (an edge many independent attackers walk is a real playbook,
+  not one noisy host).
+- 🎯 **Predictable pivots** — per source-signature, the next-step distribution and its
+  Shannon entropy. Low entropy + high `P(top)` = a deterministic fork worth a rule.
+- 📖 **Recurring 3-step playbooks** — the most common ordered `A→B→C` sequences, the
+  closest thing to a reusable attack script.
+
+A one-word **verdict** (🤖 playbook-driven ≥50% · ▥ mixed · 🎲 opportunistic <25%)
+headlines the share of transition volume flowing along *dominant* (`P≥0.5`) edges —
+high means attackers behave like scripts and are easy to pre-empt; low means ad-hoc
+probing. Honest about its limits: sequences are built over source IPs **as the IPS
+logged them** (NAT chains unrelated actors; a rotating botnet splits one playbook
+across many IPs), `A→B` is correlation not causation, and steps only chain within the
+session gap, so every count is a lower bound. Pure offline math over the local alert
+history (plus blocklist / watchlist flags) — **no SSH, no Claude, no live gateway
+query**.
+
+- `GET /api/sequence?hours=N[&limit=20][&gap=6][&support=3]` → the structured model **plus** rendered Markdown (the at-a-glance scoreboard, early-warning edges, most-walked transitions, predictable pivots and recurring playbooks).
+- `GET /api/sequence.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --sequence 168 [--limit 20] [--gap 6] [--support 3]` (or `npm run sequence`) → print the Markdown to stdout (defaults to a 7-day window so ordered transitions have enough events to chain).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent

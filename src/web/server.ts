@@ -120,6 +120,8 @@
  *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
  *   GET  /api/noise?hours=N         -> alert-noise / stream-redundancy report (repeated event tuples, compression ratio, de-dup / suppression candidates; model + Markdown)
  *   GET  /api/noise.md?hours=N      -> the same alert-noise report as a downloadable .md file
+ *   GET  /api/sequence?hours=N      -> attack-sequence / signature-transition report (ordered A→B playbooks, escalation early-warning edges, predictable pivots; model + Markdown)
+ *   GET  /api/sequence.md?hours=N   -> the same attack-sequence report as a downloadable .md file
  *   GET  /api/patterns?hours=N      -> attacker patterns-of-life / operating-hours report (bot-vs-human-shift clock fingerprint + timezone attribution; model + Markdown)
  *   GET  /api/patterns.md?hours=N   -> the same patterns-of-life report as a downloadable .md file
  *   GET  /api/offhours?hours=N      -> off-hours / defender coverage-gap report (staffed-vs-unattended attack pressure + serious detect-only exposure; model + Markdown)
@@ -239,6 +241,7 @@ import { buildConcentration, concentrationFilename } from "../analytics/concentr
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
+import { buildSequence, sequenceFilename } from "../analytics/sequence.ts";
 import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
 import { buildOffHours, offhoursFilename } from "../analytics/offhours.ts";
 import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
@@ -1884,6 +1887,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${noiseFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attack-sequence / signature-transition (ordered A→B playbooks) ---
+      if (method === "GET" && path === "/api/sequence") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const maxGapHours = Number(url.searchParams.get("gap")) || undefined;
+        const minSupport = Number(url.searchParams.get("support")) || undefined;
+        return send(res, 200, buildSequence(hours, { limit, maxGapHours, minSupport, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/sequence.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const maxGapHours = Number(url.searchParams.get("gap")) || undefined;
+        const minSupport = Number(url.searchParams.get("support")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildSequence(hours, { limit, maxGapHours, minSupport, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${sequenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
