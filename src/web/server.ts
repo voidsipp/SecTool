@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/portsig?hours=N       -> port-signature scanner-fingerprint report (which attacker toolkit each source's port-set betrays; model + Markdown)
+ *   GET  /api/portsig.md?hours=N    -> the same port-signature report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
  *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
  *   GET  /api/artifacts?hours=N     -> payload-artifact / embedded-IOC report (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads; model + Markdown)
@@ -223,6 +225,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
 import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
 import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
@@ -1423,6 +1426,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- port-signature scanner-fingerprint (which attacker toolkit each source's port-set betrays) ---
+      if (method === "GET" && path === "/api/portsig") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minMatch = Number(url.searchParams.get("minMatch")) || undefined;
+        return send(res, 200, buildPortSig(hours, { limit, minMatch, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/portsig.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minMatch = Number(url.searchParams.get("minMatch")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildPortSig(hours, { limit, minMatch, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${portSigFilename(now)}"`,
         });
         res.end(markdown);
         return;

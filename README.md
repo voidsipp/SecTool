@@ -974,6 +974,48 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 🔎 Port-signature scanner-fingerprint report (`GET /api/portsig[.md]`, `--portsig`)
+
+The scan-shape report classifies a probe by the *counts* of distinct hosts and
+ports; the port-exposure report ranks the single port under fire. Neither names
+the **intent** behind a port combination — yet a database raid
+(`3306·5432·1433·6379·27017`) and a web-stack scan (`80·443·8080·8443·8000`) look
+identical to a count. The *set* of destination ports a source touches is one of the
+most diagnostic things the IPS stream holds, because attacker toolkits have
+characteristic port signatures, and knowing *which* toolkit is probing changes the
+response:
+
+- **🧨 SMB/RDP lateral movement** — `445·139·135·3389·WinRM`: ransomware foothold / east-west movement.
+- **🗄️ Exposed-database raid** — `3306·5432·1433·6379·27017·9200·11211`: pull these off the edge **now**.
+- **🤖 IoT-botnet recruitment** — `23·2323·7547·ADB`: Mirai-class device sweep.
+- **🌐 Web-application recon**, **✉️ mail / relay probing**, **📞 VoIP toll-fraud**, **☁️ container / cloud-API probing**, **🕳️ open-proxy hunting**, **🔒 VPN/tunnel discovery**, **📡 UDP amplification vectors**, and more.
+
+For every source it recovers the set of distinct destination ports it probed (the
+same parser the port-exposure / scan-shape reports use) and matches it against a
+curated library of toolkit signatures, attributing the source to the toolkit it
+**best** matches (most signature ports hit, ties broken toward the tighter
+signature). A source that probed several ports matching no known toolkit is
+surfaced as a **novel combination** (possible new tooling); a single-port source is
+set aside as not fingerprintable. It flags **internal** hosts wearing an attacker
+fingerprint (a lateral-movement / compromise tell, not an inbound scan), the
+blocked-vs-passed split (a dangerous toolkit *let through* is the headline), and
+blocklist / watchlist / safelist membership. A companion **active-toolkits**
+roll-up ranks each toolkit by how many distinct sources are running it against you —
+the campaign view the per-source table can't give.
+
+Honest about its limits: attribution is a **heuristic** over port-sets that
+deliberately overlap (port 22 is in both lateral-movement and remote-admin) — a
+source is filed under its *best* match and the matched ports are always shown so the
+call can be second-guessed; ports are **re-parsed, not stored**, so a source's
+port-set is a lower bound; these are IPS **detections**, not full flows, so a
+surgical single-service tool can read as not-fingerprintable. Pure offline math over
+the local alert history (plus blocklist / watchlist / safelist membership) — **no
+SSH, no Claude, no live gateway query**.
+
+- `GET /api/portsig?hours=N[&limit=20][&minMatch=2]` → the structured model **plus** rendered Markdown (active-toolkits roll-up, per-source fingerprint table, novel-combination table).
+- `GET /api/portsig.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --portsig 168 [--limit 20] [--min-match 2]` (or `npm run portsig`) → print the Markdown to stdout (defaults to a 7-day window so a slow toolkit has time to reveal its full port-set).
+
 ## 🔌 Source-port fingerprint / tooling-artifact report (`GET /api/srcports[.md]`, `--srcports`)
 
 Every other report pivots on the *destination* side of the flow — which host,

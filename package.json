@@ -47,6 +47,7 @@
     "recurrence": "node src/index.ts --recurrence 168",
     "ports": "node src/index.ts --ports 168",
     "scan": "node src/index.ts --scan 168",
+    "portsig": "node src/index.ts --portsig 168",
     "cotarget": "node src/index.ts --cotarget 168",
     "artifacts": "node src/index.ts --artifacts 168",
     "services": "node src/index.ts --services 168",
