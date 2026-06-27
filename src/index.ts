@@ -53,6 +53,7 @@
  *   node src/index.ts --mttb 168      # offline detection-to-mitigation latency / Mean-Time-To-Block (how fast did we contain each attacker?) report (Markdown)
  *   node src/index.ts --safelist 168  # offline safelist / allowlist risk audit (is a vetted-benign IP still attacking? Markdown)
  *   node src/index.ts --blockplan 168 # offline block-recommendation / candidate-blocklist worklist (which sources to block next, ranked by preventable impact; Markdown)
+ *   node src/index.ts --briefing 24   # offline consolidated morning security briefing / SITREP (KPIs + trend + action items + bundled detail reports; Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -123,6 +124,7 @@ import { buildRecidivism } from "./analytics/recidivism.ts";
 import { buildMttb } from "./analytics/mttb.ts";
 import { buildSafelistAudit } from "./analytics/safelist.ts";
 import { buildBlockPlan } from "./analytics/blockplan.ts";
+import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./analytics/briefing.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1349,6 +1351,51 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic, read-only: print the Markdown block-recommendation worklist.
       console.log(buildBlockPlan(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const briefingIdx = argv.findIndex((a) => a === "--briefing" || a.startsWith("--briefing="));
+    if (briefingIdx !== -1) {
+      const inline = argv[briefingIdx]!.split("=")[1];
+      const next = argv[briefingIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a day — this is the SITREP an operator opens in the morning.
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --briefing hours: "${raw}". Use e.g. --briefing 24`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each bundled detail report's tables.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--sections a,b,c` to choose which detail reports to bundle.
+      let sections: BriefingSectionKey[] | undefined;
+      const secIdx = argv.findIndex((a) => a === "--sections" || a.startsWith("--sections="));
+      if (secIdx !== -1) {
+        const v = argv[secIdx]!.split("=")[1] ?? argv[secIdx + 1];
+        if (v) {
+          const want = v.split(",").map((s) => s.trim()).filter(Boolean);
+          const valid = want.filter((s): s is BriefingSectionKey =>
+            (ALL_SECTION_KEYS as string[]).includes(s),
+          );
+          const unknown = want.filter((s) => !(ALL_SECTION_KEYS as string[]).includes(s));
+          if (unknown.length) {
+            log.error(
+              `Unknown --sections: ${unknown.join(", ")}. Valid: ${ALL_SECTION_KEYS.join(", ")}`,
+            );
+            process.exit(2);
+          }
+          sections = valid;
+        }
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic, read-only: print the consolidated morning briefing.
+      console.log(buildBriefing(hours, { limit, sections, nowMs: Date.now() }).markdown);
       return;
     }
     const bruteforceIdx = argv.findIndex((a) => a === "--bruteforce" || a.startsWith("--bruteforce="));
