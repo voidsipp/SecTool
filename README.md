@@ -1903,6 +1903,47 @@ worklist and `mitre` behaviour view. Pure offline math over the local alert hist
 - `GET /api/cwe.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --cwe 168 [--limit 30]` (or `npm run cwe`) → print the Markdown to stdout (defaults to a 7-day window so the weakness mix reflects more than one shift).
 
+## 🔟 OWASP Top 10 (2021) coverage report (`GET /api/owasp[.md]`, `--owasp`)
+
+The fourth leg of SecTool's standards-mapping suite, and the one written in the
+language a **board slide, a SOC 2 / PCI narrative, a pen-test report and a developer
+ticket** all share. The [MITRE ATT&CK report](#️-mitre-attck-coverage-report-get-apimitremd---mitre)
+maps alerts to adversary **behaviour**; the [CWE report](#-cwe-weakness-class-coverage-report-get-apicwemd---cwe)
+maps them to **software-weakness classes**. This one maps each alert to one of the
+ten **OWASP Top 10 (2021)** web-risk categories — `A01 Broken Access Control`,
+`A02 Cryptographic Failures`, `A03 Injection`, `A04 Insecure Design`,
+`A05 Security Misconfiguration`, `A06 Vulnerable and Outdated Components`,
+`A07 Identification and Authentication Failures`, `A08 Software and Data Integrity
+Failures`, `A09 Security Logging and Monitoring Failures`, `A10 SSRF` — so the IPS
+history drops straight into an OWASP-aligned risk register without a human
+re-mapping it by hand.
+
+The mapping is a first-match-wins heuristic over each alert's `classification` \
+`signature` \ `category` text and honours the **official 2021 CWE→category
+groupings**, which moved several familiar classes: XSS folded into **A03 Injection**,
+XXE into **A05 Security Misconfiguration**, deserialization into **A08 Integrity
+Failures**, and sensitive-information exposure into **A01 Broken Access Control**.
+For each observed category it rolls up alert volume and share, distinct attacker
+sources (and **🏠 internal** sources — an inside box exercising an OWASP attack is a
+pivot tell), distinct targets, a severity-weighted attention score, the
+blocked/passed/unknown **enforcement split** with a **🚩 control-gap** flag (severe
+but mostly *let through* — the virtual-patch candidates), the dominant signatures,
+and a durable per-category **remediation hint**.
+
+Honest about its limits, exactly like the CWE report: the mapping is a **heuristic**
+over free-text Suricata fields, not a curated rule→OWASP table; each alert maps to a
+**single** best-match category; recon, scanning, C2 and policy chatter exercise *no*
+OWASP web risk and land in the honest **unmapped** bucket (counted, never silently
+dropped), and **A09** has no network-observable signature so it never maps from IPS
+telemetry — its absence is expected. A category here means the risk was **targeted**,
+not that the asset is **vulnerable** — pair it with the `cve`, `cwe` and `mitre`
+reports. Pure in-memory math over the alert store — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/owasp?hours=N[&topSignatures=3]` → the structured model **plus** rendered Markdown (Top 10 coverage matrix + per-category detail).
+- `GET /api/owasp.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --owasp 168 [--top-signatures 3]` (or `npm run owasp`) → print the Markdown to stdout (defaults to a 7-day window so the category mix reflects more than one shift).
+
 ## 📊 Threat-concentration / Pareto-Gini report (`GET /api/concentration[.md]`, `--concentration`)
 
 Every other attacker report hands you a *leaderboard* — the worst source, the

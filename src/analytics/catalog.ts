@@ -229,6 +229,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "MITRE ATT&CK coverage", "Tactic/technique coverage mapped from the firing signatures."),
   entry("Threat type / signature", "cwe", "--cwe", "/api/cwe", 168,
     "CWE weakness-class coverage", "Which classes of software weakness (SQLi, traversal, overflow, broken auth…) the traffic targets — the AppSec/hardening view, orthogonal to cve (specific bugs) and mitre (adversary behaviour)."),
+  entry("Threat type / signature", "owasp", "--owasp", "/api/owasp", 168,
+    "OWASP Top 10 (2021) coverage", "Maps the alert stream onto the ten industry-standard web risk categories (A01 Broken Access Control … A10 SSRF) using the official 2021 CWE→category groupings — the compliance/AppSec-reporting language a board slide, SOC2/PCI narrative or dev ticket is written in, with per-category enforcement gap; the third taxonomy alongside cwe (weakness classes) and mitre (adversary behaviour)."),
   entry("Threat type / signature", "killchain", "--killchain", "/api/killchain", 168,
     "Kill-chain stages", "Distribution of activity across attack stages."),
   entry("Threat type / signature", "cooccur", "--cooccur", "/api/cooccur", 168,

@@ -53,6 +53,7 @@
  *   node src/index.ts --dwell 168     # offline source dwell-time / engagement-session (sustained camp vs transient probe) report (Markdown)
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
  *   node src/index.ts --cwe 168       # offline CWE weakness-class coverage (which software-weakness classes are being probed/exploited; SQLi/traversal/overflow/auth…) report (Markdown)
+ *   node src/index.ts --owasp 168     # offline OWASP Top 10 (2021) coverage (which industry-standard web risk categories are probed/exploited; A01-A10) report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
  *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
@@ -152,6 +153,7 @@ import { buildBurstiness } from "./analytics/burstiness.ts";
 import { buildConvergence } from "./analytics/convergence.ts";
 import { buildMitre } from "./analytics/mitre.ts";
 import { buildCwe } from "./analytics/cwe.ts";
+import { buildOwasp } from "./analytics/owasp.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildMomentum } from "./analytics/momentum.ts";
 import { buildDwell } from "./analytics/dwell.ts";
@@ -2187,6 +2189,32 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown CWE weakness-class report to stdout.
       console.log(buildCwe(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // OWASP Top 10 (2021) coverage — which industry-standard web risk categories are probed.
+    const owaspIdx = argv.findIndex((a) => a === "--owasp" || a.startsWith("--owasp="));
+    if (owaspIdx !== -1) {
+      const inline = argv[owaspIdx]!.split("=")[1];
+      const next = argv[owaspIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the category mix reflects more than one shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --owasp hours: "${raw}". Use e.g. --owasp 168`);
+        process.exit(2);
+      }
+      // Optional `--top-signatures N` to cap the dominant-signature list per category.
+      let topSignatures: number | undefined;
+      const tsIdx = argv.findIndex((a) => a === "--top-signatures" || a.startsWith("--top-signatures="));
+      if (tsIdx !== -1) {
+        const v = argv[tsIdx]!.split("=")[1] ?? argv[tsIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) topSignatures = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown OWASP Top 10 report to stdout.
+      console.log(buildOwasp(hours, { topSignatures, nowMs: Date.now() }).markdown);
       return;
     }
     const concentrationIdx = argv.findIndex(
