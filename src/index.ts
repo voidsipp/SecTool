@@ -40,6 +40,7 @@
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
+ *   node src/index.ts --artifacts 168 # offline payload-artifact / embedded-IOC (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
  *   node src/index.ts --srcports 168  # offline source-port fingerprint / tooling-artifact (fixed-port tool vs ephemeral stack; shared-port botnet correlation) report (Markdown)
  *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
@@ -117,6 +118,7 @@ import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
+import { buildArtifacts } from "./analytics/artifacts.ts";
 import { buildSrcPort } from "./analytics/srcport.ts";
 import { buildServices } from "./analytics/services.ts";
 import { buildAudience } from "./analytics/audience.ts";
@@ -1638,6 +1640,41 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown co-targeting report to stdout.
       console.log(buildCoTarget(hours, { limit, assetLimit: limit, minShared, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const artifactsIdx = argv.findIndex(
+      (a) => a === "--artifacts" || a.startsWith("--artifacts=") || a === "--ioc-artifacts" || a.startsWith("--ioc-artifacts="),
+    );
+    if (artifactsIdx !== -1) {
+      const inline = argv[artifactsIdx]!.split("=")[1];
+      const next = argv[artifactsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so slow-trickle indicators have time to accumulate.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --artifacts hours: "${raw}". Use e.g. --artifacts 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each per-kind table.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-count N` to drop one-off artifacts before listing.
+      let minCount: number | undefined;
+      const mcIdx = argv.findIndex((a) => a === "--min-count" || a.startsWith("--min-count="));
+      if (mcIdx !== -1) {
+        const v = argv[mcIdx]!.split("=")[1] ?? argv[mcIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minCount = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown payload-artifact report to stdout.
+      console.log(buildArtifacts(hours, { limit, minCount, nowMs: Date.now() }).markdown);
       return;
     }
     const momentumIdx = argv.findIndex((a) => a === "--momentum" || a.startsWith("--momentum="));
