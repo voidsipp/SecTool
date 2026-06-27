@@ -980,6 +980,54 @@ watchlist / safelist membership) — **no SSH, no Claude, no live gateway query*
 - `GET /api/repertoire.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --repertoire 168 [--limit 20] [--min-alerts 2]` (or `npm run repertoire`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow operator has time to reveal breadth).
 
+## ⚔️ MITRE ATT&CK coverage report (`GET /api/mitre[.md]`, `--mitre`)
+
+Every other report describes the threat in *SecTool's own* vocabulary — sources,
+hosts, signatures, kill-chain stages. This one re-expresses the same alert
+history in the framework your SOC, your SIEM, and your compliance auditor already
+speak: **MITRE ATT&CK**. The closest neighbour is the
+[kill-chain report](#-kill-chain--attack-stage-report-get-apikillchainmd---killchain),
+but the two are complementary, not redundant — the kill chain maps each alert to
+one of **five ordered Lockheed-Martin stages** and watches a single host *progress*
+through them; this report maps each alert to one of the **fourteen ATT&CK
+Enterprise tactics** and a specific **technique ID** (T-code), producing the
+industry-standard, ATT&CK-Navigator-shaped **coverage matrix** that drops straight
+into a threat-coverage review or a detection-gap assessment. ATT&CK's tactic set
+is far finer than the kill chain's (it separates Credential Access, Discovery,
+Lateral Movement, Defense Evasion, Impact … each of which the kill chain lumps
+into a single bucket).
+
+Each stored alert is mapped to **one** ATT&CK technique by a first-match-wins
+heuristic over its `classification` / `signature` / `category` text, then rolled
+up two ways:
+
+- **Tactic coverage** — per ATT&CK tactic (in canonical order, observed cells
+  only): distinct techniques fired, alert volume and share, distinct attacker
+  sources and internal hosts, severity ceiling, blocked-vs-detected split, the
+  busiest technique, and an ASCII coverage bar.
+- **Per-technique detail** — every observed technique ranked by a
+  severity-weighted score (so a small but dangerous technique outranks a flood of
+  low-severity noise): ID + name + parent tactic, volume, distinct sources and
+  targets, severity ceiling, disposition split, the dominant signature, a **🏠
+  internal-source** flag (an inside host *sourcing* a technique is a
+  compromise / lateral-movement tell), and a **🚩 control-gap** flag for
+  medium-or-worse techniques mostly *detected, not blocked* — the ATT&CK cells to
+  verify enforcement on first.
+
+Honest about its limits: ATT&CK mapping is a **heuristic** over free-text Suricata
+fields, not a curated rule→technique table — a strong triage hint, not an authored
+mapping. To keep the coverage math clean each alert is attributed to a **single**
+best-match technique (a real ATT&CK mapping is often many-to-one), and everything
+that matches no rule lands in an honest **unmapped** bucket (counted, never
+silently dropped). These are IPS **detections**, not full telemetry — a technique
+used without tripping a signature is invisible, so coverage is a lower bound and an
+empty tactic means "not *alerted* on", not "did not happen". Pure offline math over
+the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/mitre?hours=N[&limit=30]` → the structured model **plus** rendered Markdown (tactic-coverage table + per-technique ranking).
+- `GET /api/mitre.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --mitre 168 [--limit 30]` (or `npm run mitre`) → print the Markdown to stdout (defaults to a 7-day window so the technique mix reflects more than one shift).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
