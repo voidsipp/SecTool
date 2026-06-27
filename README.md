@@ -688,6 +688,52 @@ trips a rule is invisible here. Pure offline math over the local alert history �
 - `GET /api/focus.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --focus 168 [--limit 8]` (or `npm run focus`) → print the Markdown to stdout (defaults to a 7-day window so the shape reflects more than one shift).
 
+## 🎯 Threat-potency / severity-density report (`GET /api/potency[.md]`, `--potency`)
+
+Almost every source ranking in SecTool sorts by **volume** (or volume-inflated
+magnitude), so the same chatty scanners top the list run after run — while the
+9-hit exploit chain that actually matters sinks below the fold. `--persist`,
+`--spread` and `--focus` rank by raw **count**; `--risk` ranks by **summed**
+severity-weight (the right lens for *total* damage, but a big enough flood of
+low-severity noise still out-totals a small lethal burst); `--heat` ranks by
+**recency**. None of them asks *how consequential the average alert from this
+source actually is.*
+
+This report flips the axis to **density** — the **mean risk weight per alert**,
+`Σ(severityWeight × dispositionFactor) ÷ alerts`, reusing the exact ladder and
+enforcement discount from `--risk` (`info 1 · low 3 · medium 9 · high 27 ·
+critical 81`; blocked ×0.2 / unknown ×0.7 / passed ×1.0). Density answers the
+triage question volume buries: *if I only get to look at one alert from this
+source, how bad is it likely to be?* Crossing density against volume sorts every
+source into four operationally distinct quadrants:
+
+- **🎯 Sniper** — high density, low volume. Quiet but deadly: few alerts, every
+  one matters. The find this report exists for — the source a volume ranking
+  *never* surfaces. Investigate by hand.
+- **🔴 Brawler** — high density *and* high volume. Loud **and** lethal: the
+  genuine heavy hitter. Block / escalate first.
+- **📢 Flood** — high volume, low density. Loud but harmless commodity
+  scan-noise inflating every other report. Safe to mute / auto-handle — *not*
+  worth a human's morning.
+- **· Background** — low on both. The long tail.
+
+The punch-line is the **% volume ↔ % weight gap** printed per quadrant: floods
+typically carry the bulk of your alert *volume* but a sliver of the *weight*,
+while snipers carry trivial volume but disproportionate weight — turning "that
+source is just noise" from a gut feeling into a number you can defend a mute rule
+with. Honest about its limits: density rewards small severe bursts, so sources
+below the `--min N` floor (default 3) are held out of the ranking and summarised
+separately as **thin-sample singletons** (a single passed critical scores density
+81 on n=1 — real, but statistically thin); the weights are the gateway's own
+severity/disposition heuristic (a mis-graded alert weighs wrong, same caveat as
+`--risk`); and blocked weight is **discounted ×0.2, not removed**, so the
+**Unmit.** column tells you how much actually got through. Pure offline math over
+the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/potency?hours=N[&limit=30][&min=3]` → the structured model **plus** rendered Markdown (the four-quadrant roll-up table and the density-ranked source table).
+- `GET /api/potency.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --potency 168 [--limit 30] [--min 3]` (or `npm run potency`) → print the Markdown to stdout (defaults to a 7-day window so a real population of sources can sort into quadrants).
+
 ## 🧱 Source-netblock / infrastructure report (`GET /api/netblocks[.md]`, `--netblocks`)
 
 Every other source report ranks or scores *individual* IPs, *pairs* of IPs, or
