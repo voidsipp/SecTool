@@ -76,6 +76,8 @@
  *   GET  /api/hygiene.md?hours=N    -> the same blocklist-hygiene report as a downloadable .md file
  *   GET  /api/recurrence?hours=N    -> recurrence / return-forecast report (predicts WHEN each repeat attacker is due back; model + Markdown)
  *   GET  /api/recurrence.md?hours=N -> the same return-forecast report as a downloadable .md file
+ *   GET  /api/ports?hours=N         -> service / port-exposure report (which destination port/service is attacked + which host exposes it; model + Markdown)
+ *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -163,6 +165,7 @@ import { buildCve, cveFilename } from "../analytics/cve.ts";
 import { buildClusters, clustersFilename } from "../analytics/cluster.ts";
 import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
+import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1279,6 +1282,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${recurrenceFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- service / port-exposure (which destination port/service is attacked) ---
+      if (method === "GET" && path === "/api/ports") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        return send(res, 200, buildPorts(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/ports.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const now = Date.now();
+        const { markdown } = buildPorts(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${portsFilename(now)}"`,
         });
         res.end(markdown);
         return;

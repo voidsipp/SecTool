@@ -45,6 +45,7 @@
     "cve": "node src/index.ts --cve 168",
     "hygiene": "node src/index.ts --hygiene 720",
     "recurrence": "node src/index.ts --recurrence 168",
+    "ports": "node src/index.ts --ports 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
