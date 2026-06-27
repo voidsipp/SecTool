@@ -265,6 +265,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Threat focus", "Pareto concentration: where to spend defensive effort first."),
   entry("Detection coverage", "concentration", "--concentration", "/api/concentration", 168,
     "Concentration (Gini)", "Distribution shape: block-a-handful-and-win vs diffuse storm."),
+  entry("Detection coverage", "drift", "--drift", "/api/drift", 168,
+    "Severity-mix drift", "Is the *average* alert getting nastier over time, independent of volume? Per-slice mean-severity trend (front-half vs back-half delta + least-squares slope) that surfaces the \"volume flat but the mix is escalating\" recon→exploitation signal a raw count hides — the temporal twin of risk (magnitude) and escalation (per-source)."),
 
   // --- Controls / enforcement -----------------------------------------------
   entry("Controls / enforcement", "efficacy", "--efficacy", "/api/efficacy", 168,
