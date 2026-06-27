@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/audience?hours=N      -> signature-audience / spray-vs-snipe report (background radiation vs targeted snipe per signature; model + Markdown)
+ *   GET  /api/audience.md?hours=N   -> the same signature-audience report as a downloadable .md file
  *   GET  /api/recidivism?hours=N    -> block-effectiveness / post-block recidivism audit (did the firewall block actually stop the traffic? clean vs stubborn vs leaking; model + Markdown)
  *   GET  /api/recidivism.md?hours=N -> the same block-effectiveness audit as a downloadable .md file
  *   GET  /api/mttb?hours=N          -> detection-to-mitigation latency / Mean-Time-To-Block report (how fast did we contain each attacker after first sighting? fast/moderate/slow; model + Markdown)
@@ -203,6 +205,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildAudience, audienceFilename } from "../analytics/audience.ts";
 import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts";
 import { buildBurstiness, burstinessFilename } from "../analytics/burstiness.ts";
 import { buildConvergence, convergenceFilename } from "../analytics/convergence.ts";
@@ -1393,6 +1396,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- signature-audience / spray-vs-snipe (background radiation vs targeted snipe per signature) ---
+      if (method === "GET" && path === "/api/audience") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const sourceThreshold = Number(url.searchParams.get("minSources")) || undefined;
+        const targetThreshold = Number(url.searchParams.get("minTargets")) || undefined;
+        return send(res, 200, buildAudience(hours, { limit, sourceThreshold, targetThreshold, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/audience.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const sourceThreshold = Number(url.searchParams.get("minSources")) || undefined;
+        const targetThreshold = Number(url.searchParams.get("minTargets")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildAudience(hours, { limit, sourceThreshold, targetThreshold, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${audienceFilename(now)}"`,
         });
         res.end(markdown);
         return;
