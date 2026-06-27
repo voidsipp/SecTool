@@ -76,6 +76,7 @@
  *   node src/index.ts --bogon 168     # offline bogon / special-use source-address audit (IANA RFC6890 spoofed/martian vs internal vs public; anti-spoofing & edge-filter gaps) report (Markdown)
  *   node src/index.ts --cloud 168     # offline cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts) report (Markdown)
  *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
+ *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -161,6 +162,7 @@ import { buildSafelistAudit } from "./analytics/safelist.ts";
 import { buildBlockPlan } from "./analytics/blockplan.ts";
 import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./analytics/briefing.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
+import { buildStix } from "./analytics/stix.ts";
 import { buildMetrics } from "./web/metrics.ts";
 import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
 import { buildRuleset } from "./analytics/ruleset.ts";
@@ -2525,6 +2527,46 @@ async function main(): Promise<void> {
       const model = buildIocExport(hours, { minSeverity, nowMs: Date.now() });
       const out = renderIoc(model, format);
       process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+      return;
+    }
+    // STIX 2.1 threat-intel bundle export (MISP / OpenCTI / TAXII).
+    const stixIdx = argv.findIndex((a) => a === "--stix" || a.startsWith("--stix="));
+    if (stixIdx !== -1) {
+      const inline = argv[stixIdx]!.split("=")[1];
+      const next = argv[stixIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --stix hours: "${raw}". Use e.g. --stix 168`);
+        process.exit(2);
+      }
+      // Optional `--format json|md` — json (the bundle) by default, md is the human review twin.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = (fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : "")
+        ?.trim()
+        .toLowerCase();
+      // Optional `--min-severity info|low|medium|high|critical` (default medium).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--limit N` cap on emitted indicators (highest confidence first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const includeSafe = args.has("--include-safe");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the STIX bundle JSON (or the Markdown review twin).
+      const model = buildStix(hours, { minSeverity, limit, includeSafe, nowMs: Date.now() });
+      if (fmtRaw === "md" || fmtRaw === "markdown") {
+        console.log(model.markdown);
+      } else {
+        process.stdout.write(model.json + "\n");
+      }
       return;
     }
     if (args.has("--web")) {

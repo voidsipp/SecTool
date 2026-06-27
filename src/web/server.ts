@@ -156,6 +156,9 @@
  *   GET  /metrics                   -> Prometheus / OpenMetrics scrape target (store saturation, last-alert age, severity/disposition/category splits, control-plane sizes, triage backlog)
  *   GET  /api/metrics               -> the same Prometheus exposition under the /api prefix
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
+ *   GET  /api/stix?hours=N          -> OASIS STIX 2.1 threat-intel bundle (deterministic UUIDv5 Indicator+Identity SDOs) for MISP/OpenCTI/TAXII
+ *   GET  /api/stix.json?hours=N     -> the same STIX bundle as a downloadable .json file
+ *   GET  /api/stix.md?hours=N       -> a human Markdown review twin of the STIX bundle
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -295,6 +298,7 @@ import {
   parseSeverityFloor,
   type IocFormat,
 } from "../analytics/iocExport.ts";
+import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildIntelReport, checkIntelIp } from "../analytics/intel.ts";
 import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } from "../analytics/search.ts";
 
@@ -2312,6 +2316,42 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-disposition": `attachment; filename="${iocFilename(now, format)}"`,
         });
         res.end(body);
+        return;
+      }
+
+      // --- STIX 2.1 threat-intel bundle export (MISP / OpenCTI / TAXII) ---
+      // ?hours=N · ?minSeverity=medium · ?limit=N · ?includeSafe=1
+      if (
+        method === "GET" &&
+        (path === "/api/stix" || path === "/api/stix.json" || path === "/api/stix.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const now = Date.now();
+        const model = buildStix(hours, { minSeverity, limit, includeSafe, nowMs: now });
+        if (path === "/api/stix.md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${stixFilename(now).replace(/\.json$/, ".md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        // Both /api/stix and /api/stix.json return the bundle itself (the deliverable);
+        // the .json variant adds a download disposition for "Save as…" convenience.
+        const headers: Record<string, string> = {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/stix.json") {
+          headers["content-disposition"] = `attachment; filename="${stixFilename(now)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.json);
         return;
       }
 

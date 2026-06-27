@@ -299,6 +299,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Triage SLA backlog", "Unactioned alerts aging past their triage target."),
   entry("Quality / AI / ops", "iocs", "--iocs", "/api/iocs", 168,
     "IOC export", "Threat-indicator export in firewall-ready formats (plain / json / csv).", false),
+  entry("Quality / AI / ops", "stix", "--stix", "/api/stix", 168,
+    "STIX 2.1 intel export", "OASIS STIX 2.1 bundle (Indicator + Identity SDOs with patterns, confidence and validity windows) for sharing into MISP / OpenCTI / a TAXII collection / any STIX-aware SIEM; deterministic UUIDv5 IDs keep re-published feeds idempotent. The interop sibling of iocs (SecTool-shaped) and fwrules (enforcement codegen)."),
   entry("Quality / AI / ops", "metrics", "--metrics", "/api/metrics", null,
     "Prometheus metrics", "OpenMetrics exposition of live state (also served at GET /metrics).", false),
 ];
