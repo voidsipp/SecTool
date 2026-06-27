@@ -140,6 +140,8 @@
  *   GET  /api/drift.md?hours=N      -> the same drift report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
+ *   GET  /api/dismissals?hours=N    -> dismissal audit (did a hidden alert deserve to be hidden, and did the dismissed threat keep firing / escalate afterward; model + Markdown)
+ *   GET  /api/dismissals.md?hours=N -> the same dismissal audit as a downloadable .md file
  *   GET  /api/suppaudit?hours=N     -> suppression-rule audit (which silence rules are effective / dead / shadowed / risky; model + Markdown)
  *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
  *   GET  /api/noise?hours=N         -> alert-noise / stream-redundancy report (repeated event tuples, compression ratio, de-dup / suppression candidates; model + Markdown)
@@ -295,6 +297,7 @@ import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
 import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
+import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildSequence, sequenceFilename } from "../analytics/sequence.ts";
@@ -2225,6 +2228,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cohortFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- dismissal audit (did I hide a serious alert, and did it keep firing?) ---
+      if (method === "GET" && path === "/api/dismissals") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        return send(res, 200, buildDismissals(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/dismissals.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildDismissals(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${dismissalsFilename(now)}"`,
         });
         res.end(markdown);
         return;
