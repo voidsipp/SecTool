@@ -82,6 +82,8 @@
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/recidivism?hours=N    -> block-effectiveness / post-block recidivism audit (did the firewall block actually stop the traffic? clean vs stubborn vs leaking; model + Markdown)
  *   GET  /api/recidivism.md?hours=N -> the same block-effectiveness audit as a downloadable .md file
+ *   GET  /api/safelist-audit?hours=N    -> safelist / allowlist risk audit (is a vetted-benign IP still attacking after vetting? dangerous/suspect/benign/dormant; model + Markdown)
+ *   GET  /api/safelist-audit.md?hours=N -> the same safelist risk audit as a downloadable .md file
  *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
  *   GET  /api/bruteforce.md?hours=N -> the same credential-attack report as a downloadable .md file
  *   GET  /api/repertoire?hours=N    -> attacker-repertoire / sophistication report (toolkit-operator vs one-trick probe per source; model + Markdown)
@@ -205,6 +207,7 @@ import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/su
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
 import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
+import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1385,6 +1388,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${recidivismFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- safelist / allowlist risk audit (is a vetted-benign IP still attacking after vetting?) ---
+      if (method === "GET" && path === "/api/safelist-audit") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 100;
+        return send(res, 200, buildSafelistAudit(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/safelist-audit.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 100;
+        const now = Date.now();
+        const { markdown } = buildSafelistAudit(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${safelistAuditFilename(now)}"`,
         });
         res.end(markdown);
         return;

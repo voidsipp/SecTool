@@ -972,6 +972,47 @@ no live gateway query**.
 - `GET /api/recidivism.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --recidivism 168 [--limit 30]` (or `npm run recidivism`) → print the Markdown to stdout (defaults to a 7-day window so a slow re-offender has time to show post-block activity).
 
+## 🔍 Safelist / allowlist risk audit (`GET /api/safelist-audit[.md]`, `--safelist`)
+
+Every other audit in SecTool points at the **deny side** of the controls —
+recidivism and hygiene at the blocklist, suppaudit at the suppression rules, noise
+at de-dup candidates. Nothing audits the **allow side**. The safelist (see
+`store/safelist.ts`) is your set of external IPs vetted as benign — a vendor CDN, a
+monitoring service, a sanctioned scanner. Marking an IP safe **removes it from
+host-risk scoring and shields it from any auto-blocking**: a silent, powerful trust
+grant. A safelisted address that later turns hostile is invisible to every
+risk-ranked report (its score is suppressed) and immune to reactive blocking — yet
+the IPS keeps *detecting* its traffic, because the safelist changes scoring, not
+ingestion. That detection stream is exactly the evidence this audit reads.
+
+For every safelist entry it folds the windowed alerts on that IP and — the axis no
+other report reads — splits them on the entry's **vetting timestamp** (`at`):
+`time < at` is **pre-safelist** context (often the noise the entry was created to
+silence), `time >= at` is the **post-safelist** signal that drives a verdict:
+
+- **🔴 dangerous** — post-safelist alerts at high/critical (or sustained medium):
+  the trust decision is demonstrably wrong. A vetted-benign IP is attacking you
+  while excused from scoring and shielded from blocking — the headline finding.
+- **🟠 suspect** — post-safelist alerts at medium, or a notable low/info volume:
+  the safelist is silencing something worth a glance.
+- **🟢 benign** — little or no post-safelist activity: the vetting still holds.
+- **· dormant** — no activity this window: a stale prune candidate.
+
+A **conflict** flag marks any IP that is *both* safelisted and blocklisted (a
+contradictory allow+deny curation), and the report tallies the medium-or-worse
+alerts the safelist hid from risk scoring — the blind spot the allowlist creates.
+
+Honest about its limits: the safelist suppresses *scoring*, not *ingestion*, so a
+"dangerous" verdict is a prompt to *look* (a real vendor can still trip a noisy
+rule), not an automatic un-safelist; matching is **exact-IP** (no CIDR); and the
+vetting time is not windowed, but post-vetting activity older than the look-back can
+be missed. Pure offline math over the local alert + safe / block / watch / triage
+stores — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/safelist-audit?hours=N[&limit=100]` → the structured model **plus** rendered Markdown (verdict-ranked entry table + dormant prune roll-up).
+- `GET /api/safelist-audit.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --safelist 168 [--limit 100]` (or `npm run safelist`) → print the Markdown to stdout (defaults to a 7-day window so a slow-turning vendor IP has time to reveal post-vetting activity).
+
 ## 🔑 Credential-attack / brute-force report (`GET /api/bruteforce[.md]`, `--bruteforce`)
 
 Every other report treats the alert stream *generically* — it ranks a source by
