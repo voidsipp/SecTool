@@ -50,6 +50,7 @@
     "repertoire": "node src/index.ts --repertoire 168",
     "dwell": "node src/index.ts --dwell 168",
     "mitre": "node src/index.ts --mitre 168",
+    "concentration": "node src/index.ts --concentration 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"

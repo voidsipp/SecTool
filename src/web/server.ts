@@ -84,6 +84,8 @@
  *   GET  /api/repertoire.md?hours=N -> the same repertoire report as a downloadable .md file
  *   GET  /api/dwell?hours=N         -> source dwell-time / engagement-session report (sustained camp vs transient probe per source; model + Markdown)
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
+ *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
+ *   GET  /api/concentration.md?hours=N -> the same concentration report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -178,6 +180,7 @@ import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildMitre, mitreFilename } from "../analytics/mitre.ts";
 import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
+import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1404,6 +1407,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${dwellFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) ---
+      if (method === "GET" && path === "/api/concentration") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const quickWinLimit = Number(url.searchParams.get("quickWins")) || undefined;
+        return send(res, 200, buildConcentration(hours, { limit, quickWinLimit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/concentration.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const quickWinLimit = Number(url.searchParams.get("quickWins")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildConcentration(hours, { limit, quickWinLimit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
         });
         res.end(markdown);
         return;

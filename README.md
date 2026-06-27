@@ -1079,6 +1079,49 @@ the local alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/mitre.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --mitre 168 [--limit 30]` (or `npm run mitre`) → print the Markdown to stdout (defaults to a 7-day window so the technique mix reflects more than one shift).
 
+## 📊 Threat-concentration / Pareto-Gini report (`GET /api/concentration[.md]`, `--concentration`)
+
+Every other attacker report hands you a *leaderboard* — the worst source, the
+noisiest signature, the most-hammered host. This one steps back and measures the
+**shape of the whole distribution**: the strategic number that decides *how* to
+respond before you touch any single entity. Ten thousand alerts from **three** IPs
+and ten thousand from **eight thousand** IPs read identically on every count- and
+rank-based report, yet they demand opposite playbooks — a tight blocklist that
+wins the day versus a botnet storm where no single block moves the needle and the
+answer is tuning, rate-limiting or geo/ASN policy. That difference lives in how
+*evenly* the volume is spread, which a leaderboard hides.
+
+The report measures concentration across **three orthogonal dimensions** —
+**sources** (attacker IPs), **signatures** (which rules fire) and **targets**
+(destination hosts) — and for each computes:
+
+- **Gini coefficient (0–1)** — the classic inequality measure. 0 = perfectly even
+  (every entity contributes the same volume); → 1 = one entity owns everything.
+- **Pareto top-shares** — what the top 1% / 5% / 10% / 20% of entities account for.
+- **Coverage breakpoints** — the inverse: how *few* entities cover 50% / 80% / 90%
+  / 95% of the volume (the directly actionable "9 sources = 80% of alerts").
+- A one-word **shape** — **🎯 concentrated** (block-and-win), **▥ mixed**, or
+  **🌫 diffuse** (tune / rate-limit / geo-policy, not blocklists).
+
+Because a shape verdict is only useful if you can act on it, the source dimension
+carries a **blocklist quick-wins** view: the heaviest *unblocked, external,
+non-safelisted* sources and the exact fraction of source-attributed alerts that
+blocking those few would remove — alongside how much the blocklist already absorbs.
+Internal hosts that surface as *source* heavy hitters are flagged (a compromise /
+misconfiguration tell, not an inbound attacker).
+
+Honest about its limits: concentration is measured on alert **counts**, not
+severity — a diffuse tail can still hide one concentrated critical actor, so the
+*shape* guides strategy, not triage. These are IPS **detections**: NAT / shared
+egress can collapse many real actors into one IP (over-stating concentration) and a
+rotating botnet can inflate the source count (under-stating it). A long look-back
+can hit the store's history cap and clip the tail. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/concentration?hours=N[&limit=15][&quickWins=10]` → the structured model **plus** rendered Markdown (the at-a-glance matrix, per-dimension Pareto/coverage detail and the quick-wins table).
+- `GET /api/concentration.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --concentration 168 [--limit 15] [--quick-wins 10]` (or `npm run concentration`) → print the Markdown to stdout (defaults to a 7-day window so the distribution shape reflects more than one shift).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
