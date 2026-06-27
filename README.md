@@ -2080,6 +2080,50 @@ query**.
 - `GET /api/forecast.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --forecast 336 [--horizon 24] [--recent 24]` (or `npm run forecast`) → print the Markdown to stdout (defaults to a 2-week baseline so each hour-of-day bucket has several samples, projecting the next 24h).
 
+## 🔇 Silence / dormancy (gone-quiet) report (`GET /api/silence[.md]`, `--silence`)
+
+Every other report surfaces what is *present and loud* — the biggest counts, the
+hottest risers, the freshest arrivals. None surfaces the opposite: an entity that
+was an established, recurring part of the alert stream and has now **fallen
+completely silent**. That absence carries two very different, equally actionable
+meanings, and a defender needs to know which:
+
+1. **Good news** — a source you blocked has actually stopped (the block is
+   working), a noisy campaign burned out, or a targeted asset was hardened /
+   decommissioned and no longer draws fire.
+2. **A blind spot** — a signature that fired like clockwork for days has gone
+   silent, which can mean the rule was disabled, an Emerging-Threats / Talos feed
+   lapsed, or the sensor simply stopped forwarding. A chronically-firing rule going
+   to zero is one of the few *silent* failure modes in a detection stack: nothing
+   errors, no alert fires, and **every other report quietly under-counts** because
+   the data stopped arriving.
+
+This report is the mirror image of `--novelty` (arrivals): it reports
+**departures**. The look-back window is split into an **established** period and a
+trailing **quiet-check** period of `--quiet H` (default a quarter of the window).
+An entity is **dormant** when it had **≥ `--min-count`** alerts (default 3) in the
+established period and **zero** in the quiet-check period. Dormant entities are
+ranked by how big a fixture they were, across the same three dimensions as
+`--heat` — **sources**, **signatures** and **targets** — and each carries its
+prior alert count, the number of **distinct days** it was active (a high count is
+what makes a silence *alarming* rather than routine), how long it has been **quiet
+for**, the worst severity seen, and — for IP rows — blocklist / watchlist /
+safelist / internal flags so "block worked" is cleanly separated from "lost
+visibility". A signature active on **≥ 3 distinct days** is flagged **chronic** —
+the headline detection-blind-spot tell when it goes fully silent.
+
+Honest about its limits: **silence is a lead, not a verdict** — zero recent alerts
+can mean a threat genuinely stopped *or* that you stopped seeing it; the report
+flags candidates for a human to confirm. "Established" only reaches as far back as
+the window and the alert store's history cap, so an entity quiet since before the
+window opened never appears. These are IPS **detections**, so a "silent source"
+may just be the same actor on a fresh IP. Pure offline math over the local alert
+history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/silence?hours=N[&quiet=42][&limit=15][&minCount=3]` → the structured model **plus** rendered Markdown (the at-a-glance dormancy matrix and per-dimension gone-quiet tables).
+- `GET /api/silence.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --silence 168 [--quiet 42] [--limit 15] [--min-count 3]` (or `npm run silence`) → print the Markdown to stdout (defaults to a 7-day window with the most recent quarter as the quiet-check period).
+
 ## 🔁 Attacker cohort-retention / churn report (`GET /api/cohort[.md]`, `--cohort`)
 
 This is **product-style retention analytics applied to attackers.** A growth team
