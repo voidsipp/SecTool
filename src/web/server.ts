@@ -101,6 +101,9 @@
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
  *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
+ *   GET  /api/graph?hours=N         -> attack-graph visualization (source→target topology; node/edge model + GraphViz DOT + Mermaid + Markdown)
+ *   GET  /api/graph.dot?hours=N     -> the same attack graph as a downloadable GraphViz .dot file
+ *   GET  /api/graph.md?hours=N      -> the same attack graph as a downloadable .md file (embedded Mermaid + legend + top-edges)
  *   GET  /api/artifacts?hours=N     -> payload-artifact / embedded-IOC report (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads; model + Markdown)
  *   GET  /api/artifacts.md?hours=N  -> the same payload-artifact report as a downloadable .md file
  *   GET  /api/catalog[?q=&category=] -> self-describing report catalog (every report's flag, npm script, API route, window + purpose; model + Markdown)
@@ -267,6 +270,7 @@ import {
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
+import { buildAttackGraph, graphFilename } from "../analytics/graph.ts";
 import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
 import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
@@ -1711,6 +1715,43 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${cotargetFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- attack-graph visualization (source→target topology as a node/edge model + GraphViz DOT + Mermaid) ---
+      if (method === "GET" && path === "/api/graph") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const maxNodes = Number(url.searchParams.get("maxNodes")) || undefined;
+        return send(
+          res,
+          200,
+          buildAttackGraph(hours, { maxSources: maxNodes, maxTargets: maxNodes, nowMs: Date.now() }),
+        );
+      }
+      if (method === "GET" && path === "/api/graph.dot") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const maxNodes = Number(url.searchParams.get("maxNodes")) || undefined;
+        const now = Date.now();
+        const { dot } = buildAttackGraph(hours, { maxSources: maxNodes, maxTargets: maxNodes, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/vnd.graphviz; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${graphFilename(now, "dot")}"`,
+        });
+        res.end(dot);
+        return;
+      }
+      if (method === "GET" && path === "/api/graph.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const maxNodes = Number(url.searchParams.get("maxNodes")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildAttackGraph(hours, { maxSources: maxNodes, maxTargets: maxNodes, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${graphFilename(now, "md")}"`,
         });
         res.end(markdown);
         return;

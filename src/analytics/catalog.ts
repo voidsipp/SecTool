@@ -201,6 +201,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Traffic direction", "Inbound vs outbound vs lateral exposure split."),
   entry("Target / exposure", "edges", "--edges", "/api/edges", 168,
     "Attack-edge graph", "Source→target edges and lateral-movement topology between hosts."),
+  entry("Target / exposure", "graph", "--graph", "/api/graph", 168,
+    "Attack-graph visualization", "Renders the source→target topology as a ready-to-paste GraphViz DOT diagram, a Mermaid flowchart and a JSON node/edge model (--format dot|mermaid|md|json) — the visual twin of the edges report for incident bridges, tickets and post-mortems."),
   entry("Target / exposure", "traffic", "--traffic", "/api/traffic", 168,
     "Traffic / top-talkers", "Volumetric NetFlow view (not the alert stream): heaviest hosts, top conversations, outbound fan-out / exfil tell and the destination-service mix."),
 
