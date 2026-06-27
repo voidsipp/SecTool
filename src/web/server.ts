@@ -92,6 +92,8 @@
  *   GET  /api/protocols.md?hours=N  -> the same protocol-mix report as a downloadable .md file
  *   GET  /api/bogon?hours=N         -> bogon / special-use source-address audit (IANA RFC6890 spoofed/martian vs internal vs public; anti-spoofing & edge-filter gaps; model + Markdown)
  *   GET  /api/bogon.md?hours=N      -> the same bogon audit report as a downloadable .md file
+ *   GET  /api/cloud?hours=N         -> cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts; model + Markdown)
+ *   GET  /api/cloud.md?hours=N      -> the same cloud-attribution report as a downloadable .md file
  *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
@@ -244,6 +246,7 @@ import { buildTraffic, trafficFilename } from "../analytics/traffic.ts";
 import { buildRuleset, rulesetFilename } from "../analytics/ruleset.ts";
 import { buildProtocols, protocolsFilename } from "../analytics/protocols.ts";
 import { buildBogon, bogonFilename } from "../analytics/bogon.ts";
+import { buildCloud, cloudFilename } from "../analytics/cloud.ts";
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
@@ -1561,6 +1564,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${bogonFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- cloud / hosting-origin attribution (match public source IPs to cloud/VPS/CDN providers) ---
+      if (method === "GET" && path === "/api/cloud") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        return send(res, 200, buildCloud(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/cloud.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const now = Date.now();
+        const { markdown } = buildCloud(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${cloudFilename(now)}"`,
         });
         res.end(markdown);
         return;

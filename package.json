@@ -80,6 +80,7 @@
     "ruleset": "node src/index.ts --ruleset 168",
     "protocols": "node src/index.ts --protocols 168",
     "bogon": "node src/index.ts --bogon 168",
+    "cloud": "node src/index.ts --cloud 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "metrics": "node src/index.ts --metrics",
     "catalog": "node src/index.ts --catalog",
