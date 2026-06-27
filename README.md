@@ -930,6 +930,56 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 🧠 Attacker repertoire / sophistication report (`GET /api/repertoire[.md]`, `--repertoire`)
+
+Almost every attacker-centric report ranks a source by *how much* it does:
+persistence and footprint reward longevity and volume, fan-out and scan-shape
+reward *reach across targets*, escalation rewards a rising *severity*. None of
+them rank a source by *how many different things it does*. Yet that breadth is
+the sharpest sophistication tell the IPS stream holds: a source that trips one
+classtype five hundred times is automated background noise, while a source that
+walks **reconnaissance → delivery → exploitation → command-and-control**,
+tripping a dozen distinct signatures across several threat classes, is a
+hands-on operator running a *toolkit* — far more dangerous at a fraction of the
+volume, and exactly what raw-count rankings bury.
+
+For every source it folds the windowed alerts and measures three orthogonal
+breadth axes: **stage breadth** (distinct kill-chain stages reached, mapped with
+the very same heuristic that powers the kill-chain report, plus the furthest
+stage), **class breadth** (distinct Suricata classifications, resolved exactly as
+the threat-mix report resolves them), and **technique breadth** (distinct
+signatures). From those it computes a 0–100 **sophistication score** — stage
+breadth weighted heaviest, then class & technique breadth, chain depth and worst
+severity, with **volume deliberately excluded** so a quiet many-method operator
+outranks a loud flood — and assigns a one-word tier:
+
+- **🎯 operator** — reaches **≥3 kill-chain stages**: a multi-stage intrusion in
+  motion, the highest-priority thing to act on.
+- **🧰 toolkit** — spans **2 stages** or **≥3 threat classes**: a varied attacker
+  worth a closer look.
+- **🔧 specialist** — one stage but **many signatures / classes**: one thing done
+  many ways (a dedicated brute-forcer, a vuln-specific exploiter).
+- **• probe** — minimal breadth: the long tail of one-trick scanners and noise.
+
+Each row carries a compact **stage strip** (①②③④⑤ lit for the stages reached),
+the blocked-vs-passed split (a sophisticated source whose traffic is *let
+through* is the worst case), worst severity, the top class / signature, and
+blocklist / watchlist / safelist membership. **Internal** sources with a wide
+repertoire are flagged — an internal box reaching multiple attack stages is a
+lateral-movement / compromise tell, not an inbound probe.
+
+Honest about its limits: **tier and stage are heuristics** (regex over
+classification + category + signature text; the raw distinct counts are always
+shown so the call can be second-guessed); breadth needs labels, so a source under
+unhelpful rule names can under-read as a "probe" (labelling coverage is
+reported); these are IPS **detections**, not full flows, so repertoire breadth is
+a lower bound. Pure offline math over the local alert history (plus blocklist /
+watchlist / safelist membership) — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/repertoire?hours=N[&limit=20][&minAlerts=2]` → the structured model **plus** rendered Markdown (per-source sophistication table with stage strips).
+- `GET /api/repertoire.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --repertoire 168 [--limit 20] [--min-alerts 2]` (or `npm run repertoire`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow operator has time to reveal breadth).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
