@@ -49,6 +49,7 @@
  *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
  *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
  *   node src/index.ts --convergence 168 # offline temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash-crowd) report (Markdown)
+ *   node src/index.ts --recidivism 168 # offline block-effectiveness / post-block recidivism (did the block actually stop the traffic?) audit (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -115,6 +116,7 @@ import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
 import { buildPatterns } from "./analytics/patterns.ts";
+import { buildRecidivism } from "./analytics/recidivism.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1226,6 +1228,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const recidivismIdx = argv.findIndex((a) => a === "--recidivism" || a.startsWith("--recidivism="));
+    if (recidivismIdx !== -1) {
+      const inline = argv[recidivismIdx]!.split("=")[1];
+      const next = argv[recidivismIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a slow re-offender has time to show post-block activity.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --recidivism hours: "${raw}". Use e.g. --recidivism 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source and cleanup tables.
+      let limit = 30;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown block-effectiveness report.
+      console.log(buildRecidivism(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const bruteforceIdx = argv.findIndex((a) => a === "--bruteforce" || a.startsWith("--bruteforce="));
