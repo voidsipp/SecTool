@@ -154,6 +154,8 @@
  *   GET  /api/exposure.md?hours=N   -> the same exposure-breadth report as a downloadable .md file
  *   GET  /api/timeline?hours=N&bucket=H -> daily timeline ledger: one chronological row per UTC day (volume, delta, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (model + Markdown)
  *   GET  /api/timeline.md?hours=N&bucket=H -> the same timeline ledger as a downloadable .md file
+ *   GET  /api/vector?hours=N&limit=N -> entry-vector / first-contact: what fresh attackers try FIRST + the opener→escalation funnel (escalation rate, median warning lead, one-and-done, opened-hot; model + Markdown)
+ *   GET  /api/vector.md?hours=N&limit=N -> the same entry-vector report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/dismissals?hours=N    -> dismissal audit (did a hidden alert deserve to be hidden, and did the dismissed threat keep firing / escalate afterward; model + Markdown)
@@ -320,6 +322,7 @@ import { buildForecast, forecastFilename } from "../analytics/forecast.ts";
 import { buildSilence, silenceFilename } from "../analytics/silence.ts";
 import { buildExposure, exposureFilename } from "../analytics/exposure.ts";
 import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
+import { buildVector, vectorFilename } from "../analytics/vector.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
@@ -2385,6 +2388,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${timelineFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- entry-vector / first-contact (foot-in-the-door + opener→escalation funnel) ---
+      if (method === "GET" && path === "/api/vector") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        return send(res, 200, buildVector(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/vector.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildVector(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${vectorFilename(now)}"`,
         });
         res.end(markdown);
         return;

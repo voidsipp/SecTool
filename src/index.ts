@@ -63,6 +63,7 @@
  *   node src/index.ts --silence 168   # offline silence / dormancy (gone-quiet) report: which established fixtures stopped firing — block confirmed working vs detection blind spot (--quiet H) (Markdown)
  *   node src/index.ts --exposure 168  # offline target exposure-breadth / hardening-priority report: ranks hosts by VARIETY of attack (distinct service classes, signatures, threat classes, kill-chain stages, sources), not volume — systemic-hardening vs single-point-fix (--limit, --min-count) (Markdown)
  *   node src/index.ts --timeline 168  # offline daily timeline ledger: one chronological row per UTC day (volume, Δ, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (--bucket H) (Markdown)
+ *   node src/index.ts --vector 168    # offline entry-vector / first-contact (foot-in-the-door): what fresh attackers try FIRST + the opener→escalation funnel (esc rate, median warning lead, one-and-done, opened-hot) (--limit) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -175,6 +176,7 @@ import { buildForecast } from "./analytics/forecast.ts";
 import { buildSilence } from "./analytics/silence.ts";
 import { buildExposure } from "./analytics/exposure.ts";
 import { buildTimeline } from "./analytics/timeline.ts";
+import { buildVector } from "./analytics/vector.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
@@ -2576,6 +2578,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown timeline ledger to stdout.
       console.log(buildTimeline(hours, { limit, bucketHours, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const vectorIdx = argv.findIndex((a) => a === "--vector" || a.startsWith("--vector="));
+    if (vectorIdx !== -1) {
+      const inline = argv[vectorIdx]!.split("=")[1];
+      const next = argv[vectorIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so fresh-arrival openers have a real population to funnel.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --vector hours: "${raw}". Use e.g. --vector 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap how many (busiest) opener rows print.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown entry-vector report to stdout.
+      console.log(buildVector(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const cohortIdx = argv.findIndex((a) => a === "--cohort" || a.startsWith("--cohort="));
