@@ -37,6 +37,7 @@
  *   node src/index.ts --hygiene 720   # offline blocklist hygiene / stale-IOC (which blocks to keep vs prune) report (Markdown)
  *   node src/index.ts --recurrence 168 # offline recurrence / return-forecast (when each repeat attacker is due back) report (Markdown)
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
+ *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -91,6 +92,7 @@ import { buildCve } from "./analytics/cve.ts";
 import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
+import { buildScan } from "./analytics/scan.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1162,6 +1164,46 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown service / port-exposure report to stdout.
       console.log(buildPorts(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const scanIdx = argv.findIndex((a) => a === "--scan" || a.startsWith("--scan="));
+    if (scanIdx !== -1) {
+      const inline = argv[scanIdx]!.split("=")[1];
+      const next = argv[scanIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a slow, low-and-slow scanner has time to show breadth.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --scan hours: "${raw}". Use e.g. --scan 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source (and per-service) table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-hosts N` / `--min-ports N` to tune the shape thresholds.
+      let hostThreshold: number | undefined;
+      const mhIdx = argv.findIndex((a) => a === "--min-hosts" || a.startsWith("--min-hosts="));
+      if (mhIdx !== -1) {
+        const v = argv[mhIdx]!.split("=")[1] ?? argv[mhIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) hostThreshold = n;
+      }
+      let portThreshold: number | undefined;
+      const mpIdx = argv.findIndex((a) => a === "--min-ports" || a.startsWith("--min-ports="));
+      if (mpIdx !== -1) {
+        const v = argv[mpIdx]!.split("=")[1] ?? argv[mpIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) portThreshold = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown scan-shape report to stdout.
+      console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

@@ -198,7 +198,7 @@ const MS_PER_HOUR = 3_600_000;
  * databases, file shares, IoT) over the long tail of registered ports. Used for
  * the *display* label only — ranking never depends on a port being mapped.
  */
-const SERVICE_NAMES: Record<number, string> = {
+export const SERVICE_NAMES: Record<number, string> = {
   20: "FTP-data",
   21: "FTP",
   22: "SSH",
@@ -292,7 +292,7 @@ const SERVICE_NAMES: Record<number, string> = {
  * services. An attacked high-risk port that is *exposed* and *let through* is
  * the report's headline finding — close it at the firewall.
  */
-const HIGH_RISK_PORTS = new Set<number>([
+export const HIGH_RISK_PORTS = new Set<number>([
   22, 23, 135, 137, 138, 139, 389, 445, 593, 623, 636, 873, 1099, 1433, 1434,
   1521, 2049, 2222, 2375, 2376, 3306, 3389, 5432, 5555, 5601, 5900, 5984, 6379,
   6443, 7001, 9200, 9300, 10000, 11211, 27017, 27018,
