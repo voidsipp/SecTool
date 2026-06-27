@@ -930,6 +930,60 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 🔑 Credential-attack / brute-force report (`GET /api/bruteforce[.md]`, `--bruteforce`)
+
+Every other report treats the alert stream *generically* — it ranks a source by
+breadth, a signature by noise, a window by shape, the gateway by enforcement. The
+classification report rolls the whole taxonomy into a *mix*, but a percentage
+("12% credential access") never tells you ***which* login surface is under fire,
+how hard, from how many sources, and whether the guesses are reaching the
+service.** This report drills into the single attack class that matters most to
+almost every threat model — *someone trying to authenticate as someone they are
+not* — because the response is so cheap and so specific (MFA, lockout,
+rate-limit, restrict the source), and the **shape** of the attack tells you which
+to reach for:
+
+- **🔨 Brute-force / stuffing** — *many attempts concentrated on one (or few)
+  hosts*: a dictionary / credential-stuffing run against a single login. **Lock
+  the host down and rate-limit it.**
+- **💦 Password spray** — *a few attempts each, fanned across many hosts*: trading
+  depth for breadth to stay under per-account lockout. Per-host lockout never
+  trips; the tell is the **fan-out** and the fix is **org-wide** (MFA, disable
+  legacy auth, alert on the pattern).
+- **🕸 Distributed** — *one target, many sources*: a botnet sharing the guess work
+  to dodge IP blocks. The tell is the **source count** on a single victim —
+  **rate-limit the service**, not just the addresses.
+- **• Probe** — *low volume*: opportunistic noise, surfaced for completeness,
+  never ranked above a real run.
+
+Credential-bearing alerts are identified two complementary ways (and which fired
+is shown, for honesty about the heuristic): by **signature semantics** (the
+signature / classification / raw line matches a curated credential vocabulary —
+brute-force, login, auth, password, kerberos, hydra, "privilege gain", …, which
+also catches app-layer logins like a WordPress flood on an odd port) **or** by
+**target service** (the destination port — re-parsed from the raw line via the
+same parser the port-exposure report uses — is a known authentication service:
+SSH/22, RDP/3389, SMB/445, FTP/21, the database and mail-auth ports, …). The
+qualifying alerts are folded per **target login surface** (`dstIp` × service:
+where the guessing lands, how hard, from how many sources, and how much is *let
+through*) and per **attacking source** (classified into the four shapes above). A
+**passed-through** credential attempt is the headline — the gateway *detected* the
+login and let the packet reach the service, so the only thing between the attacker
+and the account is the password itself.
+
+Honest about its limits: these are IPS **detections, not authentication outcomes**
+— an attempt means a login tripped a rule, never that a password was *correct*, so
+the report measures pressure and exposure, not breach; identification is a
+**keyword / port heuristic** (the signature-confirmed vs. port-only split is always
+shown so a port-inflated set is visible); ports are **re-parsed, not stored**, with
+a text-inferred or "unknown" service fallback. Pure offline math over the local
+alert history (plus blocklist / watchlist / safelist membership) — **no SSH, no
+Claude, no live gateway query**.
+
+- `GET /api/bruteforce?hours=N[&limit=20][&minAttempts=3]` → the structured model **plus** rendered Markdown (login-surface table + attacking-source shape table).
+- `GET /api/bruteforce.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --bruteforce 168 [--limit 20] [--min-attempts 3]` (or `npm run bruteforce`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow guesser has time to reveal a run).
+
 ## 🧠 Attacker repertoire / sophistication report (`GET /api/repertoire[.md]`, `--repertoire`)
 
 Almost every attacker-centric report ranks a source by *how much* it does:
