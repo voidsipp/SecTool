@@ -2124,6 +2124,41 @@ history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/silence.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --silence 168 [--quiet 42] [--limit 15] [--min-count 3]` (or `npm run silence`) → print the Markdown to stdout (defaults to a 7-day window with the most recent quarter as the quiet-check period).
 
+## 🗓️ Daily timeline ledger (`GET /api/timeline[.md]`, `--timeline`)
+
+The most common morning question is the plainest one: *show me each day in order —
+was last night quiet, did Tuesday spike, when did the new campaign start?* No other
+report answers it directly. `--rhythm` folds the window onto a **cyclical**
+hour-of-day × day-of-week heat-map (it throws away *which* Tuesday); `--surge` hunts
+**sub-hour** bursts and skips the calm days; `--compare` diffs exactly **two**
+windows; `--forecast` projects **forward**. This report is the missing **absolute,
+gap-free, chronological** ledger.
+
+It slices the look-back window into fixed buckets — **UTC calendar days** by default,
+any width via `--bucket H` — and emits **one row per bucket in time order, including
+the empty ones** (so quiet days are visible, not silently skipped). Each row carries
+the numbers you flip through a calendar for: **total** alerts with a day-over-day
+**Δ** (▲/▼ %), the **serious** (high + critical) count and **worst severity**, the
+**unique sources / targets / signatures** seen (breadth, not just volume), the count
+of **new** sources appearing for the first time vs the retained history *before* the
+window (the same baseline `--novelty` uses), and the **busiest source**, **top
+signature** and **dominant category** that drove the day. Above the table sits a
+window-wide volume **sparkline** and headline call-outs: the busiest day, the worst
+day by serious volume, the biggest day-over-day jump (campaign onset), the biggest
+influx of new attackers, and the first-half → second-half **trend**.
+
+Honest about its limits: buckets are **UTC**, so activity near local midnight can
+fall either side of a boundary (use `--patterns` for attacker-timezone attribution);
+the **new-source** count is bounded by the retained store, so a long-quiet returning
+source can read as new; and the first and last buckets are usually **partial** (the
+window rarely starts/ends on a boundary) and flagged ⚠ so their totals are not
+compared to a full interior day. Pure offline math over the local alert history —
+**no SSH, no Claude, no live gateway query**.
+
+- `GET /api/timeline?hours=N[&bucket=24][&limit=60]` → the structured model **plus** rendered Markdown (the volume sparkline and the chronological day-by-day ledger table).
+- `GET /api/timeline.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --timeline 168 [--bucket 24] [--limit 60]` (or `npm run timeline`) → print the Markdown to stdout (defaults to a 7-day window of UTC-day buckets, showing the most recent 60 rows).
+
 ## 🔁 Attacker cohort-retention / churn report (`GET /api/cohort[.md]`, `--cohort`)
 
 This is **product-style retention analytics applied to attackers.** A growth team
