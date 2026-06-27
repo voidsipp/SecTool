@@ -253,6 +253,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Patterns of life", "Operating hours and timezone attribution: bot vs human shift."),
   entry("Temporal", "offhours", "--offhours", "/api/offhours", 168,
     "Off-hours coverage gap", "How much attack pressure — and serious detect-only exposure — lands while no one is on shift."),
+  entry("Temporal", "forecast", "--forecast", "/api/forecast", 336,
+    "Threat forecast / next-window projection", "The one *forward*-looking volume report: projects expected alert load (and the high/critical share) for the coming hours from the historical hour-of-day × day-of-week rhythm plus a recent-trend multiplier, with per-hour/per-day expectations, a ~90% Poisson interval, the peak hour and the next busy stretch (--horizon H, --recent H) — the staffing/coverage twin of rhythm (backward heat-map), surge (past spikes) and momentum (per-source slope)."),
 
   // --- Detection coverage ---------------------------------------------------
   entry("Detection coverage", "bruteforce", "--bruteforce", "/api/bruteforce", 168,

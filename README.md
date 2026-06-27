@@ -2035,6 +2035,51 @@ local alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/heat.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --heat 168 [--limit 15] [--half-life 24]` (or `npm run heat`) → print the Markdown to stdout (defaults to a 7-day window with a 24h half-life).
 
+## 🔮 Threat-forecast / next-window projection (`GET /api/forecast[.md]`, `--forecast`)
+
+Every temporal report in SecTool looks *backwards*: `--rhythm` is an hour-of-day ×
+day-of-week heat-map of when you *have been* busy, `--surge` finds where the volume
+*already* spiked, `--momentum` fits a per-source rate slope of who *has been*
+ramping up, and `--recurrence` forecasts a single *per-source return* ("IP X is due
+back"). None of them answer the question a shift lead asks before going off-rota:
+*what does the next 24 hours look like — roughly how many alerts, when's the peak,
+and how many will be high/critical?* This is the one **forward-looking projection
+of network-wide load**, built for staffing and coverage decisions.
+
+The method is a classic, fully-explainable time-series decomposition:
+
+- **Baseline rate** — alerts ÷ hours of history actually covered (alerts/hour);
+- **Diurnal seasonality** — a normalized multiplicative **hour-of-day factor** (24
+  buckets) and **day-of-week factor** (7 buckets); a factor of `1.8×` means "this
+  hour/day historically runs 80% busier than average". Share-based, so the number of
+  whole days in the window doesn't bias it;
+- **Recent-trend multiplier** — the most recent window's actual volume versus what
+  the seasonal baseline alone predicted for it, capturing "the network is running
+  hotter/cooler than its own rhythm *right now*" (a live campaign, or a lull),
+  clamped to a sane range.
+
+Each upcoming hour's expectation is
+`λ = overallRate × hourFactor[h] × dowFactor[d] × recentMultiplier`, carried with an
+**approximate 90% prediction interval** (the Poisson normal approximation
+`λ ± 1.645·√λ`). Those hourly λ's roll up into a **per-day** table, a **peak hour**,
+the **next busy stretch** (the first contiguous run above 1.5× the horizon mean) and
+an **expected severity split** (the historical mix applied to the projected total),
+so the high/critical load — the part that drives escalation staffing — is called out
+explicitly.
+
+Honest about its limits: it is a **planning baseline, not a promise** — it
+extrapolates the existing rhythm and trend and cannot see a *new* campaign that
+hasn't started, a holiday or a takedown. These are IPS **detections** (a forecast of
+sensor noise, not of real attacking), the 90% band is approximate (loose for very
+small λ), forecast skill decays the further out the horizon runs, and under ~2 days
+of history the seasonal factors rest on very few samples (the report says so). Pure
+offline math over the local alert history — **no SSH, no Claude, no live gateway
+query**.
+
+- `GET /api/forecast?hours=N[&horizon=24][&recent=24]` → the structured model **plus** rendered Markdown (the projection box, per-day and hour-by-hour tables, the daily-rhythm baseline and the expected-severity split).
+- `GET /api/forecast.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --forecast 336 [--horizon 24] [--recent 24]` (or `npm run forecast`) → print the Markdown to stdout (defaults to a 2-week baseline so each hour-of-day bucket has several samples, projecting the next 24h).
+
 ## 🔁 Attacker cohort-retention / churn report (`GET /api/cohort[.md]`, `--cohort`)
 
 This is **product-style retention analytics applied to attackers.** A growth team
