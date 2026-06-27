@@ -70,6 +70,8 @@
  *   GET  /api/targets.md?hours=N    -> the same target-exposure report as a downloadable .md file
  *   GET  /api/clusters?hours=N      -> coordinated-infrastructure / toolkit-cluster report (groups attacker IPs by shared signature fingerprint; model + Markdown)
  *   GET  /api/clusters.md?hours=N   -> the same cluster report as a downloadable .md file
+ *   GET  /api/hygiene?hours=N       -> blocklist hygiene / stale-IOC report (which blocks to keep vs prune; model + Markdown)
+ *   GET  /api/hygiene.md?hours=N    -> the same blocklist-hygiene report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -154,6 +156,7 @@ import { buildInsight, insightFilename } from "../analytics/insight.ts";
 import { buildEscalation, escalationFilename } from "../analytics/escalation.ts";
 import { buildTargets, targetsFilename } from "../analytics/targets.ts";
 import { buildClusters, clustersFilename } from "../analytics/cluster.ts";
+import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1201,6 +1204,27 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${clustersFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- blocklist hygiene / stale-IOC (which blocks to keep vs prune) ---
+      if (method === "GET" && path === "/api/hygiene") {
+        // Freshness window defaults to 30 days so "dormant" means really gone quiet.
+        const hours = Number(url.searchParams.get("hours")) || 720;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        return send(res, 200, buildHygiene(hours, { limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/hygiene.md") {
+        const hours = Number(url.searchParams.get("hours")) || 720;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const now = Date.now();
+        const { markdown } = buildHygiene(hours, { limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${hygieneFilename(now)}"`,
         });
         res.end(markdown);
         return;

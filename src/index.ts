@@ -33,6 +33,7 @@
  *   node src/index.ts --escalation 168 # offline severity-escalation / trajectory (rising-vs-falling) report (Markdown)
  *   node src/index.ts --targets 168   # offline target / victim-exposure (which of your assets is hit hardest) report (Markdown)
  *   node src/index.ts --clusters 168  # offline coordinated-infrastructure / toolkit-cluster (botnet correlation) report (Markdown)
+ *   node src/index.ts --hygiene 720   # offline blocklist hygiene / stale-IOC (which blocks to keep vs prune) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -83,6 +84,7 @@ import { buildInsight } from "./analytics/insight.ts";
 import { buildEscalation } from "./analytics/escalation.ts";
 import { buildTargets } from "./analytics/targets.ts";
 import { buildClusters } from "./analytics/cluster.ts";
+import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1037,6 +1039,32 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown coordinated-infrastructure report to stdout.
       console.log(buildClusters(hours, { limit, minJaccard, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const hygieneIdx = argv.findIndex((a) => a === "--hygiene" || a.startsWith("--hygiene="));
+    if (hygieneIdx !== -1) {
+      const inline = argv[hygieneIdx]!.split("=")[1];
+      const next = argv[hygieneIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to 30 days: a block needs a long quiet stretch before "dormant"
+      // means the threat really moved on rather than a lull between bursts.
+      const hours = raw ? Number(raw) : 720;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --hygiene hours: "${raw}". Use e.g. --hygiene 720`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the active / dormant / unverified tables.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown blocklist-hygiene report to stdout.
+      console.log(buildHygiene(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
