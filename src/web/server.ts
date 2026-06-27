@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
+ *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
  *   GET  /api/catalog[?q=&category=] -> self-describing report catalog (every report's flag, npm script, API route, window + purpose; model + Markdown)
  *   GET  /api/catalog.md            -> the same report catalog as a downloadable .md file
  *   GET  /api/srcports?hours=N      -> source-port fingerprint / tooling-artifact report (fixed-port tool vs ephemeral stack + shared-port botnet correlation; model + Markdown)
@@ -213,6 +215,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
 import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
 import { buildServices, servicesFilename } from "../analytics/services.ts";
@@ -1408,6 +1411,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- co-targeting / shared-attacker affinity (which internal assets share adversaries) ---
+      if (method === "GET" && path === "/api/cotarget") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minShared = Number(url.searchParams.get("minShared")) || undefined;
+        return send(res, 200, buildCoTarget(hours, { limit, assetLimit: limit, minShared, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/cotarget.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minShared = Number(url.searchParams.get("minShared")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildCoTarget(hours, { limit, assetLimit: limit, minShared, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${cotargetFilename(now)}"`,
         });
         res.end(markdown);
         return;

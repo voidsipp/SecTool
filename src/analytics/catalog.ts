@@ -187,6 +187,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Attack surface by service class", "Remote-access / database / file-share / ICS-IoT crown-jewel surface."),
   entry("Target / exposure", "scan", "--scan", "/api/scan", 168,
     "Reconnaissance shape", "Per-source probe shape: horizontal vs vertical vs sweep vs targeted."),
+  entry("Target / exposure", "cotarget", "--cotarget", "/api/cotarget", 168,
+    "Co-targeting affinity", "Which of your hosts share the same adversaries — shared-fate / blast-radius clusters."),
   entry("Target / exposure", "direction", "--direction", "/api/direction", 168,
     "Traffic direction", "Inbound vs outbound vs lateral exposure split."),
   entry("Target / exposure", "edges", "--edges", "/api/edges", 168,

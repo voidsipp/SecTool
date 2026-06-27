@@ -39,6 +39,7 @@
  *   node src/index.ts --recurrence 168 # offline recurrence / return-forecast (when each repeat attacker is due back) report (Markdown)
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
+ *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
  *   node src/index.ts --srcports 168  # offline source-port fingerprint / tooling-artifact (fixed-port tool vs ephemeral stack; shared-port botnet correlation) report (Markdown)
  *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
@@ -115,6 +116,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildCoTarget } from "./analytics/cotarget.ts";
 import { buildSrcPort } from "./analytics/srcport.ts";
 import { buildServices } from "./analytics/services.ts";
 import { buildAudience } from "./analytics/audience.ts";
@@ -1601,6 +1603,41 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown repertoire report to stdout.
       console.log(buildRepertoire(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const cotargetIdx = argv.findIndex(
+      (a) => a === "--cotarget" || a.startsWith("--cotarget=") || a === "--coassets" || a.startsWith("--coassets="),
+    );
+    if (cotargetIdx !== -1) {
+      const inline = argv[cotargetIdx]!.split("=")[1];
+      const next = argv[cotargetIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so slow, selective adversaries have time to reveal overlap.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --cotarget hours: "${raw}". Use e.g. --cotarget 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the pair (and per-asset) tables.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-shared N` to tune how many shared attackers a pair needs.
+      let minShared: number | undefined;
+      const msIdx = argv.findIndex((a) => a === "--min-shared" || a.startsWith("--min-shared="));
+      if (msIdx !== -1) {
+        const v = argv[msIdx]!.split("=")[1] ?? argv[msIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minShared = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown co-targeting report to stdout.
+      console.log(buildCoTarget(hours, { limit, assetLimit: limit, minShared, nowMs: Date.now() }).markdown);
       return;
     }
     const momentumIdx = argv.findIndex((a) => a === "--momentum" || a.startsWith("--momentum="));
