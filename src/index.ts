@@ -75,6 +75,7 @@
  *   node src/index.ts --protocols 168 # offline protocol-mix / transport (TCP/UDP/ICMP) & application-layer breakdown (re-parsed from raw; tunnelling & amplification tells) report (Markdown)
  *   node src/index.ts --bogon 168     # offline bogon / special-use source-address audit (IANA RFC6890 spoofed/martian vs internal vs public; anti-spoofing & edge-filter gaps) report (Markdown)
  *   node src/index.ts --cloud 168     # offline cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts) report (Markdown)
+ *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -164,6 +165,7 @@ import { buildMetrics } from "./web/metrics.ts";
 import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
 import { buildRuleset } from "./analytics/ruleset.ts";
 import { buildProtocols } from "./analytics/protocols.ts";
+import { buildFwRules, parseFwDialect, renderFwScript } from "./analytics/fwrules.ts";
 import { buildBogon } from "./analytics/bogon.ts";
 import { buildCloud } from "./analytics/cloud.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
@@ -1405,6 +1407,33 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown protocol-mix report to stdout.
       console.log(buildProtocols(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Firewall-rule export — render the enforced blocklist into deployable firewall config.
+    const fwrulesIdx = argv.findIndex((a) => a === "--fwrules" || a.startsWith("--fwrules="));
+    if (fwrulesIdx !== -1) {
+      // Optional `--dialect X` prints just that platform's script (pipe to a file);
+      // omitting it prints the full multi-dialect Markdown document.
+      const dialectIdx = argv.findIndex((a) => a === "--dialect" || a.startsWith("--dialect="));
+      const fwNext = argv[fwrulesIdx + 1];
+      const dialectRaw =
+        argv[fwrulesIdx]!.split("=")[1] ??
+        (dialectIdx !== -1 ? argv[dialectIdx]!.split("=")[1] ?? argv[dialectIdx + 1] : undefined) ??
+        (fwNext && !fwNext.startsWith("--") ? fwNext : undefined);
+      // Optional `--set NAME` overrides the generated set/table/group name.
+      let setName: string | undefined;
+      const setIdx = argv.findIndex((a) => a === "--set" || a.startsWith("--set="));
+      if (setIdx !== -1) setName = argv[setIdx]!.split("=")[1] ?? argv[setIdx + 1];
+      // Opt-in to emitting safelisted IPs (excluded by default for safety).
+      const includeSafe = argv.includes("--include-safe");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      const model = buildFwRules({ setName, includeSafe, nowMs: Date.now() });
+      if (dialectRaw && !dialectRaw.startsWith("--")) {
+        console.log(renderFwScript(model, parseFwDialect(dialectRaw)));
+      } else {
+        console.log(model.markdown);
+      }
       return;
     }
     // Bogon / special-use source-address audit — IANA RFC6890 spoofed vs internal vs public.

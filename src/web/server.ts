@@ -94,6 +94,9 @@
  *   GET  /api/bogon.md?hours=N      -> the same bogon audit report as a downloadable .md file
  *   GET  /api/cloud?hours=N         -> cloud / hosting-origin attribution (matches public source IPs to AWS/GCP/Azure/DigitalOcean/OVH/… ranges; per-provider abuse contacts; model + Markdown)
  *   GET  /api/cloud.md?hours=N      -> the same cloud-attribution report as a downloadable .md file
+ *   GET  /api/fwrules               -> firewall-rule export: the enforced blocklist rendered into 10 firewall dialects (ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows/plain; model + Markdown)
+ *   GET  /api/fwrules.md            -> the same firewall-rule export as a downloadable .md file
+ *   GET  /api/fwrules.txt?dialect=X -> just one dialect's ready-to-apply script as text/plain (curl-and-pipe)
  *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
@@ -247,6 +250,12 @@ import { buildRuleset, rulesetFilename } from "../analytics/ruleset.ts";
 import { buildProtocols, protocolsFilename } from "../analytics/protocols.ts";
 import { buildBogon, bogonFilename } from "../analytics/bogon.ts";
 import { buildCloud, cloudFilename } from "../analytics/cloud.ts";
+import {
+  buildFwRules,
+  fwRulesFilename,
+  parseFwDialect,
+  renderFwScript,
+} from "../analytics/fwrules.ts";
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
@@ -1586,6 +1595,40 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-disposition": `attachment; filename="${cloudFilename(now)}"`,
         });
         res.end(markdown);
+        return;
+      }
+
+      // --- firewall-rule export (enforced blocklist -> deployable config in 10 dialects) ---
+      if (method === "GET" && path === "/api/fwrules") {
+        const setName = url.searchParams.get("set") ?? undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        return send(res, 200, buildFwRules({ setName, includeSafe, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/fwrules.md") {
+        const setName = url.searchParams.get("set") ?? undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const now = Date.now();
+        const { markdown } = buildFwRules({ setName, includeSafe, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${fwRulesFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+      if (method === "GET" && path === "/api/fwrules.txt") {
+        const setName = url.searchParams.get("set") ?? undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const dialect = parseFwDialect(url.searchParams.get("dialect"));
+        const now = Date.now();
+        const model = buildFwRules({ setName, includeSafe, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${fwRulesFilename(now, dialect)}"`,
+        });
+        res.end(renderFwScript(model, dialect));
         return;
       }
 
