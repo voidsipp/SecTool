@@ -39,6 +39,7 @@
  *   node src/index.ts --recurrence 168 # offline recurrence / return-forecast (when each repeat attacker is due back) report (Markdown)
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
+ *   node src/index.ts --srcports 168  # offline source-port fingerprint / tooling-artifact (fixed-port tool vs ephemeral stack; shared-port botnet correlation) report (Markdown)
  *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
  *   node src/index.ts --momentum 168  # offline attack-momentum / rate-trend (surging-vs-spent: who is ramping up right now) report (Markdown)
  *   node src/index.ts --audience 168  # offline signature-audience / spray-vs-snipe (background radiation vs targeted snipe per signature) report (Markdown)
@@ -112,6 +113,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildSrcPort } from "./analytics/srcport.ts";
 import { buildAudience } from "./analytics/audience.ts";
 import { buildBruteforce } from "./analytics/bruteforce.ts";
 import { buildBurstiness } from "./analytics/burstiness.ts";
@@ -1250,6 +1252,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const srcportIdx = argv.findIndex((a) => a === "--srcports" || a.startsWith("--srcports="));
+    if (srcportIdx !== -1) {
+      const inline = argv[srcportIdx]!.split("=")[1];
+      const next = argv[srcportIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a slow tool has time to reveal its fixed-port habit.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --srcports hours: "${raw}". Use e.g. --srcports 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source table and the shared roll-up.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-alerts N` to tune the volume gate before a verdict is drawn.
+      let minAlerts: number | undefined;
+      const maIdx = argv.findIndex((a) => a === "--min-alerts" || a.startsWith("--min-alerts="));
+      if (maIdx !== -1) {
+        const v = argv[maIdx]!.split("=")[1] ?? argv[maIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown source-port fingerprint report.
+      console.log(buildSrcPort(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
       return;
     }
     const audienceIdx = argv.findIndex((a) => a === "--audience" || a.startsWith("--audience="));
