@@ -90,6 +90,8 @@
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/suppaudit?hours=N     -> suppression-rule audit (which silence rules are effective / dead / shadowed / risky; model + Markdown)
  *   GET  /api/suppaudit.md?hours=N  -> the same suppression-rule audit as a downloadable .md file
+ *   GET  /api/noise?hours=N         -> alert-noise / stream-redundancy report (repeated event tuples, compression ratio, de-dup / suppression candidates; model + Markdown)
+ *   GET  /api/noise.md?hours=N      -> the same alert-noise report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
@@ -187,6 +189,7 @@ import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
+import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1479,6 +1482,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${suppressionAuditFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- alert-noise / stream-redundancy (repeated event tuples, de-dup) ---
+      if (method === "GET" && path === "/api/noise") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const repeatThreshold = Number(url.searchParams.get("repeat")) || undefined;
+        return send(res, 200, buildNoise(hours, { limit, repeatThreshold, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/noise.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const repeatThreshold = Number(url.searchParams.get("repeat")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildNoise(hours, { limit, repeatThreshold, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${noiseFilename(now)}"`,
         });
         res.end(markdown);
         return;

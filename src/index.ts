@@ -44,6 +44,7 @@
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
+ *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -105,6 +106,7 @@ import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
+import { buildNoise } from "./analytics/noise.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
@@ -1418,6 +1420,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown suppression-audit report to stdout.
       console.log(buildSuppressionAudit(hours, { limit, graceHours, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const noiseIdx = argv.findIndex((a) => a === "--noise" || a.startsWith("--noise="));
+    if (noiseIdx !== -1) {
+      const inline = argv[noiseIdx]!.split("=")[1];
+      const next = argv[noiseIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so repetition is measured over more than a single shift.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --noise hours: "${raw}". Use e.g. --noise 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the noise-driver table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--repeat N`: repeat count at/above which a tuple is a suppression candidate.
+      let repeatThreshold: number | undefined;
+      const repeatIdx = argv.findIndex((a) => a === "--repeat" || a.startsWith("--repeat="));
+      if (repeatIdx !== -1) {
+        const v = argv[repeatIdx]!.split("=")[1] ?? argv[repeatIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n >= 2) repeatThreshold = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown alert-noise report to stdout.
+      console.log(buildNoise(hours, { limit, repeatThreshold, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));

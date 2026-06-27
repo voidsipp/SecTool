@@ -1215,6 +1215,45 @@ human look. Pure offline math over the local alert history + suppression store �
 - `GET /api/suppaudit.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --suppaudit 168 [--limit 100] [--grace 24]` (or `npm run suppaudit`) → print the Markdown to stdout (defaults to a 7-day window so dormant-but-proven rules are judged on more than one shift).
 
+## 🔁 Alert-noise / stream-redundancy report (`GET /api/noise[.md]`, `--noise`)
+
+The single biggest driver of analyst fatigue is **the same event firing over and
+over** — and **no other report measures it**. `dedupe.ts` only de-bounces duplicate
+*deliveries* in the live pipeline (each distinct event is still stored and still
+counts); `--concentration` measures volume inequality across *one* entity dimension
+at a time; `--tuning` ranks *noisy rules* heuristically. None of them fold the
+stream onto the **event tuple** — `source IP · destination IP · signature` (signature
+falling back to the event `category`) — to ask "how much of this is repetition, and
+exactly which combinations should I collapse?".
+
+For the window it computes the **redundancy ratio** (`1 − distinct/total` — the share
+of volume that is repeats of an event already represented), the **compression
+factor** (`total/distinct` — "your 5 000 alerts compress to 320 lines, 15.6×"), and
+the **collapsible alert count** (rows that would simply vanish if every repeat folded
+to one line, with zero loss of distinct information). It bands the repetition
+histogram, ranks the loudest **noise drivers**, and — crucially — separates two kinds
+of repeat so you never suppress the wrong thing:
+
+- 🧹 **Collapsible noise** — a tuple repeating ≥ the threshold whose worst severity is
+  only info/low. Textbook fatigue: aggregate it into one line or write a suppression
+  rule (see `--suppaudit`); you lose nothing.
+- 🚨 **Sustained pressure** — a tuple repeating just as often but reaching
+  high/critical severity. This is *not* noise — it is the same serious attack landing
+  again and again, so each repeat is flagged and must never be folded away.
+
+A one-word **verdict** (🔁 high ≥60% · ▥ moderate · 🟢 low <30% redundancy) headlines
+how repetitive the stream is. Honest about its limits: redundancy is measured over
+source IPs **as the IPS logged them** — NAT / shared egress over-states it, a rotating
+botnet hitting one rule from many IPs under-states it; signature-less firewall events
+are keyed on their coarser `category`; repetition older than the rolling store's cap is
+invisible, so every metric is a lower bound. Pure offline math over the local alert
+history (plus blocklist / watchlist / safelist flags) — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/noise?hours=N[&limit=20][&repeat=5]` → the structured model **plus** rendered Markdown (the at-a-glance scoreboard, repetition distribution, noise-driver table and the action list).
+- `GET /api/noise.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --noise 168 [--limit 20] [--repeat 5]` (or `npm run noise`) → print the Markdown to stdout (defaults to a 7-day window so repetition is measured over more than one shift).
+
 ## 🔍 Endpoint agent (process attribution)
 
 Network data tells you *that* a host talked to an IP; the agent
