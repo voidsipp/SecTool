@@ -1643,6 +1643,49 @@ watchlist / safelist membership) — **no SSH, no Claude, no live gateway query*
 - `GET /api/repertoire.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --repertoire 168 [--limit 20] [--min-alerts 2]` (or `npm run repertoire`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow operator has time to reveal breadth).
 
+## 📜 Detection-rule (SID) inventory & ruleset-provenance report (`GET /api/ruleset[.md]`, `--ruleset`)
+
+Every signature-centric report in SecTool keys off the human-readable **signature
+text** (`tuning`, `lifecycle`, `audience`, `noise` all group and de-dup by the
+`msg` string). But that string is **mutable** — Emerging Threats rewrites a rule's
+`msg` across revisions, so group-by-text silently splits one rule across its
+wording changes and conflates near-duplicates. This report keys off the one field
+that is a **stable, globally-unique identity** for the rule that actually fired:
+the Suricata `gid:sid:rev` stamp (`[1:2024897:4]`) that leads every fast.log line,
+re-parsed straight from each stored alert's raw payload (using the same bracket the
+ingest detector keys on, plus the JSON `signature_id`/`gid`/`rev` fields for
+eve-format alerts).
+
+That numeric identity carries information the text cannot:
+
+- **Provenance** — Suricata/Snort allocate SID ranges by *source feed*: `< 1,000,000`
+  is Snort/Talos (the GPL + registered VRT ruleset), `1,000,000–1,999,999` is the
+  range reserved for an operator's **own local rules**, and `2,000,000+` is
+  **Emerging Threats** (ET OPEN / ETPRO). The report rolls hits up by feed, so you
+  see the ruleset's centre of gravity — and can confirm at a glance that your local
+  rules are loaded and firing (or that they have gone silent, a coverage blind spot).
+- **Revision drift** — the same SID firing under **two revisions inside one window**
+  is a fingerprint that your ruleset was **updated mid-window**; any trend or
+  period comparison that straddles the update is comparing different detection
+  logic. A dedicated drift table surfaces every such rule, newest rev highlighted.
+- **Family / category** — the ET `msg`'s own family + category prefix (`ET MALWARE`,
+  `ET SCAN`, `GPL ICMP`, `ETPRO …`) is rolled up as a coarser, source-native
+  grouping, distinct from Suricata's `Classification` taxonomy.
+
+The per-rule inventory ranks by severity-weighted volume and carries each rule's
+rev(s), feed, signature text, hits, peak severity, block-rate and distinct
+source/target counts — so the first tuning candidate is named by its **stable SID**,
+not by wording that will change under you. Alerts whose raw line carries no
+recoverable rule id (firewall / threat-management events, or alerts whose raw was
+lost) are counted as *un-attributable* and excluded from the rule tables (never
+silently folded into a rule); the parse-coverage fraction is reported so a thin
+attribution rate is visible, not hidden. Pure in-memory math over the stored alert
+history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/ruleset?hours=N[&limit=25][&minHits=1]` → the structured model **plus** rendered Markdown (provenance rollup, family rollup, per-rule inventory and revision-drift watch).
+- `GET /api/ruleset.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --ruleset 168 [--limit 25] [--min-hits 1]` (or `npm run ruleset`) → print the Markdown to stdout (defaults to a 7-day window so slow-firing rules and revision drift have time to show). Provenance is a documented range heuristic (the raw SID is always shown); only Suricata IDS/IPS alerts carry a SID, so firewall events are un-attributable.
+
 ## 🚀 Attack-momentum / rate-trend report (`GET /api/momentum[.md]`, `--momentum`)
 
 Every source-centric report measures a *static* property of an attacker — how

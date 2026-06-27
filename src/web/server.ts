@@ -86,6 +86,8 @@
  *   GET  /api/rarity.md?hours=N     -> the same rarity report as a downloadable .md file
  *   GET  /api/traffic?hours=N       -> NetFlow traffic / top-talkers report (heaviest hosts, conversations, outbound fan-out/exfil, service mix; model + Markdown)
  *   GET  /api/traffic.md?hours=N    -> the same traffic report as a downloadable .md file
+ *   GET  /api/ruleset?hours=N       -> detection-rule (Suricata SID) inventory & ruleset provenance (Snort/Talos vs local vs ET; revision drift; model + Markdown)
+ *   GET  /api/ruleset.md?hours=N    -> the same ruleset report as a downloadable .md file
  *   GET  /api/autoblock?hours=N     -> auto-block threshold simulator (sweep "block after N alerts"; preventable-volume knee curve; model + Markdown)
  *   GET  /api/autoblock.md?hours=N  -> the same auto-block simulator report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
@@ -233,6 +235,7 @@ import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
 import { buildRarity, rarityFilename } from "../analytics/rarity.ts";
 import { buildTraffic, trafficFilename } from "../analytics/traffic.ts";
+import { buildRuleset, rulesetFilename } from "../analytics/ruleset.ts";
 import { buildAutoblock, autoblockFilename } from "../analytics/autoblock.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
@@ -1487,6 +1490,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${trafficFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- detection-rule (Suricata SID) inventory & ruleset provenance (Snort/Talos vs local vs ET; rev drift) ---
+      if (method === "GET" && path === "/api/ruleset") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minHits = Number(url.searchParams.get("minHits")) || undefined;
+        return send(res, 200, buildRuleset(hours, { limit, minHits, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/ruleset.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 25;
+        const minHits = Number(url.searchParams.get("minHits")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildRuleset(hours, { limit, minHits, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${rulesetFilename(now)}"`,
         });
         res.end(markdown);
         return;
