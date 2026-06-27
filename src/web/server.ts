@@ -82,6 +82,8 @@
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/recidivism?hours=N    -> block-effectiveness / post-block recidivism audit (did the firewall block actually stop the traffic? clean vs stubborn vs leaking; model + Markdown)
  *   GET  /api/recidivism.md?hours=N -> the same block-effectiveness audit as a downloadable .md file
+ *   GET  /api/mttb?hours=N          -> detection-to-mitigation latency / Mean-Time-To-Block report (how fast did we contain each attacker after first sighting? fast/moderate/slow; model + Markdown)
+ *   GET  /api/mttb.md?hours=N       -> the same MTTB report as a downloadable .md file
  *   GET  /api/safelist-audit?hours=N    -> safelist / allowlist risk audit (is a vetted-benign IP still attacking after vetting? dangerous/suspect/benign/dormant; model + Markdown)
  *   GET  /api/safelist-audit.md?hours=N -> the same safelist risk audit as a downloadable .md file
  *   GET  /api/bruteforce?hours=N    -> credential-attack / brute-force report (login surfaces under attack + spray/brute-force/distributed sources; model + Markdown)
@@ -207,6 +209,7 @@ import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/su
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
 import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
+import { buildMttb, mttbFilename } from "../analytics/mttb.ts";
 import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
@@ -1388,6 +1391,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${recidivismFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- detection-to-mitigation latency / Mean-Time-To-Block (how fast did we contain each attacker?) ---
+      if (method === "GET" && path === "/api/mttb") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 50;
+        const fastMins = Number(url.searchParams.get("fastMins")) || undefined;
+        const slowMins = Number(url.searchParams.get("slowMins")) || undefined;
+        return send(res, 200, buildMttb(hours, { limit, fastMins, slowMins, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/mttb.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 50;
+        const fastMins = Number(url.searchParams.get("fastMins")) || undefined;
+        const slowMins = Number(url.searchParams.get("slowMins")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildMttb(hours, { limit, fastMins, slowMins, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${mttbFilename(now)}"`,
         });
         res.end(markdown);
         return;
