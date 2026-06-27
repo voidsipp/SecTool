@@ -1278,6 +1278,53 @@ gateway query**.
 - `GET /api/blockplan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --blockplan 168 [--limit 30]` (or `npm run blockplan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow attacker accrues enough impact to rank).
 
+## 🎚️ Priority-inversion / IDS-urgency-vs-enforcement audit (`GET /api/priority[.md]`, `--priority`)
+
+Suricata stamps every alert with a numeric **priority** (`[Priority: 1]` …, where
+**1 is the most urgent** and the number climbs as urgency falls) — the engine's own
+verdict on how serious a detection is, set by the rule author and the classtype map.
+That field is upstream of, and finer-grained than, the single five-rung `severity`
+ladder SecTool derives from it. Every *other* enforcement report (the IPS
+enforcement-gap, block-worklist, recidivism and MTTB reports) reasons in terms of
+that derived **severity**; none reads the raw Suricata **priority**, and none asks
+the first question a tuning engineer asks about enforcement quality: *is the
+gateway's block decision actually correlated with the engine's urgency?*
+
+In a healthy posture **block rate falls as the priority number climbs** — the
+most-urgent band (P1) is blocked hardest, routine policy chatter (P3/P4) is mostly
+just logged. **Priority inversion** is the dangerous opposite: urgent P1/P2 traffic
+*passed* while low-priority noise is *blocked* — the classic shape of an IPS that
+drops chatty low-value signatures inline while the scariest categories sit in
+alert-only mode. Volume- and severity-pivoted reports hide it, because the *count*
+of blocks can look healthy while the *worst* events are the ones escaping.
+
+For every alert it **re-parses the Suricata priority from the raw line** (the same
+`[Priority: N]` bracket / JSON `priority` shapes the detector reads — the value is
+*not* a stored column, so this mirrors how the port reports recover ports) and
+crosses it against the gateway disposition (**blocked** / **passed** / **unknown**,
+using the shared `classifyDisposition`). It then produces three layers: a
+**priority × enforcement matrix** (one row per band with its block rate and reach),
+the **inversion headline** — urgent-band block rate vs routine-band block rate and
+an **Inversion Index** ∈ `[-1, 1]` (`urgentBlockRate − routineBlockRate`; positive
+is healthy, **negative is true inversion**, near-zero is a flat posture that ignores
+urgency) — and the **worklist**: the top **sources** and top **signatures** behind
+urgent-but-passed alerts, with urgent traffic that reached an *internal* asset
+flagged hardest.
+
+Honest about its limits: priority is **re-parsed, not stored** (every figure is
+drawn from alerts that still carried a `[Priority: N]` bracket or JSON `priority`
+field, and the priority-bearing count is always shown); **"passed" means "not
+enforced inline"**, which is a gap only when a block was expected — a detection in
+IDS/alert mode is *meant* to be logged, not dropped, so the report surfaces the
+shape without assuming intent; unknown-action alerts are counted but **never inflate
+a block rate**; these are IPS **detections**, not full flows. Pure offline math over
+the local alert history (plus blocklist / watchlist / safelist membership) — **no
+SSH, no Claude, no live gateway query**.
+
+- `GET /api/priority?hours=N[&limit=20][&urgentMax=2]` → the structured model **plus** rendered Markdown (priority × enforcement matrix + source/signature worklists).
+- `GET /api/priority.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --priority 168 [--limit 20] [--urgent-max 2]` (or `npm run priority`) → print the Markdown to stdout (defaults to a 7-day window so a representative urgency-vs-enforcement mix accumulates).
+
 ## 📋 Morning security briefing / SITREP (`GET /api/briefing[.md]`, `--briefing`)
 
 SecTool has grown a deep catalogue of sharp, single-purpose reports, but none of

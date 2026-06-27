@@ -88,6 +88,8 @@
  *   GET  /api/catalog.md            -> the same report catalog as a downloadable .md file
  *   GET  /api/srcports?hours=N      -> source-port fingerprint / tooling-artifact report (fixed-port tool vs ephemeral stack + shared-port botnet correlation; model + Markdown)
  *   GET  /api/srcports.md?hours=N   -> the same source-port fingerprint report as a downloadable .md file
+ *   GET  /api/priority?hours=N      -> priority-inversion / IDS-urgency-vs-enforcement audit (did the gateway block the engine's most-urgent verdicts, or pass them?; model + Markdown)
+ *   GET  /api/priority.md?hours=N   -> the same priority-inversion report as a downloadable .md file
  *   GET  /api/services?hours=N      -> attack-surface-by-service-class report (remote-access/database/file-share/ICS-IoT roll-up + exposed crown-jewel worklist; model + Markdown)
  *   GET  /api/services.md?hours=N   -> the same attack-surface report as a downloadable .md file
  *   GET  /api/audience?hours=N      -> signature-audience / spray-vs-snipe report (background radiation vs targeted snipe per signature; model + Markdown)
@@ -221,6 +223,7 @@ import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
 import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
 import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
+import { buildPriority, priorityFilename } from "../analytics/priority.ts";
 import { buildServices, servicesFilename } from "../analytics/services.ts";
 import { buildAudience, audienceFilename } from "../analytics/audience.ts";
 import { buildBruteforce, bruteforceFilename } from "../analytics/bruteforce.ts";
@@ -1500,6 +1503,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${srcportFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- priority-inversion / IDS-urgency-vs-enforcement (did the gateway block the engine's most-urgent verdicts?) ---
+      if (method === "GET" && path === "/api/priority") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const urgentMax = Number(url.searchParams.get("urgentMax")) || undefined;
+        return send(res, 200, buildPriority(hours, { limit, urgentMax, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/priority.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const urgentMax = Number(url.searchParams.get("urgentMax")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildPriority(hours, { limit, urgentMax, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${priorityFilename(now)}"`,
         });
         res.end(markdown);
         return;
