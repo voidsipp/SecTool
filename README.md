@@ -1987,6 +1987,54 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/concentration.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --concentration 168 [--limit 15] [--quick-wins 10]` (or `npm run concentration`) → print the Markdown to stdout (defaults to a 7-day window so the distribution shape reflects more than one shift).
 
+## 🔥 Current-heat / decay-weighted activity report (`GET /api/heat[.md]`, `--heat`)
+
+Every volume-ranked leaderboard treats an alert from an hour ago and one from six
+days ago as worth exactly the same — a raw count. That answers *"who has been the
+worst all week"* and misses the question a morning responder actually asks:
+*"given what just happened, what do I look at first?"* A source that hammered you
+Monday and went quiet still tops a 7-day count board on Friday; a source that
+appeared three hours ago but is firing hard sits buried near the bottom. This
+report applies the one transform the others don't — an **exponential time
+decay** — so the ranking reflects *current* intensity, not stale volume.
+
+Each alert contributes `exp(−ln2 · age / half-life)` to its entity's **heat
+score**: worth **1.0** at the window edge, **0.5** a half-life ago, **0.25** two
+half-lives ago — the same exponentially-weighted-moving-average idea an SRE
+error-rate dashboard uses, applied to the alert stream. The half-life defaults to
+one-seventh of the window (a 168h week → a 24h half-life, so yesterday counts half
+as much as today) and is overridable with `--half-life H` / `&halfLife=H`. Heat is
+computed across the same **three dimensions** as the concentration report —
+**sources**, **signatures** and **targets** — and each entity carries:
+
+- **heat** and its **share** of the dimension's total heat (the ranking key);
+- **count** — the raw alert total, for contrast;
+- a **rank shift** — places climbed from the *volume* leaderboard to the *heat*
+  leaderboard. A large **▲** is the headline: *"#14 by volume but #2 by heat"* = a
+  fresh riser a count view buries;
+- a **trend** comparing the recent half of the window to the older half —
+  **🔥 heating**, **🆕 new** (nothing older), **➡ steady** or **❄ cooling**
+  (front-loaded, fading).
+
+Because "hot right now" is only useful if you can act on it, the source dimension
+carries an **act-now** list: the hottest *external, unblocked, non-safelisted*
+sources — the addresses worth blocking this minute, ranked by present intensity.
+Internal hosts topping a heat board are flagged (a compromise / misconfiguration
+tell, not an inbound attacker).
+
+Honest about its limits: heat weights **recency**, not severity — a flurry of
+fresh low-severity scans outscores one old critical, so pair the *what's-hot*
+signal with the severity-ranked reports (`--risk`, `--efficacy`) for triage. These
+are IPS **detections**: NAT / shared egress can collapse many real actors into one
+IP. The decay is anchored to the window end, so a short look-back is mostly "now"
+and a long one buries old volume by design — which also makes a recency-weighted
+score **robust** to the store's history-cap truncation. Pure offline math over the
+local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/heat?hours=N[&limit=15][&halfLife=24]` → the structured model **plus** rendered Markdown (the at-a-glance matrix, per-dimension heat tables and the act-now list).
+- `GET /api/heat.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --heat 168 [--limit 15] [--half-life 24]` (or `npm run heat`) → print the Markdown to stdout (defaults to a 7-day window with a 24h half-life).
+
 ## 🔁 Attacker cohort-retention / churn report (`GET /api/cohort[.md]`, `--cohort`)
 
 This is **product-style retention analytics applied to attackers.** A growth team

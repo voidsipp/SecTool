@@ -267,6 +267,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Threat focus", "Pareto concentration: where to spend defensive effort first."),
   entry("Detection coverage", "concentration", "--concentration", "/api/concentration", 168,
     "Concentration (Gini)", "Distribution shape: block-a-handful-and-win vs diffuse storm."),
+  entry("Detection coverage", "heat", "--heat", "/api/heat", 168,
+    "Current heat (decay-weighted)", "What's hot *right now*, not loudest all-week: scores every alert by exponential time-decay (configurable half-life) and ranks sources, signatures and targets by recency-weighted intensity — surfacing fresh risers a raw count buries (rank-shift volume→heat) and front-loaded actors that have gone cold, with an act-now list of the hottest unblocked external sources. The present-tense twin of momentum (slope), surge (spikes) and concentration (shape)."),
   entry("Detection coverage", "drift", "--drift", "/api/drift", 168,
     "Severity-mix drift", "Is the *average* alert getting nastier over time, independent of volume? Per-slice mean-severity trend (front-half vs back-half delta + least-squares slope) that surfaces the \"volume flat but the mix is escalating\" recon→exploitation signal a raw count hides — the temporal twin of risk (magnitude) and escalation (per-source)."),
 

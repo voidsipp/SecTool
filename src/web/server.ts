@@ -136,6 +136,8 @@
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
  *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
  *   GET  /api/concentration.md?hours=N -> the same concentration report as a downloadable .md file
+ *   GET  /api/heat?hours=N          -> current-heat / decay-weighted activity report (what's hot right now via exponential time-decay across sources/signatures/targets; model + Markdown)
+ *   GET  /api/heat.md?hours=N       -> the same heat report as a downloadable .md file
  *   GET  /api/drift?hours=N         -> severity-mix drift / threat-quality trend (is the average alert getting nastier over time, independent of volume; model + Markdown)
  *   GET  /api/drift.md?hours=N      -> the same drift report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
@@ -295,6 +297,7 @@ import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts"
 import { buildMomentum, momentumFilename } from "../analytics/momentum.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
+import { buildHeat, heatFilename } from "../analytics/heat.ts";
 import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildDismissals, dismissalsFilename } from "../analytics/dismissals.ts";
@@ -2186,6 +2189,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- current-heat / decay-weighted activity (what's hot right now, not loudest all-week) ---
+      if (method === "GET" && path === "/api/heat") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const halfLifeHours = Number(url.searchParams.get("halfLife")) || undefined;
+        return send(res, 200, buildHeat(hours, { limit, halfLifeHours, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/heat.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const halfLifeHours = Number(url.searchParams.get("halfLife")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildHeat(hours, { limit, halfLifeHours, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${heatFilename(now)}"`,
         });
         res.end(markdown);
         return;

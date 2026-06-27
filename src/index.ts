@@ -55,6 +55,7 @@
  *   node src/index.ts --cwe 168       # offline CWE weakness-class coverage (which software-weakness classes are being probed/exploited; SQLi/traversal/overflow/auth…) report (Markdown)
  *   node src/index.ts --owasp 168     # offline OWASP Top 10 (2021) coverage (which industry-standard web risk categories are probed/exploited; A01-A10) report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
+ *   node src/index.ts --heat 168      # offline current-heat / decay-weighted activity (what's hot right now, not loudest all-week) report (Markdown)
  *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
@@ -159,6 +160,7 @@ import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildMomentum } from "./analytics/momentum.ts";
 import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
+import { buildHeat } from "./analytics/heat.ts";
 import { buildDrift } from "./analytics/drift.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
@@ -2252,6 +2254,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown concentration report to stdout.
       console.log(buildConcentration(hours, { limit, quickWinLimit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const heatIdx = argv.findIndex((a) => a === "--heat" || a.startsWith("--heat="));
+    if (heatIdx !== -1) {
+      const inline = argv[heatIdx]!.split("=")[1];
+      const next = argv[heatIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the decay has both a fresh head and an older tail to weigh.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --heat hours: "${raw}". Use e.g. --heat 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each per-dimension leaderboard.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--half-life H` to control how fast old alerts decay (hours).
+      let halfLifeHours: number | undefined;
+      const hlIdx = argv.findIndex((a) => a === "--half-life" || a.startsWith("--half-life="));
+      if (hlIdx !== -1) {
+        const v = argv[hlIdx]!.split("=")[1] ?? argv[hlIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) halfLifeHours = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown heat report to stdout.
+      console.log(buildHeat(hours, { limit, halfLifeHours, nowMs: Date.now() }).markdown);
       return;
     }
     const driftIdx = argv.findIndex((a) => a === "--drift" || a.startsWith("--drift="));

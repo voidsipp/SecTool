@@ -72,6 +72,7 @@
     "cwe": "node src/index.ts --cwe 168",
     "owasp": "node src/index.ts --owasp 168",
     "concentration": "node src/index.ts --concentration 168",
+    "heat": "node src/index.ts --heat 168",
     "drift": "node src/index.ts --drift 168",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
