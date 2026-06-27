@@ -70,6 +70,8 @@
  *   GET  /api/targets.md?hours=N    -> the same target-exposure report as a downloadable .md file
  *   GET  /api/clusters?hours=N      -> coordinated-infrastructure / toolkit-cluster report (groups attacker IPs by shared signature fingerprint; model + Markdown)
  *   GET  /api/clusters.md?hours=N   -> the same cluster report as a downloadable .md file
+ *   GET  /api/recurrence?hours=N    -> recurrence / return-forecast report (predicts WHEN each repeat attacker is due back; model + Markdown)
+ *   GET  /api/recurrence.md?hours=N -> the same return-forecast report as a downloadable .md file
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -154,6 +156,7 @@ import { buildInsight, insightFilename } from "../analytics/insight.ts";
 import { buildEscalation, escalationFilename } from "../analytics/escalation.ts";
 import { buildTargets, targetsFilename } from "../analytics/targets.ts";
 import { buildClusters, clustersFilename } from "../analytics/cluster.ts";
+import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
 import {
   buildIocExport,
@@ -1201,6 +1204,34 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${clustersFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- recurrence / return-forecast (predict WHEN each repeat attacker is due back) ---
+      if (method === "GET" && path === "/api/recurrence") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const sg = Number(url.searchParams.get("sessionGap"));
+        const sessionGapMinutes = Number.isFinite(sg) && sg > 0 ? sg : undefined;
+        const ms = Number(url.searchParams.get("minSessions"));
+        const minSessions = Number.isFinite(ms) && ms > 0 ? ms : undefined;
+        return send(res, 200, buildRecurrence(hours, { limit, sessionGapMinutes, minSessions, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/recurrence.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const sg = Number(url.searchParams.get("sessionGap"));
+        const sessionGapMinutes = Number.isFinite(sg) && sg > 0 ? sg : undefined;
+        const ms = Number(url.searchParams.get("minSessions"));
+        const minSessions = Number.isFinite(ms) && ms > 0 ? ms : undefined;
+        const now = Date.now();
+        const { markdown } = buildRecurrence(hours, { limit, sessionGapMinutes, minSessions, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${recurrenceFilename(now)}"`,
         });
         res.end(markdown);
         return;
