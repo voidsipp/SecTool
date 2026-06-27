@@ -11,7 +11,7 @@ import { log } from "../logger.ts";
 const DATA_DIR = fileURLToPath(new URL("../../data", import.meta.url));
 const STORE_PATH = join(DATA_DIR, "dismissed.json");
 
-interface DismissEntry {
+export interface DismissEntry {
   id: string;
   at: number;
   reason?: string;
@@ -72,6 +72,16 @@ class DismissStore {
   count(): number {
     this.#ensure();
     return this.#map.size;
+  }
+
+  /**
+   * A snapshot of every dismissal entry, newest dismissal first. Read-only copy
+   * so callers (e.g. the offline dismissal-audit report) can enumerate the
+   * hidden-alert set without reaching into the private map.
+   */
+  all(): DismissEntry[] {
+    this.#ensure();
+    return [...this.#map.values()].sort((a, b) => b.at - a.at);
   }
 }
 

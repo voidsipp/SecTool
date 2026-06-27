@@ -291,6 +291,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Firewall-rule export", "Renders the enforced blocklist into ready-to-apply config for 10 firewall dialects (ipset/iptables/nftables/UFW/pf/Cisco/MikroTik/EdgeRouter-VyOS-UniFi/Windows/plain CIDR); safelisted IPs excluded by default, advisory CIDR-rollup hints. The codegen step after the iocs IP list."),
   entry("Controls / enforcement", "suppaudit", "--suppaudit", "/api/suppaudit", 168,
     "Suppression audit", "Are your alert-suppression rules effective — and are they hiding anything live?"),
+  entry("Controls / enforcement", "dismissals", "--dismissals", "/api/dismissals", 168,
+    "Dismissal audit", "Audits the hide control none of the others touch: of the alerts you manually dismissed, which were high/critical, which kept firing after you hid them (same source+signature), and which escalated — plus no-reason hygiene gaps. The per-alert sibling of safelist (per-IP) and suppaudit (per-rule)."),
   entry("Controls / enforcement", "watchlist", "--watchlist", "/api/watchlist-activity", 24,
     "Watchlist activity", "What your watched entities have been doing in the window."),
 

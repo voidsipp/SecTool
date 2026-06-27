@@ -58,6 +58,7 @@
  *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
+ *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
  *   node src/index.ts --offhours 168  # offline off-hours / defender coverage-gap (attack pressure + unattended detect-only exposure outside staffed hours) report (Markdown)
@@ -160,6 +161,7 @@ import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
 import { buildDrift } from "./analytics/drift.ts";
 import { buildCohort } from "./analytics/cohort.ts";
+import { buildDismissals } from "./analytics/dismissals.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
 import { buildSequence } from "./analytics/sequence.ts";
@@ -2308,6 +2310,33 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown cohort report to stdout.
       console.log(buildCohort(hours, { limit, bucketHours, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const dismissalsIdx = argv.findIndex(
+      (a) => a === "--dismissals" || a.startsWith("--dismissals="),
+    );
+    if (dismissalsIdx !== -1) {
+      const inline = argv[dismissalsIdx]!.split("=")[1];
+      const next = argv[dismissalsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so post-dismissal recurrence has room to actually show.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --dismissals hours: "${raw}". Use e.g. --dismissals 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the audited-dismissal table.
+      let limit = 100;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown dismissal-audit report to stdout.
+      console.log(buildDismissals(hours, { limit, nowMs: Date.now() }).markdown);
       return;
     }
     const suppAuditIdx = argv.findIndex(

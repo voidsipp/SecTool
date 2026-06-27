@@ -75,6 +75,7 @@
     "drift": "node src/index.ts --drift 168",
     "cohort": "node src/index.ts --cohort 168",
     "suppaudit": "node src/index.ts --suppaudit 168",
+    "dismissals": "node src/index.ts --dismissals 168",
     "noise": "node src/index.ts --noise 168",
     "patterns": "node src/index.ts --patterns 168",
     "offhours": "node src/index.ts --offhours 168",
