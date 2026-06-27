@@ -229,6 +229,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Coordinated strikes", "Temporal convergence: botnet / DDoS / distributed-spray flash-crowds."),
   entry("Temporal", "patterns", "--patterns", "/api/patterns", 168,
     "Patterns of life", "Operating hours and timezone attribution: bot vs human shift."),
+  entry("Temporal", "offhours", "--offhours", "/api/offhours", 168,
+    "Off-hours coverage gap", "How much attack pressure — and serious detect-only exposure — lands while no one is on shift."),
 
   // --- Detection coverage ---------------------------------------------------
   entry("Detection coverage", "bruteforce", "--bruteforce", "/api/bruteforce", 168,

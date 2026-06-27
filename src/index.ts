@@ -53,6 +53,7 @@
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
+ *   node src/index.ts --offhours 168  # offline off-hours / defender coverage-gap (attack pressure + unattended detect-only exposure outside staffed hours) report (Markdown)
  *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
  *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
  *   node src/index.ts --convergence 168 # offline temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash-crowd) report (Markdown)
@@ -136,6 +137,7 @@ import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
 import { buildPatterns } from "./analytics/patterns.ts";
+import { buildOffHours } from "./analytics/offhours.ts";
 import { buildRecidivism } from "./analytics/recidivism.ts";
 import { buildMttb } from "./analytics/mttb.ts";
 import { buildSafelistAudit } from "./analytics/safelist.ts";
@@ -1994,6 +1996,65 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown patterns-of-life report to stdout.
       console.log(buildPatterns(hours, { limit, minAlerts, assumedMiddayHour, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const offhoursIdx = argv.findIndex((a) => a === "--offhours" || a.startsWith("--offhours="));
+    if (offhoursIdx !== -1) {
+      const inline = argv[offhoursIdx]!.split("=")[1];
+      const next = argv[offhoursIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a weekday/weekend split is actually meaningful.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --offhours hours: "${raw}". Use e.g. --offhours 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each leaderboard.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min N`: minimum alerts before a signature/source/asset is ranked.
+      let minAlerts: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min" || a.startsWith("--min="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      // Optional staffing model: `--tz H` (UTC offset), `--start H`, `--end H` (local hours).
+      let tzOffset: number | undefined;
+      const tzIdx = argv.findIndex((a) => a === "--tz" || a.startsWith("--tz="));
+      if (tzIdx !== -1) {
+        const v = argv[tzIdx]!.split("=")[1] ?? argv[tzIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n)) tzOffset = n;
+      }
+      let bizStart: number | undefined;
+      const startIdx = argv.findIndex((a) => a === "--start" || a.startsWith("--start="));
+      if (startIdx !== -1) {
+        const v = argv[startIdx]!.split("=")[1] ?? argv[startIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n)) bizStart = n;
+      }
+      let bizEnd: number | undefined;
+      const endIdx = argv.findIndex((a) => a === "--end" || a.startsWith("--end="));
+      if (endIdx !== -1) {
+        const v = argv[endIdx]!.split("=")[1] ?? argv[endIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n)) bizEnd = n;
+      }
+      // `--staff-weekends` treats weekend business hours as staffed too (a 7-day shop).
+      const weekendsOff = !argv.includes("--staff-weekends");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown off-hours coverage-gap report.
+      console.log(
+        buildOffHours(hours, { limit, minAlerts, tzOffset, bizStart, bizEnd, weekendsOff, nowMs: Date.now() }).markdown,
+      );
       return;
     }
     const burstinessIdx = argv.findIndex((a) => a === "--burstiness" || a.startsWith("--burstiness="));

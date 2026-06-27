@@ -70,6 +70,7 @@
     "suppaudit": "node src/index.ts --suppaudit 168",
     "noise": "node src/index.ts --noise 168",
     "patterns": "node src/index.ts --patterns 168",
+    "offhours": "node src/index.ts --offhours 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "metrics": "node src/index.ts --metrics",
     "catalog": "node src/index.ts --catalog",
