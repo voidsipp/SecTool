@@ -47,6 +47,7 @@
     "recurrence": "node src/index.ts --recurrence 168",
     "ports": "node src/index.ts --ports 168",
     "scan": "node src/index.ts --scan 168",
+    "srcports": "node src/index.ts --srcports 168",
     "bruteforce": "node src/index.ts --bruteforce 168",
     "burstiness": "node src/index.ts --burstiness 168",
     "convergence": "node src/index.ts --convergence 168",

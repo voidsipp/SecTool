@@ -974,6 +974,51 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 🔌 Source-port fingerprint / tooling-artifact report (`GET /api/srcports[.md]`, `--srcports`)
+
+Every other report pivots on the *destination* side of the flow — which host,
+which service, which port is under fire. None of them look at the **source port**
+the attacker dialled *from*, yet that field carries a signal nothing else captures:
+*is this a real client stack or a packet-crafting tool — and do several unrelated
+IPs share the same fixed source port (one toolkit, many hands)?*
+
+- A healthy client OS picks a fresh, effectively-random **ephemeral** source port
+  (Linux 32768–60999, Windows 49152–65535) per connection, so hundreds of alerts
+  show hundreds of distinct high-numbered ports — **high entropy**.
+- A **mass-scanning tool** (zmap, masscan, many bespoke scanners) commonly pins a
+  *single fixed* source port for its whole run for speed and stateless
+  reply-matching. A source firing 400 alerts all from `:61000` is not a browser —
+  it is a tool, and that port value is a **fingerprint**.
+- A **privileged** source port (`< 1024`) on inbound attack traffic is abnormal for
+  a real client (those need root/raw sockets) and hints at **spoofing, reflection,
+  or hand-rolled tooling**.
+
+For every source it recovers each alert's source port from the raw line (the same
+flow-tuple / JSON parser the port-exposure report uses, here reading the *source*
+side) and computes the **distinct source ports**, the **normalised Shannon entropy**
+of their distribution (0 = one fixed port, 1 = uniform spread), the **dominant
+port and its share**, and the **privileged / ephemeral** shares. Each source is
+classified **🔧 fixed** (one dominant port — classic tool artifact), **🎯 clustered**
+(a small reused set — semi-automated or a NAT pool), or **🎲 varied** (broad
+ephemeral spread — normal stack), and sources rank most-tool-like first. A
+companion **shared-fingerprint** roll-up surfaces source ports that are the
+dominant dial-out port for *more than one* distinct IP — a cross-source artifact
+that points at the same tool / launch script (often the same operator) behind
+otherwise-unrelated addresses, which no destination-pivoted report can see.
+
+Honest about its limits: source ports are **re-parsed, not stored**, so every
+figure is a lower bound drawn from alerts that still carried a flow tuple or
+`src_port` field; **low volume is not a fingerprint** (a 4-alert floor keeps
+coincidence out of the "tool" verdict, and raw counts are always shown); **NAT**
+can make many hosts share a source port over time, so attribution is to the
+address SecTool saw; these are IPS **detections**, not full flows. Pure offline
+math over the local alert history (plus blocklist / watchlist / safelist
+membership) — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/srcports?hours=N[&limit=20][&minAlerts=4]` → the structured model **plus** rendered Markdown (per-source fingerprint table, shared-fingerprint roll-up).
+- `GET /api/srcports.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --srcports 168 [--limit 20] [--min-alerts 4]` (or `npm run srcports`) → print the Markdown to stdout (defaults to a 7-day window so a slow tool has time to reveal its fixed-port habit).
+
 ## 📡 Signature-audience / spray-vs-snipe report (`GET /api/audience[.md]`, `--audience`)
 
 The threat-classification report tells you the threat *mix*, the tuning report
