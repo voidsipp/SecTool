@@ -51,6 +51,7 @@
     "burstiness": "node src/index.ts --burstiness 168",
     "convergence": "node src/index.ts --convergence 168",
     "recidivism": "node src/index.ts --recidivism 168",
+    "mttb": "node src/index.ts --mttb 168",
     "safelist": "node src/index.ts --safelist 168",
     "repertoire": "node src/index.ts --repertoire 168",
     "dwell": "node src/index.ts --dwell 168",

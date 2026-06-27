@@ -972,6 +972,49 @@ no live gateway query**.
 - `GET /api/recidivism.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --recidivism 168 [--limit 30]` (or `npm run recidivism`) → print the Markdown to stdout (defaults to a 7-day window so a slow re-offender has time to show post-block activity).
 
+## ⏱️ Detection-to-mitigation latency / Mean-Time-To-Block (`GET /api/mttb[.md]`, `--mttb`)
+
+The recidivism audit reads each block's timestamp to ask the *post*-block question
+("did the traffic stop?"). This report reads the very same timestamp to ask the
+opposite, *pre*-block one that nothing else answers: **once an attacker first
+showed up in my logs, how long did it take me to actually block them — and how
+much got through during that gap?** Detection-to-mitigation latency is to blocking
+what MTTR is to incident response: two SOCs can block the exact same attackers and
+have wildly different real-world exposure depending on how fast each block landed.
+
+For every IP whose block was applied inside the window it scans the **entire**
+stored history for that source (reaching back past the window to find the *first*
+sighting the latency is measured from), then grades the gap **latency = block time
+− first alert**:
+
+- **🟢 fast** — latency ≤ the fast threshold (default 5 min): containment was
+  effectively immediate; little or nothing landed.
+- **🟡 moderate** — latency ≤ the slow threshold (default 60 min).
+- **🔴 slow** — latency above the slow threshold: the source attacked for a
+  meaningful stretch before being contained — and if anything *passed* in that
+  window, that exposure was real, not theoretical.
+- **⚪ no-lead-up** — no pre-block alert in the store: a proactive (manual /
+  threat-intel / first-packet reactive) block, or a source whose early history has
+  aged out of the capped store. Reported separately and **excluded from the MTTB**
+  so they don't flatter it as "instant".
+
+Sources are ranked **slowest-latency first** — for a responsiveness report the
+biggest gaps are the finding. A headline stat block reports mean/median/fastest/
+slowest MTTB and the total lead-up alerts the gateway **let through before any
+block existed** (real exposure during the gap).
+
+Honest about its limits: latency is a **lower bound** (the rotating store can drop
+an old source's earliest alerts, so the true gap may be larger); these are IPS
+**detections**, so "first seen" is first *detected* activity, not first contact;
+alerts are matched to a block by **source address**; and the number is only as
+accurate as the recorded block timestamp. Pure offline math over the local alert +
+block history (plus watchlist / safelist membership) — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/mttb?hours=N[&limit=50][&fastMins=5][&slowMins=60]` → the structured model **plus** rendered Markdown (latency stat block + per-block latency table).
+- `GET /api/mttb.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --mttb 168 [--limit 50] [--fast-mins 5] [--slow-mins 60]` (or `npm run mttb`) → print the Markdown to stdout (defaults to a 7-day window so recent enforcement actions are graded with their lead-up).
+
 ## 🔍 Safelist / allowlist risk audit (`GET /api/safelist-audit[.md]`, `--safelist`)
 
 Every other audit in SecTool points at the **deny side** of the controls —

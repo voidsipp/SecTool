@@ -50,6 +50,7 @@
  *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
  *   node src/index.ts --convergence 168 # offline temporal-convergence / coordinated-strike (botnet / DDoS / distributed-spray flash-crowd) report (Markdown)
  *   node src/index.ts --recidivism 168 # offline block-effectiveness / post-block recidivism (did the block actually stop the traffic?) audit (Markdown)
+ *   node src/index.ts --mttb 168      # offline detection-to-mitigation latency / Mean-Time-To-Block (how fast did we contain each attacker?) report (Markdown)
  *   node src/index.ts --safelist 168  # offline safelist / allowlist risk audit (is a vetted-benign IP still attacking? Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
@@ -118,6 +119,7 @@ import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
 import { buildPatterns } from "./analytics/patterns.ts";
 import { buildRecidivism } from "./analytics/recidivism.ts";
+import { buildMttb } from "./analytics/mttb.ts";
 import { buildSafelistAudit } from "./analytics/safelist.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
@@ -1255,6 +1257,46 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown block-effectiveness report.
       console.log(buildRecidivism(hours, { limit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const mttbIdx = argv.findIndex((a) => a === "--mttb" || a.startsWith("--mttb="));
+    if (mttbIdx !== -1) {
+      const inline = argv[mttbIdx]!.split("=")[1];
+      const next = argv[mttbIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so recent enforcement actions are graded with their lead-up.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --mttb hours: "${raw}". Use e.g. --mttb 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-block table.
+      let limit = 50;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--fast-mins N` / `--slow-mins N` to tune the latency grade thresholds.
+      let fastMins: number | undefined;
+      const fmIdx = argv.findIndex((a) => a === "--fast-mins" || a.startsWith("--fast-mins="));
+      if (fmIdx !== -1) {
+        const v = argv[fmIdx]!.split("=")[1] ?? argv[fmIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n >= 0) fastMins = n;
+      }
+      let slowMins: number | undefined;
+      const smIdx = argv.findIndex((a) => a === "--slow-mins" || a.startsWith("--slow-mins="));
+      if (smIdx !== -1) {
+        const v = argv[smIdx]!.split("=")[1] ?? argv[smIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n >= 0) slowMins = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown detection-to-mitigation latency report.
+      console.log(buildMttb(hours, { limit, fastMins, slowMins, nowMs: Date.now() }).markdown);
       return;
     }
     const safelistIdx = argv.findIndex((a) => a === "--safelist" || a.startsWith("--safelist="));
