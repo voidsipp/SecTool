@@ -47,6 +47,7 @@
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
  *   node src/index.ts --patterns 168  # offline attacker patterns-of-life / operating-hours (timezone-attribution: bot vs human shift) report (Markdown)
  *   node src/index.ts --bruteforce 168 # offline credential-attack / brute-force (spray vs brute-force vs distributed login attacks) report (Markdown)
+ *   node src/index.ts --burstiness 168 # offline burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome cadence) report (Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
  */
 import { fileURLToPath } from "node:url";
@@ -103,6 +104,7 @@ import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
 import { buildBruteforce } from "./analytics/bruteforce.ts";
+import { buildBurstiness } from "./analytics/burstiness.ts";
 import { buildMitre } from "./analytics/mitre.ts";
 import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildDwell } from "./analytics/dwell.ts";
@@ -1531,6 +1533,47 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown patterns-of-life report to stdout.
       console.log(buildPatterns(hours, { limit, minAlerts, assumedMiddayHour, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const burstinessIdx = argv.findIndex((a) => a === "--burstiness" || a.startsWith("--burstiness="));
+    if (burstinessIdx !== -1) {
+      const inline = argv[burstinessIdx]!.split("=")[1];
+      const next = argv[burstinessIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so an on/off duty cycle has several burst-then-sleep rounds to emerge.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --burstiness hours: "${raw}". Use e.g. --burstiness 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap each (bursty / regular) table.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-events N`: minimum alerts for a source to be scored.
+      let minEvents: number | undefined;
+      const meIdx = argv.findIndex((a) => a === "--min-events" || a.startsWith("--min-events="));
+      if (meIdx !== -1) {
+        const v = argv[meIdx]!.split("=")[1] ?? argv[meIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minEvents = n;
+      }
+      // Optional `--burst-window S`: sliding-window width (seconds) for the tightest-burst metric.
+      let burstWindowSec: number | undefined;
+      const bwIdx = argv.findIndex((a) => a === "--burst-window" || a.startsWith("--burst-window="));
+      if (bwIdx !== -1) {
+        const v = argv[bwIdx]!.split("=")[1] ?? argv[bwIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) burstWindowSec = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown burstiness report to stdout.
+      console.log(buildBurstiness(hours, { limit, minEvents, burstWindowSec, nowMs: Date.now() }).markdown);
       return;
     }
     const iocsIdx = argv.findIndex((a) => a === "--iocs" || a.startsWith("--iocs="));
