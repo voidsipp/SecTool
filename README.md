@@ -974,6 +974,58 @@ over the local alert history (plus blocklist / watchlist / safelist membership) 
 - `GET /api/scan.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --scan 168 [--limit 20] [--min-hosts 3] [--min-ports 3]` (or `npm run scan`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow scanner has time to show breadth).
 
+## 📡 Signature-audience / spray-vs-snipe report (`GET /api/audience[.md]`, `--audience`)
+
+The threat-classification report tells you the threat *mix*, the tuning report
+ranks the noisiest *rules* by volume, and the concentration report measures the
+*shape of the whole distribution*. None of them answer the single sharpest triage
+question the IPS stream holds about each rule that fired: ***who* is behind it —
+is this signature being *sprayed* at me by a diffuse crowd of unrelated sources
+(internet background radiation I can down-prioritise) or *sniped* by one or two
+actors at a handful of my hosts (a focused, real signal that raw volume buries)?***
+A rule firing 10 000 times from a single IP and one firing 10 000 times from
+8 000 IPs are indistinguishable to a volume ranking, yet the first is one attacker
+and the second is the whole internet.
+
+For every signature it folds the windowed alerts and computes its **source
+breadth** (distinct `srcIp`), a diversity-weighted **effective source count**
+(inverse-Simpson `1 / Σ shareᵢ²`, which discounts a long tail of one-shot sources
+so a crowd dominated by one actor reads as "few"), the **dominant source's share**,
+and its **target breadth** (distinct `dstIp`). It then classifies each signature
+from the two diffusion axes against tunable thresholds (`≥5` effective sources /
+`≥5` targets = "many" by default):
+
+- **🌐 Spray** — *many sources × many targets*: internet background radiation.
+  Loud, ubiquitous, low-signal — collapse / down-prioritise / suppression-tune.
+- **🐝 Swarm** — *many sources × few targets*: a crowd converging on one box (a
+  popular target, or a botnet tasked specifically at you).
+- **🛰 Scan** — *few sources × many targets*: a small number of actors sweeping
+  wide (cross-reference the scan-shape report).
+- **🎯 Targeted** — *few sources × few targets*: a focused, hands-on signal — the
+  alert most likely to be a real intrusion, and the one volume ranking buries.
+
+The primary table ranks signatures by **alert volume** (what fills the console)
+but annotates each with its quadrant and effective-source count, so a loud row
+reads at a glance as "spray → tune it away" or "targeted → investigate". Two
+companion roll-ups then pull the extremes the volume ranking hides: **sharpest
+targeted signatures** (the buried, low-volume snipes, ranked by severity) and
+**top spray / tuning candidates** (the loudest background radiation). It flags
+signatures fired *by internal sources* (a compromise / lateral-movement tell) and
+the blocklist / watchlist / safelist status of each dominant source.
+
+Honest about its limits: the diffusion **shape is a heuristic** over the
+source/target thresholds (raw counts and the effective-source number are always
+shown so the call can be second-guessed); **effective sources ≠ distinct sources**
+(a crowd dominated by one actor is correctly read as concentrated, with the
+dominant share shown alongside); these are IPS **detections**, not full flows, so
+every source count is a lower bound. Pure offline math over the local alert history
+(plus blocklist / watchlist / safelist membership) — **no SSH, no Claude, no live
+gateway query**.
+
+- `GET /api/audience?hours=N[&limit=25][&minSources=5][&minTargets=5]` → the structured model **plus** rendered Markdown (per-signature audience table, sharpest-targeted and top-spray roll-ups).
+- `GET /api/audience.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --audience 168 [--limit 25] [--min-sources 5] [--min-targets 5]` (or `npm run audience`) → print the Markdown to stdout (defaults to a 7-day window so a diffuse, low-and-slow spray has time to show breadth).
+
 ## 🚫 Block-effectiveness / post-block recidivism audit (`GET /api/recidivism[.md]`, `--recidivism`)
 
 Every IP SecTool (or you) blocks at the firewall is stamped with a *block time*.

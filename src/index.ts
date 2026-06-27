@@ -40,6 +40,7 @@
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --repertoire 168 # offline attacker-repertoire / sophistication (toolkit-operator vs one-trick probe) report (Markdown)
+ *   node src/index.ts --audience 168  # offline signature-audience / spray-vs-snipe (background radiation vs targeted snipe per signature) report (Markdown)
  *   node src/index.ts --dwell 168     # offline source dwell-time / engagement-session (sustained camp vs transient probe) report (Markdown)
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
@@ -110,6 +111,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildAudience } from "./analytics/audience.ts";
 import { buildBruteforce } from "./analytics/bruteforce.ts";
 import { buildBurstiness } from "./analytics/burstiness.ts";
 import { buildConvergence } from "./analytics/convergence.ts";
@@ -1246,6 +1248,46 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const audienceIdx = argv.findIndex((a) => a === "--audience" || a.startsWith("--audience="));
+    if (audienceIdx !== -1) {
+      const inline = argv[audienceIdx]!.split("=")[1];
+      const next = argv[audienceIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so diffuse, low-and-slow sprays have time to show breadth.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --audience hours: "${raw}". Use e.g. --audience 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-signature table and the roll-ups.
+      let limit = 25;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-sources N` / `--min-targets N` to tune the diffusion thresholds.
+      let sourceThreshold: number | undefined;
+      const msIdx = argv.findIndex((a) => a === "--min-sources" || a.startsWith("--min-sources="));
+      if (msIdx !== -1) {
+        const v = argv[msIdx]!.split("=")[1] ?? argv[msIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) sourceThreshold = n;
+      }
+      let targetThreshold: number | undefined;
+      const mtIdx = argv.findIndex((a) => a === "--min-targets" || a.startsWith("--min-targets="));
+      if (mtIdx !== -1) {
+        const v = argv[mtIdx]!.split("=")[1] ?? argv[mtIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) targetThreshold = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown signature-audience report to stdout.
+      console.log(buildAudience(hours, { limit, sourceThreshold, targetThreshold, nowMs: Date.now() }).markdown);
       return;
     }
     const recidivismIdx = argv.findIndex((a) => a === "--recidivism" || a.startsWith("--recidivism="));
