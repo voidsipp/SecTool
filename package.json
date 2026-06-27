@@ -69,6 +69,7 @@
     "patterns": "node src/index.ts --patterns 168",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "metrics": "node src/index.ts --metrics",
+    "catalog": "node src/index.ts --catalog",
     "print-config": "node src/index.ts --print-config",
     "typecheck": "tsc --noEmit"
   },

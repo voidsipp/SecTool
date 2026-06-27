@@ -60,6 +60,7 @@
  *   node src/index.ts --blockplan 168 # offline block-recommendation / candidate-blocklist worklist (which sources to block next, ranked by preventable impact; Markdown)
  *   node src/index.ts --briefing 24   # offline consolidated morning security briefing / SITREP (KPIs + trend + action items + bundled detail reports; Markdown)
  *   node src/index.ts --iocs 168 --format plain  # offline threat-indicator (IOC) export
+ *   node src/index.ts --catalog       # offline self-describing report catalog / directory of every report (CLI flag, npm script, API route, window; Markdown)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -136,6 +137,7 @@ import { buildBlockPlan } from "./analytics/blockplan.ts";
 import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./analytics/briefing.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { buildMetrics } from "./web/metrics.ts";
+import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -1254,6 +1256,27 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Self-describing report catalog — no window, no alert data; lists every report.
+    const catalogIdx = argv.findIndex(
+      (a) => a === "--catalog" || a.startsWith("--catalog=") || a === "--reports" || a.startsWith("--reports="),
+    );
+    if (catalogIdx !== -1) {
+      // `--catalog=<query>` / `--catalog <query>` filters by free-text substring.
+      const inline = argv[catalogIdx]!.split("=")[1];
+      const next = argv[catalogIdx + 1];
+      const query = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Optional `--category "Controls / enforcement"` to scope to one bucket.
+      let category: ReportCategory | undefined;
+      const catIdx = argv.findIndex((a) => a === "--category" || a.startsWith("--category="));
+      if (catIdx !== -1) {
+        const v = argv[catIdx]!.split("=")[1] ?? argv[catIdx + 1];
+        if (v && !v.startsWith("--")) category = v as ReportCategory;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      console.log(buildCatalog({ query, category, nowMs: Date.now() }).markdown);
       return;
     }
     const srcportIdx = argv.findIndex((a) => a === "--srcports" || a.startsWith("--srcports="));

@@ -80,6 +80,8 @@
  *   GET  /api/ports.md?hours=N      -> the same port-exposure report as a downloadable .md file
  *   GET  /api/scan?hours=N          -> scan-shape / reconnaissance-pattern report (horizontal vs vertical vs sweep per source; model + Markdown)
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
+ *   GET  /api/catalog[?q=&category=] -> self-describing report catalog (every report's flag, npm script, API route, window + purpose; model + Markdown)
+ *   GET  /api/catalog.md            -> the same report catalog as a downloadable .md file
  *   GET  /api/srcports?hours=N      -> source-port fingerprint / tooling-artifact report (fixed-port tool vs ephemeral stack + shared-port botnet correlation; model + Markdown)
  *   GET  /api/srcports.md?hours=N   -> the same source-port fingerprint report as a downloadable .md file
  *   GET  /api/services?hours=N      -> attack-surface-by-service-class report (remote-access/database/file-share/ICS-IoT roll-up + exposed crown-jewel worklist; model + Markdown)
@@ -211,6 +213,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildCatalog, catalogFilename, type ReportCategory } from "../analytics/catalog.ts";
 import { buildSrcPort, srcportFilename } from "../analytics/srcport.ts";
 import { buildServices, servicesFilename } from "../analytics/services.ts";
 import { buildAudience, audienceFilename } from "../analytics/audience.ts";
@@ -1405,6 +1408,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- report catalog / discovery (self-describing directory of every report; reads no alert data) ---
+      if (method === "GET" && path === "/api/catalog") {
+        const query = url.searchParams.get("q") ?? url.searchParams.get("query") ?? undefined;
+        const category = (url.searchParams.get("category") as ReportCategory | null) ?? undefined;
+        return send(res, 200, buildCatalog({ query, category, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/catalog.md") {
+        const query = url.searchParams.get("q") ?? url.searchParams.get("query") ?? undefined;
+        const category = (url.searchParams.get("category") as ReportCategory | null) ?? undefined;
+        const now = Date.now();
+        const { markdown } = buildCatalog({ query, category, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${catalogFilename(now)}"`,
         });
         res.end(markdown);
         return;
