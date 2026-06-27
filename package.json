@@ -84,6 +84,7 @@
     "fwrules": "node src/index.ts --fwrules",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "stix": "node src/index.ts --stix 168",
+    "sigma": "node src/index.ts --sigma 168",
     "metrics": "node src/index.ts --metrics",
     "catalog": "node src/index.ts --catalog",
     "print-config": "node src/index.ts --print-config",
