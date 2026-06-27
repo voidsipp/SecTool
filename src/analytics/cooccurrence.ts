@@ -261,11 +261,19 @@ interface PairAccum {
   lastSeenMs: number;
 }
 
+/**
+ * Separator byte for {@link pairKey}: an ASCII NUL (U+0000), written as an explicit
+ * `\0` escape rather than a literal control character so it survives editors,
+ * copy-paste, and encoding round-trips and stays visible to readers of this source.
+ */
+const PAIR_KEY_SEP = "\0";
+
 /** Stable, collision-free key for an unordered pair (signatures are lexically sorted). */
 function pairKey(s1: string, s2: string): string {
-  // NOTE: the separator below is a NUL byte — it cannot occur inside a signature
-  // string, so `"A" + "B<NUL>C"` and `"A<NUL>B" + "C"` stay distinct keys.
-  return `${s1} ${s2}`;
+  // NUL cannot occur inside a text-based IDS signature, so `"A" + SEP + "B C"` and
+  // `"A B" + SEP + "C"` stay distinct keys. A plain space would collide here,
+  // because signatures are free-form text that routinely contain spaces.
+  return `${s1}${PAIR_KEY_SEP}${s2}`;
 }
 
 /**
