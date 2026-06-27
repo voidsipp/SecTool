@@ -43,6 +43,7 @@
  *   node src/index.ts --rarity 168    # offline rarity / signal-surprise (TF-IDF which source fires signatures nobody else does — needle vs commodity noise) report (Markdown)
  *   node src/index.ts --autoblock 168 # offline auto-block threshold simulator (sweep "block a source after N alerts"; preventable-volume vs blocks-issued knee curve) report (Markdown)
  *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
+ *   node src/index.ts --graph 168     # offline attack-graph visualization (source→target topology as GraphViz DOT by default; --format mermaid|md|json) export
  *   node src/index.ts --artifacts 168 # offline payload-artifact / embedded-IOC (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
  *   node src/index.ts --srcports 168  # offline source-port fingerprint / tooling-artifact (fixed-port tool vs ephemeral stack; shared-port botnet correlation) report (Markdown)
@@ -138,6 +139,7 @@ import { buildTraffic } from "./analytics/traffic.ts";
 import { buildAutoblock } from "./analytics/autoblock.ts";
 import { buildPortSig } from "./analytics/portsig.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
+import { buildAttackGraph, parseGraphFormat, renderGraph } from "./analytics/graph.ts";
 import { buildArtifacts } from "./analytics/artifacts.ts";
 import { buildSrcPort } from "./analytics/srcport.ts";
 import { buildPriority } from "./analytics/priority.ts";
@@ -1982,6 +1984,37 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown co-targeting report to stdout.
       console.log(buildCoTarget(hours, { limit, assetLimit: limit, minShared, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Attack-graph visualization export (GraphViz DOT / Mermaid / Markdown / JSON).
+    const graphIdx = argv.findIndex((a) => a === "--graph" || a.startsWith("--graph="));
+    if (graphIdx !== -1) {
+      const inline = argv[graphIdx]!.split("=")[1];
+      const next = argv[graphIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so slower, selective topology has time to fill in.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --graph hours: "${raw}". Use e.g. --graph 168`);
+        process.exit(2);
+      }
+      // Optional `--format dot|mermaid|md|json` — DOT by default (paste into `dot -Tsvg`).
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseGraphFormat(fmtRaw);
+      // Optional `--max-nodes N` caps both the source and target columns.
+      let maxNodes: number | undefined;
+      const mnIdx = argv.findIndex((a) => a === "--max-nodes" || a.startsWith("--max-nodes="));
+      if (mnIdx !== -1) {
+        const v = argv[mnIdx]!.split("=")[1] ?? argv[mnIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) maxNodes = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested graph format to stdout.
+      const model = buildAttackGraph(hours, { maxSources: maxNodes, maxTargets: maxNodes, nowMs: Date.now() });
+      process.stdout.write(renderGraph(model, format) + "\n");
       return;
     }
     const artifactsIdx = argv.findIndex(

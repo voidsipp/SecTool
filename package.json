@@ -50,6 +50,7 @@
     "portsig": "node src/index.ts --portsig 168",
     "rarity": "node src/index.ts --rarity 168",
     "cotarget": "node src/index.ts --cotarget 168",
+    "graph": "node src/index.ts --graph 168",
     "artifacts": "node src/index.ts --artifacts 168",
     "services": "node src/index.ts --services 168",
     "srcports": "node src/index.ts --srcports 168",
