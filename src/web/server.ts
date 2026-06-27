@@ -122,6 +122,8 @@
  *   GET  /api/noise.md?hours=N      -> the same alert-noise report as a downloadable .md file
  *   GET  /api/patterns?hours=N      -> attacker patterns-of-life / operating-hours report (bot-vs-human-shift clock fingerprint + timezone attribution; model + Markdown)
  *   GET  /api/patterns.md?hours=N   -> the same patterns-of-life report as a downloadable .md file
+ *   GET  /api/offhours?hours=N      -> off-hours / defender coverage-gap report (staffed-vs-unattended attack pressure + serious detect-only exposure; model + Markdown)
+ *   GET  /api/offhours.md?hours=N   -> the same off-hours coverage-gap report as a downloadable .md file
  *   GET  /api/burstiness?hours=N    -> burstiness / temporal-texture report (per-source Goh-Barabási B + memory coeff: bursty tooling vs Poisson drizzle vs metronome cadence; model + Markdown)
  *   GET  /api/burstiness.md?hours=N -> the same burstiness report as a downloadable .md file
  *   GET  /api/convergence?hours=N   -> temporal-convergence / coordinated-strike report (peak distinct sources per target/signature in one window: botnet / DDoS / distributed-spray flash crowd; model + Markdown)
@@ -238,6 +240,7 @@ import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
 import { buildPatterns, patternsFilename } from "../analytics/patterns.ts";
+import { buildOffHours, offhoursFilename } from "../analytics/offhours.ts";
 import { buildRecidivism, recidivismFilename } from "../analytics/recidivism.ts";
 import { buildMttb, mttbFilename } from "../analytics/mttb.ts";
 import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist.ts";
@@ -1908,6 +1911,39 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         });
         res.end(markdown);
         return;
+      }
+
+      // --- off-hours / defender coverage-gap (staffed vs unattended attack pressure + serious detect-only exposure) ---
+      if (method === "GET" && (path === "/api/offhours" || path === "/api/offhours.md")) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 15;
+        const minAlerts = Number(url.searchParams.get("min")) || undefined;
+        const tzOffset = url.searchParams.has("tz") ? Number(url.searchParams.get("tz")) : undefined;
+        const bizStart = url.searchParams.has("start") ? Number(url.searchParams.get("start")) : undefined;
+        const bizEnd = url.searchParams.has("end") ? Number(url.searchParams.get("end")) : undefined;
+        // ?weekends=on (or all/true) treats weekend business hours as staffed (a 7-day shop).
+        const weekendsParam = (url.searchParams.get("weekends") ?? "").toLowerCase();
+        const weekendsOff = !["on", "all", "true", "1"].includes(weekendsParam);
+        const opts = {
+          limit,
+          minAlerts: Number.isFinite(minAlerts as number) ? minAlerts : undefined,
+          tzOffset: Number.isFinite(tzOffset as number) ? tzOffset : undefined,
+          bizStart: Number.isFinite(bizStart as number) ? bizStart : undefined,
+          bizEnd: Number.isFinite(bizEnd as number) ? bizEnd : undefined,
+          weekendsOff,
+        };
+        if (path === "/api/offhours.md") {
+          const now = Date.now();
+          const { markdown } = buildOffHours(hours, { ...opts, nowMs: now });
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${offhoursFilename(now)}"`,
+          });
+          res.end(markdown);
+          return;
+        }
+        return send(res, 200, buildOffHours(hours, { ...opts, nowMs: Date.now() }));
       }
 
       // --- burstiness / temporal-texture (bursty tooling vs Poisson drizzle vs metronome) ---
