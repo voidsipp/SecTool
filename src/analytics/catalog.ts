@@ -281,6 +281,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Safelist risk audit", "Is a vetted-benign / allow-listed IP still attacking you?"),
   entry("Controls / enforcement", "hygiene", "--hygiene", "/api/hygiene", 720,
     "Blocklist hygiene", "Stale IOCs: which blocks to keep versus prune."),
+  entry("Controls / enforcement", "fwrules", "--fwrules", "/api/fwrules", null,
+    "Firewall-rule export", "Renders the enforced blocklist into ready-to-apply config for 10 firewall dialects (ipset/iptables/nftables/UFW/pf/Cisco/MikroTik/EdgeRouter-VyOS-UniFi/Windows/plain CIDR); safelisted IPs excluded by default, advisory CIDR-rollup hints. The codegen step after the iocs IP list."),
   entry("Controls / enforcement", "suppaudit", "--suppaudit", "/api/suppaudit", 168,
     "Suppression audit", "Are your alert-suppression rules effective — and are they hiding anything live?"),
   entry("Controls / enforcement", "watchlist", "--watchlist", "/api/watchlist-activity", 24,
