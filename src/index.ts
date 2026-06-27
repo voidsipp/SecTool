@@ -40,6 +40,7 @@
  *   node src/index.ts --ports 168     # offline service / port-exposure (which service is attacked / exposed) report (Markdown)
  *   node src/index.ts --scan 168      # offline scan-shape / reconnaissance-pattern (horizontal vs vertical vs sweep) report (Markdown)
  *   node src/index.ts --portsig 168   # offline port-signature scanner-fingerprint (which attacker toolkit each source's port-set betrays) report (Markdown)
+ *   node src/index.ts --rarity 168    # offline rarity / signal-surprise (TF-IDF which source fires signatures nobody else does — needle vs commodity noise) report (Markdown)
  *   node src/index.ts --cotarget 168  # offline co-targeting / shared-attacker affinity (which of your hosts share adversaries; blast-radius clusters) report (Markdown)
  *   node src/index.ts --artifacts 168 # offline payload-artifact / embedded-IOC (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads) report (Markdown)
  *   node src/index.ts --services 168  # offline attack-surface-by-service-class (remote-access/database/file-share/ICS-IoT; exposed crown-jewel surface) report (Markdown)
@@ -121,6 +122,7 @@ import { buildHygiene } from "./analytics/hygiene.ts";
 import { buildRecurrence } from "./analytics/recurrence.ts";
 import { buildPorts } from "./analytics/ports.ts";
 import { buildScan } from "./analytics/scan.ts";
+import { buildRarity } from "./analytics/rarity.ts";
 import { buildPortSig } from "./analytics/portsig.ts";
 import { buildCoTarget } from "./analytics/cotarget.ts";
 import { buildArtifacts } from "./analytics/artifacts.ts";
@@ -1268,6 +1270,40 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown scan-shape report to stdout.
       console.log(buildScan(hours, { limit, hostThreshold, portThreshold, nowMs: Date.now() }).markdown);
+      return;
+    }
+    // Rarity / signal-surprise — TF-IDF which source fires signatures nobody else does.
+    const rarityIdx = argv.findIndex((a) => a === "--rarity" || a.startsWith("--rarity="));
+    if (rarityIdx !== -1) {
+      const inline = argv[rarityIdx]!.split("=")[1];
+      const next = argv[rarityIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the rare, low-volume actors have time to appear.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --rarity hours: "${raw}". Use e.g. --rarity 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap the per-source and rarest-signature tables.
+      let limit = 20;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min-alerts N` to tune the volume gate before a source is scored.
+      let minAlerts: number | undefined;
+      const maIdx = argv.findIndex((a) => a === "--min-alerts" || a.startsWith("--min-alerts="));
+      if (maIdx !== -1) {
+        const v = argv[maIdx]!.split("=")[1] ?? argv[maIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown rarity report to stdout.
+      console.log(buildRarity(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
       return;
     }
     // Port-signature scanner-fingerprint — which attacker toolkit each source's port-set betrays.

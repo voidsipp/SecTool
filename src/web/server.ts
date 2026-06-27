@@ -82,6 +82,8 @@
  *   GET  /api/scan.md?hours=N       -> the same scan-shape report as a downloadable .md file
  *   GET  /api/portsig?hours=N       -> port-signature scanner-fingerprint report (which attacker toolkit each source's port-set betrays; model + Markdown)
  *   GET  /api/portsig.md?hours=N    -> the same port-signature report as a downloadable .md file
+ *   GET  /api/rarity?hours=N        -> rarity / signal-surprise report (TF-IDF which source fires signatures nobody else does; model + Markdown)
+ *   GET  /api/rarity.md?hours=N     -> the same rarity report as a downloadable .md file
  *   GET  /api/cotarget?hours=N      -> co-targeting / shared-attacker affinity report (which internal assets share adversaries; blast-radius clusters; model + Markdown)
  *   GET  /api/cotarget.md?hours=N   -> the same co-targeting report as a downloadable .md file
  *   GET  /api/artifacts?hours=N     -> payload-artifact / embedded-IOC report (domains, URLs, file hashes, CVEs, tool user-agents mined from raw payloads; model + Markdown)
@@ -225,6 +227,7 @@ import { buildHygiene, hygieneFilename } from "../analytics/hygiene.ts";
 import { buildRecurrence, recurrenceFilename } from "../analytics/recurrence.ts";
 import { buildPorts, portsFilename } from "../analytics/ports.ts";
 import { buildScan, scanFilename } from "../analytics/scan.ts";
+import { buildRarity, rarityFilename } from "../analytics/rarity.ts";
 import { buildPortSig, portSigFilename } from "../analytics/portsig.ts";
 import { buildCoTarget, cotargetFilename } from "../analytics/cotarget.ts";
 import { buildArtifacts, artifactsFilename } from "../analytics/artifacts.ts";
@@ -1426,6 +1429,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${scanFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- rarity / signal-surprise (TF-IDF which source fires signatures nobody else does) ---
+      if (method === "GET" && path === "/api/rarity") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        return send(res, 200, buildRarity(hours, { limit, minAlerts, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/rarity.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || 20;
+        const minAlerts = Number(url.searchParams.get("minAlerts")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildRarity(hours, { limit, minAlerts, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${rarityFilename(now)}"`,
         });
         res.end(markdown);
         return;
