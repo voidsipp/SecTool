@@ -112,6 +112,8 @@
  *   GET  /api/convergence.md?hours=N -> the same convergence report as a downloadable .md file
  *   GET  /api/mitre?hours=N         -> MITRE ATT&CK coverage report (tactic + technique mapping of the alert history; model + Markdown)
  *   GET  /api/mitre.md?hours=N      -> the same ATT&CK coverage report as a downloadable .md file
+ *   GET  /metrics                   -> Prometheus / OpenMetrics scrape target (store saturation, last-alert age, severity/disposition/category splits, control-plane sizes, triage backlog)
+ *   GET  /api/metrics               -> the same Prometheus exposition under the /api prefix
  *   GET  /api/iocs?hours=N&format=  -> threat-indicator export (json|csv|plain|markdown) for blocklists/SIEM
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
@@ -218,6 +220,7 @@ import { buildSafelistAudit, safelistAuditFilename } from "../analytics/safelist
 import { buildBlockPlan, blockPlanFilename } from "../analytics/blockplan.ts";
 import { buildBriefing, briefingFilename, ALL_SECTION_KEYS, type BriefingSectionKey } from "../analytics/briefing.ts";
 import { buildCooccurrence, cooccurrenceFilename } from "../analytics/cooccurrence.ts";
+import { buildMetrics } from "./metrics.ts";
 import {
   buildIocExport,
   renderIoc,
@@ -311,6 +314,19 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           triage: triageStore.counts(),
           suppressions: suppressionStore.count(),
         });
+      }
+
+      // --- prometheus / openmetrics scrape target ---
+      // Served at both the conventional `/metrics` path Prometheus probes by
+      // default and under `/api/` for symmetry with the rest of the surface.
+      if (method === "GET" && (path === "/metrics" || path === "/api/metrics")) {
+        const body = buildMetrics(cfg, { nowMs: Date.now() });
+        res.writeHead(200, {
+          "content-type": "text/plain; version=0.0.4; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        res.end(body);
+        return;
       }
 
       // --- restore all dismissed ---

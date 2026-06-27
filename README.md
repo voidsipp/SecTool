@@ -68,6 +68,7 @@ In the UniFi Network app:
 npm start            # start the service
 npm run self-test    # inject a synthetic IPS alert end-to-end (posts to Discord)
 npm run print-config # show the resolved config (secrets redacted)
+npm run metrics      # print the Prometheus/OpenMetrics exposition (also served at GET /metrics)
 npm run typecheck    # tsc --noEmit
 ```
 
@@ -416,6 +417,49 @@ alert history — **no SSH, no Claude, no live gateway query**.
 
 - `GET /api/iocs?hours=N&format=json|csv|plain|markdown&minSeverity=medium[&includeSafe=1]` → the export in the requested format (`json` returns the structured model inline; the others download as a file).
 - `node src/index.ts --iocs 168 [--format plain] [--min-severity medium]` (or `npm run iocs`) → print the export to stdout (defaults to a 7-day window and the `plain` blocklist format, ideal for piping into `ipset restore`).
+
+## 📈 Prometheus / OpenMetrics endpoint (`GET /metrics`, `--metrics`)
+
+Every other surface answers a question **after the fact** — a Markdown report you
+open, a dashboard panel you glance at, a digest you skim in the morning. This one
+lets your **monitoring system** watch SecTool continuously, with no human in the
+loop. It exposes SecTool's live state as a flat set of gauges in the Prometheus
+text exposition format (v0.0.4, also valid OpenMetrics), so Grafana graphs it and
+Alertmanager fires on it. The alarms it unlocks — none of which exist today:
+
+- **Sensor / pipeline down.** `sectool_last_alert_age_seconds` climbing past a
+  threshold means the syslog feed went quiet (collector outage, gateway reboot,
+  dropped UDP stream) — a "no alerts" stretch that reads as "no *visibility*",
+  the most dangerous silent failure. Alert on e.g. `sectool_last_alert_age_seconds > 3600`.
+- **Severity spike.** `sectool_alerts_window{window="1h"}` and
+  `sectool_alerts_window_by_severity{window="24h",severity="critical"}` page on a
+  sudden surge the moment it happens, not at the next briefing.
+- **Store truncation.** `sectool_alert_store_saturation_ratio` nearing `1.0` warns
+  the bounded history is evicting the past, so every windowed report is quietly
+  understating it.
+- **Control-plane drift.** `sectool_blocklist_size`, `sectool_watchlist_size` and
+  `sectool_triage{status="open"}` turn "is the queue growing unboundedly?" into a
+  graph and an alert.
+
+Cardinality is bounded by design — no raw IP or signature is ever a label;
+severity, disposition, triage status and window are fixed enumerations, and the
+only data-driven family (`category`) is capped to the top 12 with the tail folded
+into `other`. Everything is an **instantaneous gauge** (the store is capped and
+rotated, so a fake monotonic `_total` counter would silently reset and break
+`rate()`). Pure offline math over the local stores — **no SSH, no Claude, no live
+gateway query** — so a scrape is microseconds and safe to hit every 15s.
+
+- `GET /metrics` (the path Prometheus probes by default) or `GET /api/metrics` → the exposition as `text/plain; version=0.0.4`.
+- `node src/index.ts --metrics` (or `npm run metrics`) → print the same exposition to stdout for a quick eyeball.
+
+Example scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: sectool
+    static_configs:
+      - targets: ["localhost:8787"]   # SecTool's WEB_PORT
+```
 
 ## ⛓️ Kill-chain / attack-stage report (`GET /api/killchain[.md]`, `--killchain`)
 

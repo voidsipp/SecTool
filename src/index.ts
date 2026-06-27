@@ -5,6 +5,7 @@
  *   node src/index.ts                 # run the service
  *   node src/index.ts --self-test     # push a synthetic alert end-to-end
  *   node src/index.ts --print-config  # print the resolved config (redacted)
+ *   node src/index.ts --metrics       # print Prometheus/OpenMetrics exposition of current state (also at GET /metrics)
  *   node src/index.ts --compare 24    # offline period-over-period comparison (Markdown)
  *   node src/index.ts --profile <ip>  # offline single-IP profile report (Markdown)
  *   node src/index.ts --assets 24     # offline internal-asset exposure scoreboard (Markdown)
@@ -126,6 +127,7 @@ import { buildSafelistAudit } from "./analytics/safelist.ts";
 import { buildBlockPlan } from "./analytics/blockplan.ts";
 import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./analytics/briefing.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
+import { buildMetrics } from "./web/metrics.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -288,6 +290,14 @@ async function main(): Promise<void> {
   try {
     if (args.has("--print-config")) {
       console.log(JSON.stringify(redactConfig(loadConfig()), null, 2));
+      return;
+    }
+    if (args.has("--metrics")) {
+      // Offline, deterministic: print the Prometheus/OpenMetrics exposition of
+      // the current stored state to stdout (also served live at GET /metrics).
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      process.stdout.write(buildMetrics(cfg, { nowMs: Date.now() }));
       return;
     }
     if (args.has("--self-test")) {
