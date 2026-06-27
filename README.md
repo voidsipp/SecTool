@@ -980,6 +980,57 @@ watchlist / safelist membership) — **no SSH, no Claude, no live gateway query*
 - `GET /api/repertoire.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --repertoire 168 [--limit 20] [--min-alerts 2]` (or `npm run repertoire`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow operator has time to reveal breadth).
 
+## 🕒 Source dwell-time & engagement-session report (`GET /api/dwell[.md]`, `--dwell`)
+
+Every *temporal* report already exists — the [rhythm report](#-temporal-activity-rhythm-report)
+folds the whole network into an hour-of-day heatmap, the surge report finds volume
+spikes, the [beacon report](#-beacon--periodicity-report) hunts metronomic
+fixed-interval C2 pings, and the [persistence report](#-persistence--repeat-offender-report)
+counts the distinct *days* a source reappears. None of them segment a **single
+source's timeline into sessions** and answer the responder's first triage
+question about an active actor: *is this one sustained sitting (camped, hands-on,
+working a target right now) or a thin scatter of drive-by touches across the
+week?* Two sources with the **same alert count and the same first/last
+timestamps** can be a solid three-hour intrusion or twelve one-second pokes spread
+over six days — opposite threats that every count- and span-based report renders
+identically. The difference lives in the **gaps**, which nothing else measures.
+
+For every source it sorts the alert timestamps and **sessionises** them — a new
+sitting begins whenever the idle gap exceeds a threshold (default **30 min**,
+`--gap`/`?gap=`) — then derives the **dwell span** (first→last), the **number of
+sittings**, the **longest / mean sitting**, the **active time & duty cycle** (Σ
+sitting durations as a fraction of the span: how *present* the source was), and
+the **longest idle gap**. From those it assigns a one-word engagement pattern:
+
+- **🔥 sustained** — one long continuous sitting, or many covering ≥50% of a
+  non-trivial span: camped on you *now*, the highest-priority thing to look at.
+- **🔁 intermittent** — three or more separated sittings: a returner that keeps
+  coming back (low-and-slow, or a scheduled job / beacon too ragged for the
+  beacon report).
+- **• sporadic** — a couple of touches spread thin across a wide span.
+- **⚡ transient** — a single short burst then gone (a one-off scan / probe).
+
+Sources are ranked by a 0–100 **engagement score** (dwell span as a fraction of
+the window, duty cycle, return count, worst severity) so the source most
+*entrenched in time* floats up — deliberately a different axis from the volume-,
+reach- and breadth-ranked reports, surfacing the quiet long camp a top-by-count
+table buries. Each row carries the first-seen age, dwell, sittings, longest
+sitting, duty cycle, max idle gap, worst severity, and blocklist / watchlist /
+safelist membership; **internal** hosts with sustained/intermittent engagement are
+flagged as a beaconing / data-staging tell.
+
+Honest about its limits: these are IPS **detections**, not presence — a gap is a
+gap in *alerting*, not proof of absence, so dwell span is a lower bound and the
+duty cycle an under-estimate (a careful operator can read as "sporadic"); the
+sitting threshold is a heuristic (the raw span and count are always shown); and a
+long look-back can hit the alert store's history cap and clip the earliest
+sittings. Pure offline math over the local alert history (plus blocklist /
+watchlist / safelist membership) — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/dwell?hours=N[&limit=20][&minAlerts=2][&gap=30]` → the structured model **plus** rendered Markdown (per-source dwell table).
+- `GET /api/dwell.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --dwell 168 [--limit 20] [--min-alerts 2] [--gap 30]` (or `npm run dwell`) → print the Markdown to stdout (defaults to a 7-day window so a low-and-slow returner has time to reveal its sittings).
+
 ## ⚔️ MITRE ATT&CK coverage report (`GET /api/mitre[.md]`, `--mitre`)
 
 Every other report describes the threat in *SecTool's own* vocabulary — sources,
