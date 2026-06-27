@@ -54,6 +54,7 @@
  *   node src/index.ts --mitre 168     # offline MITRE ATT&CK tactic/technique coverage report (Markdown)
  *   node src/index.ts --cwe 168       # offline CWE weakness-class coverage (which software-weakness classes are being probed/exploited; SQLi/traversal/overflow/auth…) report (Markdown)
  *   node src/index.ts --concentration 168 # offline threat-concentration / Pareto-Gini (block-and-win vs diffuse storm) report (Markdown)
+ *   node src/index.ts --drift 168     # offline severity-mix drift / threat-quality-trend (is the average alert getting nastier over time, independent of volume) report (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --noise 168     # offline alert-noise / stream-redundancy (de-dup / suppression-candidate) report (Markdown)
@@ -155,6 +156,7 @@ import { buildRepertoire } from "./analytics/repertoire.ts";
 import { buildMomentum } from "./analytics/momentum.ts";
 import { buildDwell } from "./analytics/dwell.ts";
 import { buildConcentration } from "./analytics/concentration.ts";
+import { buildDrift } from "./analytics/drift.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
 import { buildNoise } from "./analytics/noise.ts";
@@ -2220,6 +2222,31 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown concentration report to stdout.
       console.log(buildConcentration(hours, { limit, quickWinLimit, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const driftIdx = argv.findIndex((a) => a === "--drift" || a.startsWith("--drift="));
+    if (driftIdx !== -1) {
+      const inline = argv[driftIdx]!.split("=")[1];
+      const next = argv[driftIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so the severity mix has room to actually move.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --drift hours: "${raw}". Use e.g. --drift 168`);
+        process.exit(2);
+      }
+      // Optional `--buckets N` to control how finely the window is sliced.
+      let buckets: number | undefined;
+      const bucketsIdx = argv.findIndex((a) => a === "--buckets" || a.startsWith("--buckets="));
+      if (bucketsIdx !== -1) {
+        const v = argv[bucketsIdx]!.split("=")[1] ?? argv[bucketsIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) buckets = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown drift report to stdout.
+      console.log(buildDrift(hours, { buckets, nowMs: Date.now() }).markdown);
       return;
     }
     const cohortIdx = argv.findIndex((a) => a === "--cohort" || a.startsWith("--cohort="));

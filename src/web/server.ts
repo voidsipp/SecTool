@@ -136,6 +136,8 @@
  *   GET  /api/dwell.md?hours=N      -> the same dwell-time report as a downloadable .md file
  *   GET  /api/concentration?hours=N -> threat-concentration / Pareto-Gini report (block-and-win vs diffuse storm across sources/signatures/targets; model + Markdown)
  *   GET  /api/concentration.md?hours=N -> the same concentration report as a downloadable .md file
+ *   GET  /api/drift?hours=N         -> severity-mix drift / threat-quality trend (is the average alert getting nastier over time, independent of volume; model + Markdown)
+ *   GET  /api/drift.md?hours=N      -> the same drift report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
  *   GET  /api/cohort.md?hours=N     -> the same cohort-retention report as a downloadable .md file
  *   GET  /api/suppaudit?hours=N     -> suppression-rule audit (which silence rules are effective / dead / shadowed / risky; model + Markdown)
@@ -288,6 +290,7 @@ import { buildRepertoire, repertoireFilename } from "../analytics/repertoire.ts"
 import { buildMomentum, momentumFilename } from "../analytics/momentum.ts";
 import { buildDwell, dwellFilename } from "../analytics/dwell.ts";
 import { buildConcentration, concentrationFilename } from "../analytics/concentration.ts";
+import { buildDrift, driftFilename } from "../analytics/drift.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
 import { buildSuppressionAudit, suppressionAuditFilename } from "../analytics/suppressions.ts";
 import { buildNoise, noiseFilename } from "../analytics/noise.ts";
@@ -2157,6 +2160,26 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${concentrationFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- severity-mix drift / threat-quality trend (is the average alert getting nastier over time) ---
+      if (method === "GET" && path === "/api/drift") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const buckets = Number(url.searchParams.get("buckets")) || undefined;
+        return send(res, 200, buildDrift(hours, { buckets, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/drift.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const buckets = Number(url.searchParams.get("buckets")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildDrift(hours, { buckets, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${driftFilename(now)}"`,
         });
         res.end(markdown);
         return;
