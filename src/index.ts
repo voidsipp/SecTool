@@ -100,6 +100,7 @@
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
  *   node src/index.ts --snort 168     # offline Snort/Suricata native IDS-rule export: ready-to-load .rules feeding observed attackers back into the sensor (bidirectional <> $HOME_NET, deterministic sids); --format snort|iprep|md, --action drop|reject, --consolidated (rules)
  *   node src/index.ts --pcap 168      # offline forensic packet-capture filter generator: ready-to-run tcpdump/Wireshark/tshark filters + commands to grab the raw packets of your worst attackers; --format wireshark|tshark|json|md, --iface eth0, --limit N (text)
+ *   node src/index.ts --dns 168       # offline DNS sinkhole / blocklist export: malicious domains mined from alert payloads as a ready-to-load hosts/dnsmasq/unbound/RPZ/Pi-hole blocklist (benign-infra skip-list on by default); --format dnsmasq|unbound|rpz|pihole|json|md, --sinkhole IP, --min N, --include-benign (text)
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
  *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
  *   node src/index.ts --ecs 168       # offline ECS (Elastic Common Schema) event export: one ECS JSON document per alert for Elasticsearch/OpenSearch/Kibana; _bulk-ready by default; --format ndjson|json|md, --index NAME, --limit N (NDJSON)
@@ -212,6 +213,7 @@ import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from ".
 import { buildStix } from "./analytics/stix.ts";
 import { buildSigma } from "./analytics/sigma.ts";
 import { buildSnort, parseSnortFormat, parseSnortAction } from "./analytics/snort.ts";
+import { buildDnsExport, parseDnsFormat } from "./analytics/dnsExport.ts";
 import { buildPcap, parsePcapFormat } from "./analytics/pcap.ts";
 import { buildMetrics } from "./web/metrics.ts";
 import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
@@ -3538,6 +3540,66 @@ async function main(): Promise<void> {
         dialect,
         format,
         action,
+        nowMs: Date.now(),
+      });
+      if (format === "md") {
+        console.log(model.markdown);
+      } else if (format === "json") {
+        console.log(JSON.stringify(model, null, 2));
+      } else {
+        process.stdout.write(model.text.endsWith("\n") ? model.text : model.text + "\n");
+      }
+      return;
+    }
+    // DNS sinkhole / blocklist export (turn mined payload domains into DNS-layer blocks).
+    const dnsIdx = argv.findIndex((a) => a === "--dns" || a.startsWith("--dns="));
+    if (dnsIdx !== -1) {
+      const inline = argv[dnsIdx]!.split("=")[1];
+      const next = argv[dnsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --dns hours: "${raw}". Use e.g. --dns 168`);
+        process.exit(2);
+      }
+      // Optional `--format hosts|dnsmasq|unbound|rpz|pihole|json|md` — hosts by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseDnsFormat(fmtRaw);
+      // Optional `--min-severity info|low|medium|high|critical` (default none).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--min N` minimum alert count for a domain to qualify (default 1).
+      let minCount: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min" || a.startsWith("--min="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minCount = n;
+      }
+      // Optional `--limit N` cap on emitted domains (highest confidence first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--sinkhole IP` address for hosts/dnsmasq/rpz (default 0.0.0.0).
+      const skIdx = argv.findIndex((a) => a === "--sinkhole" || a.startsWith("--sinkhole="));
+      const sinkhole = skIdx !== -1 ? (argv[skIdx]!.split("=")[1] ?? argv[skIdx + 1]) : undefined;
+      const includeBenign = args.has("--include-benign");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the blocklist (or the JSON model / Markdown review twin).
+      const model = buildDnsExport(hours, {
+        format,
+        minSeverity,
+        minCount,
+        limit,
+        sinkhole,
+        includeBenign,
         nowMs: Date.now(),
       });
       if (format === "md") {

@@ -208,6 +208,8 @@
  *   GET  /api/snort.rules?hours=N   -> the same ruleset as a downloadable .rules file
  *   GET  /api/pcap?hours=N          -> forensic packet-capture filters/commands for your worst attackers (?format=tcpdump|wireshark|tshark|json|md, ?iface=eth0, ?limit=N) — tcpdump/Wireshark/tshark
  *   GET  /api/pcap.txt?hours=N      -> the same filter/command set as a downloadable text file
+ *   GET  /api/dns?hours=N           -> DNS sinkhole / blocklist of domains mined from alert payloads (?format=hosts|dnsmasq|unbound|rpz|pihole|json|md, ?sinkhole=IP, ?min=N, ?minSeverity=, ?limit=N, ?includeBenign=1)
+ *   GET  /api/dns.txt?hours=N       -> the same blocklist as a downloadable file (extension follows the format)
  *   GET  /api/feed[?format=]        -> alert syndication feed (RSS 2.0 default; format=atom|json) for any feed reader / Slack / Teams (?hours, ?minSeverity, ?limit)
  *   GET  /api/feed.xml|.atom|.json  -> the same feed as a downloadable RSS / Atom / JSON Feed file
  *   GET  /api/cef[?format=]         -> CEF/LEEF SIEM event export, one line per alert (format=cef|leef|json|markdown) for ArcSight/Splunk/Sentinel/QRadar (?hours, ?limit)
@@ -380,6 +382,7 @@ import {
 import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
 import { buildSnort, snortFilename, parseSnortFormat, parseSnortAction } from "../analytics/snort.ts";
+import { buildDnsExport, dnsFilename, parseDnsFormat } from "../analytics/dnsExport.ts";
 import { buildPcap, pcapFilename, parsePcapFormat } from "../analytics/pcap.ts";
 import {
   buildCefExport,
@@ -3007,6 +3010,54 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         };
         if (path === "/api/snort.rules") {
           headers["content-disposition"] = `attachment; filename="${snortFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.text);
+        return;
+      }
+
+      // --- DNS sinkhole / blocklist export (DNS-layer block of mined payload domains) ---
+      // ?hours=N · ?format=hosts|dnsmasq|unbound|rpz|pihole|json|md · ?sinkhole=IP
+      // ?min=N · ?minSeverity=medium · ?limit=N · ?includeBenign=1
+      if (method === "GET" && (path === "/api/dns" || path === "/api/dns.txt")) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const format = parseDnsFormat(url.searchParams.get("format"));
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const minRaw = Number(url.searchParams.get("min"));
+        const minCount = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : undefined;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const sinkhole = url.searchParams.get("sinkhole") ?? undefined;
+        const includeBenign = url.searchParams.get("includeBenign") === "1";
+        const now = Date.now();
+        const model = buildDnsExport(hours, {
+          format,
+          minSeverity,
+          minCount,
+          limit,
+          sinkhole,
+          includeBenign,
+          nowMs: now,
+        });
+        if (format === "md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${dnsFilename(now, "md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        if (format === "json") {
+          send(res, 200, model);
+          return;
+        }
+        const headers: Record<string, string> = {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/dns.txt") {
+          headers["content-disposition"] = `attachment; filename="${dnsFilename(now, format)}"`;
         }
         res.writeHead(200, headers);
         res.end(model.text);
