@@ -3,7 +3,7 @@
 # Run this ELEVATED (Administrator). It will:
 #   1. Install NSSM (via winget) if it isn't already present.
 #   2. Stop any temporary SecTool instance so port 5514 is free.
-#   3. (Re)create the "SecTool" service -> node src/index.ts, auto-start on boot,
+#   3. (Re)create the "SecTool" service -> node src/start.mjs, auto-start on boot,
 #      with logging and automatic restart on crash.
 #   4. Start it and show the status.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +23,10 @@ $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = "C:\Program Files\nodejs\node.exe" }
 if (-not (Test-Path $node)) { Fail "node.exe not found. Install Node.js or edit `$node in this script." }
 
-$entry = Join-Path $ProjectDir "src\index.ts"
+# Launch via the JS preflight launcher (src\start.mjs), not src\index.ts directly:
+# it verifies the Node version can run the TypeScript sources and fails with a
+# clear message (instead of a cryptic "Unknown file extension .ts") on old Node.
+$entry = Join-Path $ProjectDir "src\start.mjs"
 if (-not (Test-Path $entry)) { Fail "Could not find $entry. Run this script from the SecTool folder." }
 Write-Host "node : $node"
 Write-Host "entry: $entry"
@@ -57,7 +60,7 @@ Write-Host "nssm : $nssm"
 # --- Stop any temporary instances holding the port ----------------------------
 Write-Host "Stopping any running SecTool instances..." -ForegroundColor Cyan
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -and $_.CommandLine -match 'SecTool|index\.ts' } |
+  Where-Object { $_.CommandLine -and $_.CommandLine -match 'SecTool|index\.ts|start\.mjs' } |
   ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host "  stopped pid $($_.ProcessId)" } catch {} }
 
 # --- Recreate the service (idempotent) ---------------------------------------
