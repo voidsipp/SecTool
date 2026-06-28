@@ -28,6 +28,8 @@
  *   GET  /api/watchlist-activity.md?hours=N -> the same watchlist activity report as a downloadable .md file
  *   GET  /api/rhythm?hours=N&tz=M   -> temporal activity rhythm (hour/day heat-map; model + Markdown)
  *   GET  /api/rhythm.md?hours=N&tz=M -> the same rhythm report as a downloadable .md file
+ *   GET  /api/maintenance?hours=N&duration=H&limit=N&tz=M -> maintenance / change-window recommender: calmest non-overlapping slots to book a change (model + Markdown)
+ *   GET  /api/maintenance.md?hours=N&duration=H&limit=N&tz=M -> the same change-window report as a downloadable .md file
  *   GET  /api/backlog?hours=N       -> triage SLA backlog (open/overdue queue + throughput; model + Markdown)
  *   GET  /api/backlog.md?hours=N    -> the same backlog report as a downloadable .md file
  *   GET  /api/novelty?hours=N       -> first-seen / novelty report (new src/dst/signatures; model + Markdown)
@@ -273,6 +275,7 @@ import { buildAssets, assetsFilename } from "../analytics/assets.ts";
 import { buildTuning, tuningFilename } from "../analytics/tuning.ts";
 import { buildWatchlist, watchlistFilename } from "../analytics/watchlist.ts";
 import { buildRhythm, rhythmFilename } from "../analytics/rhythm.ts";
+import { buildMaintenance, maintenanceFilename } from "../analytics/maintenance.ts";
 import { buildBacklog, backlogFilename } from "../analytics/backlog.ts";
 import { buildNovelty, noveltyFilename } from "../analytics/novelty.ts";
 import { buildKillChain, killChainFilename } from "../analytics/killchain.ts";
@@ -999,6 +1002,30 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${rhythmFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- maintenance / change-window recommender (calmest slot to book a change) ---
+      if (method === "GET" && path === "/api/maintenance") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const durationHours = Number(url.searchParams.get("duration")) || undefined;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const tzOffsetMinutes = Number(url.searchParams.get("tz")) || 0;
+        return send(res, 200, buildMaintenance(hours, { durationHours, limit, tzOffsetMinutes, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/maintenance.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const durationHours = Number(url.searchParams.get("duration")) || undefined;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const tzOffsetMinutes = Number(url.searchParams.get("tz")) || 0;
+        const now = Date.now();
+        const { markdown } = buildMaintenance(hours, { durationHours, limit, tzOffsetMinutes, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${maintenanceFilename(now)}"`,
         });
         res.end(markdown);
         return;
