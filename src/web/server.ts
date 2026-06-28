@@ -158,6 +158,8 @@
  *   GET  /api/vector.md?hours=N&limit=N -> the same entry-vector report as a downloadable .md file
  *   GET  /api/potency?hours=N&limit=N&min=N -> threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) into sniper/brawler/flood/background quadrants with the %volume↔%weight gap (model + Markdown)
  *   GET  /api/potency.md?hours=N&limit=N&min=N -> the same threat-potency report as a downloadable .md file
+ *   GET  /api/lexicon?hours=N&limit=N&min=N -> threat-lexicon / signature vocabulary: tokenises signature text into a ranked term-frequency table bucketed into threat themes + the vendor rule-class taxonomy parsed from ET/GPL prefixes (model + Markdown)
+ *   GET  /api/lexicon.md?hours=N&limit=N&min=N -> the same threat-lexicon report as a downloadable .md file
  *   GET  /api/pivot?hours=N&limit=N&min=N&includeSafe=1 -> OSINT investigation pivot sheet: worst public sources deep-linked into AbuseIPDB/VirusTotal/GreyNoise/Shodan/… + whois/dig/--profile commands (model + Markdown)
  *   GET  /api/pivot.md?hours=N&limit=N&min=N&includeSafe=1 -> the same pivot sheet as a downloadable .md file
  *   GET  /api/pivot.links?hours=N&limit=N&min=N&includeSafe=1 -> the flat, de-duplicated OSINT URL list (text/plain, one per line) to fan open at once
@@ -334,6 +336,7 @@ import { buildSilence, silenceFilename } from "../analytics/silence.ts";
 import { buildExposure, exposureFilename } from "../analytics/exposure.ts";
 import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
 import { buildPotency, potencyFilename } from "../analytics/potency.ts";
+import { buildLexicon, lexiconFilename } from "../analytics/lexicon.ts";
 import { buildPivot, pivotFilename } from "../analytics/pivot.ts";
 import { buildDiversity, diversityFilename } from "../analytics/diversity.ts";
 import { buildVector, vectorFilename } from "../analytics/vector.ts";
@@ -2446,6 +2449,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${potencyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- threat-lexicon / signature vocabulary (term frequency + rule-class) ---
+      if (method === "GET" && path === "/api/lexicon") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const minCount = Number(url.searchParams.get("min")) || undefined;
+        return send(res, 200, buildLexicon(hours, { limit, minCount, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/lexicon.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const minCount = Number(url.searchParams.get("min")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildLexicon(hours, { limit, minCount, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${lexiconFilename(now)}"`,
         });
         res.end(markdown);
         return;

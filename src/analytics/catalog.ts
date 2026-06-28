@@ -232,6 +232,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Stream redundancy", "De-dup / suppression candidates in the alert firehose."),
   entry("Threat type / signature", "cve", "--cve", "/api/cve", 168,
     "CVE exposure", "Exploited-vulnerability patch worklist mapped from signatures."),
+  entry("Threat type / signature", "lexicon", "--lexicon", "/api/lexicon", 168,
+    "Threat lexicon / signature vocabulary", "Tokenises the signature corpus into a ranked term-frequency table (generic IDS filler stop-worded out) bucketed into threat themes (recon, exploitation, malware/C2, web, auth, protocol, reputation, policy), plus the vendor rule-class taxonomy parsed from the ET/GPL/ETPRO prefix — collapses near-duplicate rule variants down to the words they share (the \"word cloud as a sortable table\"), distinct from cve/cwe/owasp/mitre (external taxonomies) and lifecycle/rarity/audience (whole-signature). (--limit, --min N)", true),
   entry("Threat type / signature", "artifacts", "--artifacts", "/api/artifacts", 168,
     "Payload artifacts / IOCs", "Domains, URLs, file hashes, CVEs and tool user-agents mined from raw payloads."),
   entry("Threat type / signature", "mitre", "--mitre", "/api/mitre", 168,
