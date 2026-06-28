@@ -222,7 +222,7 @@ function mdTable(headers: string[], rows: string[][]): string {
 
 /** A stable, order-independent key for an unordered asset pair. */
 function pairKey(a: string, b: string): string {
-  return a < b ? `${a} ${b}` : `${b} ${a}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 // ----- aggregation ----------------------------------------------------------

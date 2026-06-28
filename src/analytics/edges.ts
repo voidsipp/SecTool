@@ -547,7 +547,7 @@ export function buildEdges(hours: number, opts: EdgesOptions = {}): EdgesReport 
     const dst = a.dstIp;
     if (!src || !dst || isIP(src) === 0 || isIP(dst) === 0 || src === dst) continue;
     const direction = classifyDirection(isPrivate(src), isPrivate(dst));
-    const key = `${src} ${dst}`;
+    const key = `${src}|${dst}`;
     let acc = byEdge.get(key);
     if (!acc) {
       acc = newAccum(src, dst, direction, a.time);

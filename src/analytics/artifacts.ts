@@ -365,7 +365,7 @@ export function extractArtifacts(raw: string | undefined): RawArtifact[] {
   const seen = new Set<string>();
   const out: RawArtifact[] = [];
   for (const a of found) {
-    const key = `${a.kind} ${a.value}`;
+    const key = `${a.kind}|${a.value}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(a);
@@ -616,7 +616,7 @@ export function buildArtifacts(hours: number, opts: ArtifactsOptions = {}): Arti
     const sig = a.signature?.trim();
 
     for (const art of arts) {
-      const key = `${art.kind} ${art.value}`;
+      const key = `${art.kind}|${art.value}`;
       let rec = accs.get(key);
       if (!rec) {
         rec = { kind: art.kind, value: art.value, acc: newAcc(a.time) };
