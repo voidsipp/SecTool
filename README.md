@@ -534,6 +534,38 @@ Four serializations cover the whole Elastic ingestion surface:
 - `GET /api/ecs?hours=N&format=bulk|ndjson|json|markdown&limit=N&index=NAME` → the document stream in the requested format (`json` returns the model inline; `.ndjson` / `.json` / `.md` path suffixes download as a file). Served as `application/x-ndjson`, the content type Elastic's `_bulk` endpoint expects.
 - `node src/index.ts --ecs 168 [--format ndjson] [--index my-alerts] [--limit 500]` (or `npm run ecs`) → print the document stream to stdout (defaults to a 7-day window and the `_bulk`-ready format). Pipe straight into a cluster: `npm run ecs | curl -H 'Content-Type: application/x-ndjson' -XPOST localhost:9200/_bulk --data-binary @-`.
 
+## 🛡️ MISP Event export (`GET /api/misp`, `--misp`)
+
+The ecosystem-native sibling of the STIX export. **MISP** (the Malware
+Information Sharing Platform) is the single most widely deployed open
+threat-intel platform among CSIRTs, CERTs and sector ISACs — and while it *can*
+import STIX, the communities built around it (national CERTs, the CIRCL feeds,
+most ISAC sharing groups) publish and consume the **native MISP JSON Event**
+instead: it is the format MISP's own feed system, taxonomy tags and `to_ids`
+correlation engine are built around. This export emits exactly that. Each
+external attacker IP becomes one **`ip-src` Attribute** ("Network activity") on a
+single MISP **Event**, carrying a **deterministic UUIDv5** (so re-publishing the
+same intel updates the attribute in place rather than duplicating it — the
+property a static MISP feed needs to stay idempotent across pulls), the
+**`to_ids`** flag set from SecTool's confidence (default ≥ 60, so MISP's
+"publish to IDS" workflow inherits the triage), a human `comment` (worst
+severity, alert volume, dominant signature, gateway-blocked corroboration,
+watchlist note) and per-attribute **`sectool:` taxonomy tags** (severity,
+confidence band, category) alongside the event-level **TLP** tag. Event metadata
+maps onto MISP's own vocabulary — `threat_level_id` from the worst observed
+severity, `analysis` = Initial, `distribution` = your-org-only and
+`published: false` so you set the sharing scope deliberately after review.
+
+It **reuses the same scoring engine as `iocs`/`stix`** — identical confidence
+model, severity floor, **safelist exclusion** (counted, never silent) and
+dismissed-alert handling — so no scoring logic is duplicated or allowed to drift.
+Ingest it via PyMISP `add_event`, the REST `POST /events/add`, or by dropping the
+JSON beside a `manifest.json` in a static MISP feed directory. Pure offline math
+over the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/misp?hours=N&minSeverity=medium&limit=N&tlp=amber&toIds=N[&includeSafe=1]` → the MISP Event JSON inline (`.json` / `.md` path suffixes download the event or its Markdown review twin as a file).
+- `node src/index.ts --misp 168 [--tlp amber] [--to-ids 60] [--min-severity medium] [--limit 500] [--format md]` (or `npm run misp`) → print the MISP Event to stdout (defaults to a 7-day window). Save and import: `npm run misp > event.json && curl -H 'Authorization: <key>' -H 'Content-Type: application/json' -XPOST https://misp.example/events/add --data @event.json`.
+
 ## 🕳️ DNS sinkhole / blocklist export (`GET /api/dns`, `--dns`)
 
 Every enforcement export above stops at the **IP layer** (`iocs` / `fwrules`
