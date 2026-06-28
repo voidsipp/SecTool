@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "Ingests UDM Pro security alerts via syslog, correlates relevant logs, summarizes them with Claude (OAuth), and posts to a Discord webhook.",
   "type": "module",
+  "main": "src/start.mjs",
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
-    "start": "node src/index.ts",
-    "dev": "node --watch src/index.ts",
-    "self-test": "node src/index.ts --self-test",
+    "start": "node src/start.mjs",
+    "dev": "node --watch src/start.mjs",
+    "self-test": "node src/start.mjs --self-test",
     "backfill": "node src/index.ts --backfill 24",
     "setup-ssh": "node src/index.ts --setup-ssh",
     "pull": "node src/index.ts --pull 24",
