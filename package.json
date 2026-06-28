@@ -109,6 +109,7 @@
     "pcap": "node src/index.ts --pcap 168",
     "feed": "node src/index.ts --feed 24",
     "cef": "node src/index.ts --cef 168",
+    "ecs": "node src/index.ts --ecs 168",
     "metrics": "node src/index.ts --metrics",
     "catalog": "node src/index.ts --catalog",
     "print-config": "node src/index.ts --print-config",
