@@ -216,6 +216,8 @@
  *   GET  /api/ecs.ndjson|.json|.md  -> the same ECS export as a downloadable _bulk-ready .ndjson / .json / .md file
  *   GET  /api/csv[?format=]         -> tabular alert export, one RFC-4180 row per alert with re-parsed ports/protocol/sid/direction/disposition + block/watch/safe flags (format=csv|tsv|json|markdown) for Excel/Sheets/pandas/SQLite (?hours, ?limit, ?bom)
  *   GET  /api/csv.csv|.tsv|.json|.md -> the same tabular export as a downloadable .csv / .tsv / .json / .md file
+ *   GET  /api/ics[?format=]         -> iCalendar (.ics) security calendar, one all-day VEVENT per UTC day (format=ics|json|md) for Outlook/Google/Apple Calendar (?hours, ?limit, ?includeQuiet, ?alarms=0)
+ *   GET  /api/ics.ics|.json|.md     -> the same calendar as a downloadable .ics (subscribe via webcal://) / .json / .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -400,6 +402,7 @@ import {
   parseCsvFormat,
   type CsvFormat,
 } from "../analytics/csvExport.ts";
+import { buildIcs, icsFilename, parseIcsFormat } from "../analytics/icsExport.ts";
 import {
   buildAlertFeed,
   parseFeedFormat,
@@ -3247,6 +3250,62 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         }
         res.writeHead(200, headers);
         res.end(body);
+        return;
+      }
+
+      // --- iCalendar (.ics) security-calendar export (one all-day event per UTC day) ---
+      // Subscribe in Outlook / Google / Apple Calendar via webcal://<host>/api/ics.ics
+      // ?hours=N · ?limit=N · ?includeQuiet=1 · ?alarms=0 (suppress reminders)
+      // ?format=ics|json|md, or the path suffix (.ics/.json/.md).
+      if (
+        method === "GET" &&
+        (path === "/api/ics" || path === "/api/ics.ics" || path === "/api/ics.json" || path === "/api/ics.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeQuiet = ["1", "true", "yes"].includes((url.searchParams.get("includeQuiet") ?? "").toLowerCase());
+        const alarms = !["0", "false", "no"].includes((url.searchParams.get("alarms") ?? "").toLowerCase());
+        // The path suffix picks the format; ?format= overrides the bare /api/ics.
+        let format: ReturnType<typeof parseIcsFormat>;
+        if (path === "/api/ics.json") format = "json";
+        else if (path === "/api/ics.md") format = "md";
+        else if (path === "/api/ics.ics") format = "ics";
+        else format = parseIcsFormat(url.searchParams.get("format"));
+        const now = Date.now();
+        const model = buildIcs(hours, { limit, includeQuiet, alarms, nowMs: now });
+        if (format === "json") {
+          // Bare /api/ics?format=json returns the model inline; the .json suffix downloads it.
+          if (path === "/api/ics.json") {
+            res.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "content-disposition": `attachment; filename="${icsFilename(now, "json")}"`,
+            });
+            res.end(JSON.stringify(model, null, 2));
+            return;
+          }
+          return send(res, 200, model);
+        }
+        if (format === "md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${icsFilename(now, "md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        const headers: Record<string, string> = {
+          "content-type": "text/calendar; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        // The .ics suffix is the subscription/download surface; bare /api/ics serves inline.
+        if (path === "/api/ics.ics") {
+          headers["content-disposition"] = `attachment; filename="${icsFilename(now, "ics")}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.text);
         return;
       }
 

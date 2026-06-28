@@ -104,6 +104,7 @@
  *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
  *   node src/index.ts --ecs 168       # offline ECS (Elastic Common Schema) event export: one ECS JSON document per alert for Elasticsearch/OpenSearch/Kibana; _bulk-ready by default; --format ndjson|json|md, --index NAME, --limit N (NDJSON)
  *   node src/index.ts --csv 168       # offline tabular alert export: one RFC-4180 row per alert (re-parsed ports/protocol/sid/direction/disposition + block/watch/safe flags) for Excel/Sheets/pandas/SQLite; --format csv|tsv|json|md, --bom, --limit N (CSV)
+ *   node src/index.ts --ics 168       # offline iCalendar (.ics) export: one all-day VEVENT per UTC day (volume/serious/sources/new attackers + notable-day flags & alarms) to subscribe in Outlook/Google/Apple Calendar; --format json|md, --include-quiet, --no-alarms, --limit N (RFC 5545)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -228,6 +229,7 @@ import {
 import { buildCefExport, renderCef, parseCefFormat } from "./analytics/cefExport.ts";
 import { buildEcsExport, renderEcs, parseEcsFormat } from "./analytics/ecsExport.ts";
 import { buildCsvExport, renderCsv, parseCsvFormat } from "./analytics/csvExport.ts";
+import { buildIcs, parseIcsFormat } from "./analytics/icsExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -3407,6 +3409,46 @@ async function main(): Promise<void> {
       const model = buildCsvExport(hours, { limit, nowMs: Date.now() });
       const out = renderCsv(model, format, { bom });
       process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+      return;
+    }
+    // iCalendar (.ics) security-calendar export — subscribe in Outlook / Google / Apple Calendar.
+    const icsIdx = argv.findIndex((a) => a === "--ics" || a.startsWith("--ics="));
+    if (icsIdx !== -1) {
+      const inline = argv[icsIdx]!.split("=")[1];
+      const next = argv[icsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --ics hours: "${raw}". Use e.g. --ics 168`);
+        process.exit(2);
+      }
+      // Optional `--format ics|json|md` — the .ics calendar by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseIcsFormat(fmtRaw);
+      // Optional `--limit N` cap on emitted day-events (most recent first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--include-quiet` emits zero-alert days too (default: skip them).
+      const includeQuiet = args.has("--include-quiet");
+      // Optional `--no-alarms` suppresses the VALARM reminders on serious days.
+      const alarms = !args.has("--no-alarms");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested iCalendar serialization to stdout.
+      const model = buildIcs(hours, { limit, includeQuiet, alarms, nowMs: Date.now() });
+      if (format === "md") {
+        console.log(model.markdown);
+      } else if (format === "json") {
+        console.log(JSON.stringify(model, null, 2));
+      } else {
+        process.stdout.write(model.text.endsWith("\n") ? model.text : model.text + "\n");
+      }
       return;
     }
     // Sigma detection-rule export (Splunk / Elastic / Sentinel / any SIEM via pySigma).
