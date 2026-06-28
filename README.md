@@ -407,6 +407,33 @@ history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/rhythm.md?hours=N&tz=M` → the same report as a downloadable `.md` file.
 - `node src/index.ts --rhythm 168 [--tz -300]` (or `npm run rhythm`) → print the Markdown to stdout (defaults to a 7-day window so every weekday is represented).
 
+## 🛠️ Maintenance / change-window recommender (`GET /api/maintenance[.md]`, `--maintenance`)
+
+The one **prescriptive scheduling** question the temporal reports dance around but
+never answer directly: *I need to take the network down for N hours to patch /
+reboot / deploy — when this week is historically the calmest, lowest-risk slot to
+book it, and which slot must I avoid?* It builds an **hour-of-week** severity-risk
+profile (168 cells, Mon→Sun, averaged **per week-occurrence** so a slot seen 12
+times isn't penalised against one seen 13), slides a window of the requested
+**`--duration H`** across the week (circularly, so Sunday-night → Monday-morning
+is a candidate) and ranks every start position by expected **severity-weighted
+risk** (the [`risk`](#) ladder: info 1·low 3·medium 9·high 27·critical 81),
+tie-broken by raw volume. It returns the top **non-overlapping** calmest slots —
+each carried with the expected alerts / serious / risk during a future instance,
+its share of an **average** window's risk, the **worst severity** ever seen in any
+of its hours, the **sample depth** backing it, and the **next concrete calendar
+date** the recurring local slot begins — plus the single **busiest** window to
+*avoid*. Read the recommendations in local time with `--tz`. This is prescriptive
+where [`rhythm`](#-activity-rhythm-report) is a descriptive heat-map,
+`forecast` projects forward load (the *busy* stretch), and `offhours` audits a
+fixed shift; it is a **probabilistic bet on the past rhythm holding**, not a
+guarantee. Pure offline math over the local alert history — **no SSH, no Claude,
+no live gateway query**.
+
+- `GET /api/maintenance?hours=N&duration=H&limit=N&tz=M` → the structured model **plus** rendered Markdown (`tz` = UTC offset in minutes, e.g. `-300` for US Eastern Standard; omit for UTC).
+- `GET /api/maintenance.md?hours=N&duration=H&limit=N&tz=M` → the same report as a downloadable `.md` file.
+- `node src/index.ts --maintenance 336 [--duration 3] [--limit 5] [--tz -300]` (or `npm run maintenance`) → print the Markdown to stdout (defaults to a 2-week window so each hour-of-week slot has multiple samples).
+
 ## 📋 Triage SLA backlog (`GET /api/backlog[.md]`, `--backlog`)
 
 Every other report is about the *threats*; this one is about the **response**.

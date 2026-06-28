@@ -21,6 +21,7 @@
     "tuning": "node src/index.ts --tuning 168",
     "watchlist": "node src/index.ts --watchlist 24",
     "rhythm": "node src/index.ts --rhythm 168",
+    "maintenance": "node src/index.ts --maintenance 336",
     "backlog": "node src/index.ts --backlog 720",
     "novelty": "node src/index.ts --novelty 168",
     "killchain": "node src/index.ts --killchain 168",

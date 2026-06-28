@@ -13,6 +13,7 @@
  *   node src/index.ts --tuning 168    # offline signature tuning / noise-reduction report (Markdown)
  *   node src/index.ts --watchlist 24  # offline watchlist activity report (Markdown)
  *   node src/index.ts --rhythm 168    # offline temporal activity rhythm report (Markdown)
+ *   node src/index.ts --maintenance 336 # offline maintenance / change-window recommender: ranks the calmest non-overlapping slots of length --duration H (severity-weighted) to schedule a change, with the next calendar date and the window to avoid (--duration H, --limit, --tz) (Markdown)
  *   node src/index.ts --backlog 720   # offline triage SLA backlog report (Markdown)
  *   node src/index.ts --novelty 168   # offline first-seen / novelty report (Markdown)
  *   node src/index.ts --killchain 168 # offline kill-chain / attack-stage report (Markdown)
@@ -129,6 +130,7 @@ import { buildAssets } from "./analytics/assets.ts";
 import { buildTuning } from "./analytics/tuning.ts";
 import { buildWatchlist } from "./analytics/watchlist.ts";
 import { buildRhythm } from "./analytics/rhythm.ts";
+import { buildMaintenance } from "./analytics/maintenance.ts";
 import { buildBacklog } from "./analytics/backlog.ts";
 import { buildNovelty } from "./analytics/novelty.ts";
 import { buildKillChain } from "./analytics/killchain.ts";
@@ -579,6 +581,51 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown activity rhythm report to stdout.
       console.log(buildRhythm(hours, tzOffsetMinutes, Date.now()).markdown);
+      return;
+    }
+    const maintenanceIdx = argv.findIndex((a) => a === "--maintenance" || a.startsWith("--maintenance="));
+    if (maintenanceIdx !== -1) {
+      const inline = argv[maintenanceIdx]!.split("=")[1];
+      const next = argv[maintenanceIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to two weeks so the hour-of-week profile has multiple samples per slot.
+      const hours = raw ? Number(raw) : 336;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --maintenance hours: "${raw}". Use e.g. --maintenance 336`);
+        process.exit(2);
+      }
+      // Optional `--duration H`: the length of the change window you need to book.
+      let durationHours: number | undefined;
+      const durIdx = argv.findIndex((a) => a === "--duration" || a.startsWith("--duration="));
+      if (durIdx !== -1) {
+        const v = argv[durIdx]!.split("=")[1] ?? argv[durIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) durationHours = n;
+      }
+      // Optional `--limit N` to cap how many recommended windows print.
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--tz <minutes>` to read recommendations in local time (e.g. -300 = EST).
+      let tzOffsetMinutes = 0;
+      const tzIdx = argv.findIndex((a) => a === "--tz" || a.startsWith("--tz="));
+      if (tzIdx !== -1) {
+        const tzRaw = argv[tzIdx]!.split("=")[1] ?? argv[tzIdx + 1];
+        const tz = tzRaw !== undefined ? Number(tzRaw) : NaN;
+        if (!Number.isFinite(tz)) {
+          log.error(`Invalid --tz minutes: "${tzRaw}". Use UTC offset in minutes, e.g. --tz -300 (EST) or --tz 60 (CET).`);
+          process.exit(2);
+        }
+        tzOffsetMinutes = tz;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown change-window report to stdout.
+      console.log(buildMaintenance(hours, { durationHours, limit, tzOffsetMinutes, nowMs: Date.now() }).markdown);
       return;
     }
     const backlogIdx = argv.findIndex((a) => a === "--backlog" || a.startsWith("--backlog="));
