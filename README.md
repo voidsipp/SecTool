@@ -499,6 +499,41 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/cef?hours=N&format=cef|leef|json|markdown&limit=N` → the event stream in the requested format (`json` returns the structured model inline; `.cef` / `.leef` / `.json` / `.md` path suffixes download as a file).
 - `node src/index.ts --cef 168 [--format leef] [--limit 500]` (or `npm run cef`) → print the event stream to stdout (defaults to a 7-day window and the `cef` line format, ready to pipe into a CEF/Syslog collector).
 
+## 🔎 ECS (Elastic Common Schema) event export (`GET /api/ecs`, `--ecs`)
+
+The modern-SIEM twin of the CEF/LEEF export above. The single most-deployed
+open-source SIEM stack — **Elasticsearch + Kibana + Elastic Security**, and its
+**OpenSearch** fork — does *not* ingest CEF lines natively; it ingests **JSON
+documents mapped onto the Elastic Common Schema** (`source.ip`,
+`destination.port`, `event.category`, `rule.name`, …). That is a completely
+different shape and ingestion path (Filebeat / Logstash / the `_bulk` API), so it
+needs its own exporter — this one. For every stored alert in the window it
+recovers the same normalized record `--cef` uses (the stable `gid:sid`,
+source/destination IPs, and the ports/transport/application protocol re-parsed
+from the raw line) and maps it onto canonical ECS fields — `@timestamp`,
+`event.{kind,category,type,action,severity,id}`, `log.level`, `message`, `tags`,
+`source.{ip,port}`, `destination.{ip,port}`, `network.{transport,protocol,direction,type}`,
+`rule.{id,name,ruleset,category}`, `observer.*` and `ecs.version` — with severity
+folded onto the **0–99 Elastic risk-score scale** (low 21 / medium 47 / high 73 /
+critical 99) so alerts bucket naturally in Elastic Security. Pure offline math
+over the local alert history — **no SSH, no Claude, no live gateway query**.
+
+Four serializations cover the whole Elastic ingestion surface:
+
+- **`bulk`** (default) — `_bulk`-ready NDJSON: each document is preceded by its
+  `{"index":{…}}` action line carrying a **deterministic `_id`** (SecTool's alert
+  id), so re-publishing the same window is idempotent (no duplicate documents on
+  re-index).
+- **`ndjson`** — the bare documents, one JSON object per line, for a
+  Filebeat / Logstash / Fluent Bit file input that supplies its own routing.
+- **`json`** — the structured model (metadata + the materialized `documents`
+  array), pretty-printed.
+- **`markdown`** — the human review twin: a sample document, an event table and
+  the `curl … | curl … /_bulk` one-liner to load it.
+
+- `GET /api/ecs?hours=N&format=bulk|ndjson|json|markdown&limit=N&index=NAME` → the document stream in the requested format (`json` returns the model inline; `.ndjson` / `.json` / `.md` path suffixes download as a file). Served as `application/x-ndjson`, the content type Elastic's `_bulk` endpoint expects.
+- `node src/index.ts --ecs 168 [--format ndjson] [--index my-alerts] [--limit 500]` (or `npm run ecs`) → print the document stream to stdout (defaults to a 7-day window and the `_bulk`-ready format). Pipe straight into a cluster: `npm run ecs | curl -H 'Content-Type: application/x-ndjson' -XPOST localhost:9200/_bulk --data-binary @-`.
+
 ## 📈 Prometheus / OpenMetrics endpoint (`GET /metrics`, `--metrics`)
 
 Every other surface answers a question **after the fact** — a Markdown report you

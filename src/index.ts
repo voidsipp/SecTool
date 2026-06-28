@@ -102,6 +102,7 @@
  *   node src/index.ts --pcap 168      # offline forensic packet-capture filter generator: ready-to-run tcpdump/Wireshark/tshark filters + commands to grab the raw packets of your worst attackers; --format wireshark|tshark|json|md, --iface eth0, --limit N (text)
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
  *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
+ *   node src/index.ts --ecs 168       # offline ECS (Elastic Common Schema) event export: one ECS JSON document per alert for Elasticsearch/OpenSearch/Kibana; _bulk-ready by default; --format ndjson|json|md, --index NAME, --limit N (NDJSON)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -224,6 +225,7 @@ import {
   feedDocument,
 } from "./analytics/alertFeed.ts";
 import { buildCefExport, renderCef, parseCefFormat } from "./analytics/cefExport.ts";
+import { buildEcsExport, renderEcs, parseEcsFormat } from "./analytics/ecsExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -3331,6 +3333,44 @@ async function main(): Promise<void> {
       // Offline, deterministic: print the requested event-export serialization to stdout.
       const model = buildCefExport(hours, { limit, nowMs: Date.now() });
       const out = renderCef(model, format);
+      process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+      return;
+    }
+    // ECS (Elastic Common Schema) event export — JSON documents for Elasticsearch / OpenSearch / Kibana.
+    const ecsIdx = argv.findIndex((a) => a === "--ecs" || a.startsWith("--ecs="));
+    if (ecsIdx !== -1) {
+      const inline = argv[ecsIdx]!.split("=")[1];
+      const next = argv[ecsIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --ecs hours: "${raw}". Use e.g. --ecs 168`);
+        process.exit(2);
+      }
+      // Optional `--format bulk|ndjson|json|md` — _bulk-ready stream by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseEcsFormat(fmtRaw);
+      // Optional `--limit N` cap on emitted documents (newest first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--index NAME` overrides the target _index / data-stream.
+      let index: string | undefined;
+      const idxIdx = argv.findIndex((a) => a === "--index" || a.startsWith("--index="));
+      if (idxIdx !== -1) {
+        const v = argv[idxIdx]!.split("=")[1] ?? argv[idxIdx + 1];
+        if (v && !v.startsWith("--")) index = v;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested ECS serialization to stdout.
+      const model = buildEcsExport(hours, { limit, index, nowMs: Date.now() });
+      const out = renderEcs(model, format);
       process.stdout.write(out.endsWith("\n") ? out : out + "\n");
       return;
     }

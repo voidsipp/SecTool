@@ -212,6 +212,8 @@
  *   GET  /api/feed.xml|.atom|.json  -> the same feed as a downloadable RSS / Atom / JSON Feed file
  *   GET  /api/cef[?format=]         -> CEF/LEEF SIEM event export, one line per alert (format=cef|leef|json|markdown) for ArcSight/Splunk/Sentinel/QRadar (?hours, ?limit)
  *   GET  /api/cef.cef|.leef|.json|.md -> the same event export as a downloadable .cef / .leef / .json / .md file
+ *   GET  /api/ecs[?format=]         -> ECS (Elastic Common Schema) event export, one ECS JSON document per alert (format=bulk|ndjson|json|markdown) for Elasticsearch/OpenSearch/Kibana (?hours, ?limit, ?index)
+ *   GET  /api/ecs.ndjson|.json|.md  -> the same ECS export as a downloadable _bulk-ready .ndjson / .json / .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -382,6 +384,13 @@ import {
   parseCefFormat,
   type CefFormat,
 } from "../analytics/cefExport.ts";
+import {
+  buildEcsExport,
+  renderEcs,
+  ecsFilename,
+  parseEcsFormat,
+  type EcsFormat,
+} from "../analytics/ecsExport.ts";
 import {
   buildAlertFeed,
   parseFeedFormat,
@@ -3115,6 +3124,59 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         // Suffixed paths are explicit downloads; bare /api/cef renders inline.
         if (path !== "/api/cef") {
           headers["content-disposition"] = `attachment; filename="${cefFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(body);
+        return;
+      }
+
+      // --- ECS (Elastic Common Schema) event export (one JSON doc per alert) ---
+      // For Elasticsearch / OpenSearch / Kibana. ?hours=N · ?limit=N · ?index=NAME
+      // ?format=bulk|ndjson|json|markdown, or the path suffix (.ndjson/.json/.md).
+      if (
+        method === "GET" &&
+        (path === "/api/ecs" ||
+          path === "/api/ecs.ndjson" ||
+          path === "/api/ecs.json" ||
+          path === "/api/ecs.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const index = url.searchParams.get("index")?.trim() || undefined;
+        // The path suffix picks the format; ?format= overrides the bare /api/ecs.
+        let format: EcsFormat;
+        if (path === "/api/ecs.ndjson") format = "ndjson";
+        else if (path === "/api/ecs.json") format = "json";
+        else if (path === "/api/ecs.md") format = "markdown";
+        else format = parseEcsFormat(url.searchParams.get("format"));
+        const now = Date.now();
+        const model = buildEcsExport(hours, { limit, index, nowMs: now });
+        if (format === "json") {
+          // Bare /api/ecs?format=json returns the model inline; the .json suffix downloads it.
+          if (path === "/api/ecs.json") {
+            res.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "content-disposition": `attachment; filename="${ecsFilename(now, "json")}"`,
+            });
+            res.end(renderEcs(model, "json"));
+            return;
+          }
+          return send(res, 200, JSON.parse(renderEcs(model, "json")));
+        }
+        const body = renderEcs(model, format);
+        // ECS bulk/ndjson are application/x-ndjson — the content type Elastic's
+        // _bulk endpoint and Filebeat expect; markdown stays text/markdown.
+        const contentType =
+          format === "markdown" ? "text/markdown; charset=utf-8" : "application/x-ndjson; charset=utf-8";
+        const headers: Record<string, string> = {
+          "content-type": contentType,
+          "cache-control": "no-store",
+        };
+        // Suffixed paths are explicit downloads; bare /api/ecs renders inline.
+        if (path !== "/api/ecs") {
+          headers["content-disposition"] = `attachment; filename="${ecsFilename(now, format)}"`;
         }
         res.writeHead(200, headers);
         res.end(body);
