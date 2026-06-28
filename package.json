@@ -37,6 +37,7 @@
     "potency": "node src/index.ts --potency 168",
     "diversity": "node src/index.ts --diversity 168",
     "origins": "node src/index.ts --origins 168",
+    "pivot": "node src/index.ts --pivot 168",
     "netblocks": "node src/index.ts --netblocks 168",
     "coverage": "node src/index.ts --coverage 168",
     "direction": "node src/index.ts --direction 168",

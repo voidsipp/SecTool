@@ -67,6 +67,7 @@
  *   node src/index.ts --potency 168   # offline threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) — quiet-but-deadly snipers vs loud-but-harmless floods (4 quadrants, %volume↔%weight gap) (--limit, --min N) (Markdown)
  *   node src/index.ts --diversity 168 # offline threat-landscape diversity / biodiversity: Hill-number effective counts + evenness across sources/signatures/categories/targets — monoculture (block-and-win) vs even ecosystem (broad policy) + diversify/consolidate drift (Markdown)
  *   node src/index.ts --origins 168   # offline regional / RIR origin attribution (where in the world): maps each public source IP to its Internet registry (ARIN/RIPE/APNIC/LACNIC/AFRINIC) via the IANA /8 + IPv6 /12 tables — continental distribution, per-region severity & WHOIS pivot (--limit) (Markdown)
+ *   node src/index.ts --pivot 168     # offline OSINT investigation pivot sheet: ranks worst public sources (severity-weighted) and deep-links each into AbuseIPDB/VirusTotal/GreyNoise/Shodan/Censys/Talos/OTX/… + whois/dig/--profile commands (--limit, --min N, --format md|links, --include-safe)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -184,6 +185,7 @@ import { buildPotency } from "./analytics/potency.ts";
 import { buildDiversity } from "./analytics/diversity.ts";
 import { buildVector } from "./analytics/vector.ts";
 import { buildOrigins } from "./analytics/origins.ts";
+import { buildPivot } from "./analytics/pivot.ts";
 import { buildCohort } from "./analytics/cohort.ts";
 import { buildDismissals } from "./analytics/dismissals.ts";
 import { buildSuppressionAudit } from "./analytics/suppressions.ts";
@@ -2644,6 +2646,45 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown threat-potency report to stdout.
       console.log(buildPotency(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const pivotIdx = argv.findIndex((a) => a === "--pivot" || a.startsWith("--pivot="));
+    if (pivotIdx !== -1) {
+      const inline = argv[pivotIdx]!.split("=")[1];
+      const next = argv[pivotIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a real population of public sources surfaces.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --pivot hours: "${raw}". Use e.g. --pivot 168`);
+        process.exit(2);
+      }
+      // Optional `--limit N` to cap how many (highest-priority) source kits print.
+      let limit = 15;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--min N` (alerts): the volume floor to qualify for the sheet.
+      let minAlerts: number | undefined;
+      const minIdx = argv.findIndex((a) => a === "--min" || a.startsWith("--min="));
+      if (minIdx !== -1) {
+        const v = argv[minIdx]!.split("=")[1] ?? argv[minIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) minAlerts = n;
+      }
+      // `--include-safe` folds vetted-benign safelisted sources back in.
+      const includeSafe = argv.includes("--include-safe");
+      // `--format links` emits the flat de-duplicated URL list; default is Markdown.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmt = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      const model = buildPivot(hours, { limit, minAlerts, includeSafe, nowMs: Date.now() });
+      // Offline, deterministic: either the flat URL list or the Markdown sheet.
+      console.log(fmt === "links" ? model.links.join("\n") : model.markdown);
       return;
     }
     const diversityIdx = argv.findIndex((a) => a === "--diversity" || a.startsWith("--diversity="));
