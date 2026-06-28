@@ -193,6 +193,8 @@
  *   GET  /api/sigma?hours=N         -> Sigma detection rules (per-indicator; ?consolidated=1 for a single list rule) for any SIEM via pySigma
  *   GET  /api/sigma.yml?hours=N     -> the same Sigma ruleset as a downloadable .yml file
  *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
+ *   GET  /api/snort?hours=N         -> Snort/Suricata native IDS rules (?format=snort|iprep|json|md, ?action=drop, ?consolidated=1) to feed observed attackers back into the sensor
+ *   GET  /api/snort.rules?hours=N   -> the same ruleset as a downloadable .rules file
  *   GET  /api/feed[?format=]        -> alert syndication feed (RSS 2.0 default; format=atom|json) for any feed reader / Slack / Teams (?hours, ?minSeverity, ?limit)
  *   GET  /api/feed.xml|.atom|.json  -> the same feed as a downloadable RSS / Atom / JSON Feed file
  *   GET  /api/cef[?format=]         -> CEF/LEEF SIEM event export, one line per alert (format=cef|leef|json|markdown) for ArcSight/Splunk/Sentinel/QRadar (?hours, ?limit)
@@ -353,6 +355,7 @@ import {
 } from "../analytics/iocExport.ts";
 import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
+import { buildSnort, snortFilename, parseSnortFormat, parseSnortAction } from "../analytics/snort.ts";
 import {
   buildCefExport,
   renderCef,
@@ -2795,6 +2798,55 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         }
         res.writeHead(200, headers);
         res.end(model.yaml);
+        return;
+      }
+
+      // --- Snort / Suricata native IDS-rule export (feed attackers back to the sensor) ---
+      // ?hours=N · ?format=suricata|snort|iprep|json|md · ?action=alert|drop|reject
+      // ?minSeverity=medium · ?limit=N · ?includeSafe=1 · ?consolidated=1
+      if (method === "GET" && (path === "/api/snort" || path === "/api/snort.rules")) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const format = parseSnortFormat(url.searchParams.get("format"));
+        const dialect = format === "snort" ? "snort" : "suricata";
+        const action = parseSnortAction(url.searchParams.get("action"));
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const consolidated = url.searchParams.get("consolidated") === "1";
+        const now = Date.now();
+        const model = buildSnort(hours, {
+          minSeverity,
+          limit,
+          includeSafe,
+          consolidated,
+          dialect,
+          format,
+          action,
+          nowMs: now,
+        });
+        if (format === "md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${snortFilename(now, "md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        if (format === "json") {
+          send(res, 200, model);
+          return;
+        }
+        const headers: Record<string, string> = {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/snort.rules") {
+          headers["content-disposition"] = `attachment; filename="${snortFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.text);
         return;
       }
 
