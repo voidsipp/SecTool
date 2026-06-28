@@ -214,6 +214,8 @@
  *   GET  /api/cef.cef|.leef|.json|.md -> the same event export as a downloadable .cef / .leef / .json / .md file
  *   GET  /api/ecs[?format=]         -> ECS (Elastic Common Schema) event export, one ECS JSON document per alert (format=bulk|ndjson|json|markdown) for Elasticsearch/OpenSearch/Kibana (?hours, ?limit, ?index)
  *   GET  /api/ecs.ndjson|.json|.md  -> the same ECS export as a downloadable _bulk-ready .ndjson / .json / .md file
+ *   GET  /api/csv[?format=]         -> tabular alert export, one RFC-4180 row per alert with re-parsed ports/protocol/sid/direction/disposition + block/watch/safe flags (format=csv|tsv|json|markdown) for Excel/Sheets/pandas/SQLite (?hours, ?limit, ?bom)
+ *   GET  /api/csv.csv|.tsv|.json|.md -> the same tabular export as a downloadable .csv / .tsv / .json / .md file
  *   GET  /api/intel?hours=N         -> known-bad feed IPs seen touching the network
  *   GET  /api/intel/check?ip=       -> check a single IP against the loaded feeds
  *   GET  /api/search?q=&sev=&...    -> filtered search over the stored alert history (no SSH)
@@ -391,6 +393,13 @@ import {
   parseEcsFormat,
   type EcsFormat,
 } from "../analytics/ecsExport.ts";
+import {
+  buildCsvExport,
+  renderCsv,
+  csvFilename,
+  parseCsvFormat,
+  type CsvFormat,
+} from "../analytics/csvExport.ts";
 import {
   buildAlertFeed,
   parseFeedFormat,
@@ -3177,6 +3186,64 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         // Suffixed paths are explicit downloads; bare /api/ecs renders inline.
         if (path !== "/api/ecs") {
           headers["content-disposition"] = `attachment; filename="${ecsFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(body);
+        return;
+      }
+
+      // --- tabular CSV / TSV alert export (one row per alert) ---
+      // The analyst's spreadsheet export for Excel / Sheets / pandas / SQLite.
+      // ?hours=N · ?limit=N · ?bom=1 (Excel UTF-8 BOM, csv/tsv only)
+      // ?format=csv|tsv|json|markdown, or the path suffix (.csv/.tsv/.json/.md).
+      if (
+        method === "GET" &&
+        (path === "/api/csv" ||
+          path === "/api/csv.csv" ||
+          path === "/api/csv.tsv" ||
+          path === "/api/csv.json" ||
+          path === "/api/csv.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const bom = ["1", "true", "yes"].includes((url.searchParams.get("bom") ?? "").toLowerCase());
+        // The path suffix picks the format; ?format= overrides the bare /api/csv.
+        let format: CsvFormat;
+        if (path === "/api/csv.tsv") format = "tsv";
+        else if (path === "/api/csv.json") format = "json";
+        else if (path === "/api/csv.md") format = "markdown";
+        else if (path === "/api/csv.csv") format = "csv";
+        else format = parseCsvFormat(url.searchParams.get("format"));
+        const now = Date.now();
+        const model = buildCsvExport(hours, { limit, nowMs: now });
+        if (format === "json") {
+          // Bare /api/csv?format=json returns the model inline; the .json suffix downloads it.
+          if (path === "/api/csv.json") {
+            res.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "content-disposition": `attachment; filename="${csvFilename(now, "json")}"`,
+            });
+            res.end(renderCsv(model, "json"));
+            return;
+          }
+          return send(res, 200, JSON.parse(renderCsv(model, "json")));
+        }
+        const body = renderCsv(model, format, { bom });
+        const contentType =
+          format === "markdown"
+            ? "text/markdown; charset=utf-8"
+            : format === "tsv"
+              ? "text/tab-separated-values; charset=utf-8"
+              : "text/csv; charset=utf-8";
+        const headers: Record<string, string> = {
+          "content-type": contentType,
+          "cache-control": "no-store",
+        };
+        // Suffixed paths are explicit downloads; bare /api/csv renders inline.
+        if (path !== "/api/csv") {
+          headers["content-disposition"] = `attachment; filename="${csvFilename(now, format)}"`;
         }
         res.writeHead(200, headers);
         res.end(body);

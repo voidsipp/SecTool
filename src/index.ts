@@ -103,6 +103,7 @@
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
  *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
  *   node src/index.ts --ecs 168       # offline ECS (Elastic Common Schema) event export: one ECS JSON document per alert for Elasticsearch/OpenSearch/Kibana; _bulk-ready by default; --format ndjson|json|md, --index NAME, --limit N (NDJSON)
+ *   node src/index.ts --csv 168       # offline tabular alert export: one RFC-4180 row per alert (re-parsed ports/protocol/sid/direction/disposition + block/watch/safe flags) for Excel/Sheets/pandas/SQLite; --format csv|tsv|json|md, --bom, --limit N (CSV)
  */
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -226,6 +227,7 @@ import {
 } from "./analytics/alertFeed.ts";
 import { buildCefExport, renderCef, parseCefFormat } from "./analytics/cefExport.ts";
 import { buildEcsExport, renderEcs, parseEcsFormat } from "./analytics/ecsExport.ts";
+import { buildCsvExport, renderCsv, parseCsvFormat } from "./analytics/csvExport.ts";
 import { startDigestScheduler } from "./digest/scheduler.ts";
 import { startFeedScheduler, refreshAndPostChangelog } from "./intel/feedScheduler.ts";
 
@@ -3371,6 +3373,39 @@ async function main(): Promise<void> {
       // Offline, deterministic: print the requested ECS serialization to stdout.
       const model = buildEcsExport(hours, { limit, index, nowMs: Date.now() });
       const out = renderEcs(model, format);
+      process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+      return;
+    }
+    // Tabular CSV / TSV alert export — the analyst's "give me the spreadsheet" export.
+    const csvIdx = argv.findIndex((a) => a === "--csv" || a.startsWith("--csv="));
+    if (csvIdx !== -1) {
+      const inline = argv[csvIdx]!.split("=")[1];
+      const next = argv[csvIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --csv hours: "${raw}". Use e.g. --csv 168`);
+        process.exit(2);
+      }
+      // Optional `--format csv|tsv|json|md` — comma-separated table by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseCsvFormat(fmtRaw);
+      // Optional `--limit N` cap on emitted rows (newest first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--bom` prepends a UTF-8 BOM so Excel reads the file as UTF-8.
+      const bom = args.has("--bom");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the requested tabular serialization to stdout.
+      const model = buildCsvExport(hours, { limit, nowMs: Date.now() });
+      const out = renderCsv(model, format, { bom });
       process.stdout.write(out.endsWith("\n") ? out : out + "\n");
       return;
     }
