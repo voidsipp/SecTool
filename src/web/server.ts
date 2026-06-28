@@ -158,6 +158,8 @@
  *   GET  /api/vector.md?hours=N&limit=N -> the same entry-vector report as a downloadable .md file
  *   GET  /api/potency?hours=N&limit=N&min=N -> threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) into sniper/brawler/flood/background quadrants with the %volume↔%weight gap (model + Markdown)
  *   GET  /api/potency.md?hours=N&limit=N&min=N -> the same threat-potency report as a downloadable .md file
+ *   GET  /api/diversity?hours=N -> threat-landscape diversity: Hill-number effective counts + evenness across sources/signatures/categories/targets (monoculture vs even ecosystem) + diversify/consolidate drift (model + Markdown)
+ *   GET  /api/diversity.md?hours=N -> the same diversity report as a downloadable .md file
  *   GET  /api/origins?hours=N&limit=N -> regional / RIR origin attribution (where in the world): maps public source IPs to ARIN/RIPE/APNIC/LACNIC/AFRINIC via the IANA /8 + IPv6 /12 tables, with per-region severity, block rate and WHOIS pivot (model + Markdown)
  *   GET  /api/origins.md?hours=N&limit=N -> the same regional-origins report as a downloadable .md file
  *   GET  /api/cohort?hours=N        -> attacker cohort-retention / churn (revolving-door vs committed base; new/retained/resurrected/churned + retention curve; model + Markdown)
@@ -329,6 +331,7 @@ import { buildSilence, silenceFilename } from "../analytics/silence.ts";
 import { buildExposure, exposureFilename } from "../analytics/exposure.ts";
 import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
 import { buildPotency, potencyFilename } from "../analytics/potency.ts";
+import { buildDiversity, diversityFilename } from "../analytics/diversity.ts";
 import { buildVector, vectorFilename } from "../analytics/vector.ts";
 import { buildOrigins, originsFilename } from "../analytics/origins.ts";
 import { buildCohort, cohortFilename } from "../analytics/cohort.ts";
@@ -2439,6 +2442,24 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${potencyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- threat-landscape diversity / biodiversity (monoculture vs even ecosystem) ---
+      if (method === "GET" && path === "/api/diversity") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        return send(res, 200, buildDiversity(hours, { nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/diversity.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const now = Date.now();
+        const { markdown } = buildDiversity(hours, { nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${diversityFilename(now)}"`,
         });
         res.end(markdown);
         return;
