@@ -99,6 +99,7 @@
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
  *   node src/index.ts --snort 168     # offline Snort/Suricata native IDS-rule export: ready-to-load .rules feeding observed attackers back into the sensor (bidirectional <> $HOME_NET, deterministic sids); --format snort|iprep|md, --action drop|reject, --consolidated (rules)
+ *   node src/index.ts --zeek 168      # offline Zeek (Bro) Intelligence Framework export: ready-to-load Intel::ADDR .dat (+@load-able loader script) feeding observed attackers into a Zeek/Corelight NSM's intel framework; --format script|json|md, --notice, --source NAME, --limit N (intel file)
  *   node src/index.ts --pcap 168      # offline forensic packet-capture filter generator: ready-to-run tcpdump/Wireshark/tshark filters + commands to grab the raw packets of your worst attackers; --format wireshark|tshark|json|md, --iface eth0, --limit N (text)
  *   node src/index.ts --dns 168       # offline DNS sinkhole / blocklist export: malicious domains mined from alert payloads as a ready-to-load hosts/dnsmasq/unbound/RPZ/Pi-hole blocklist (benign-infra skip-list on by default); --format dnsmasq|unbound|rpz|pihole|json|md, --sinkhole IP, --min N, --include-benign (text)
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
@@ -213,6 +214,7 @@ import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from ".
 import { buildStix } from "./analytics/stix.ts";
 import { buildSigma } from "./analytics/sigma.ts";
 import { buildSnort, parseSnortFormat, parseSnortAction } from "./analytics/snort.ts";
+import { buildZeek, parseZeekFormat } from "./analytics/zeekExport.ts";
 import { buildDnsExport, parseDnsFormat } from "./analytics/dnsExport.ts";
 import { buildPcap, parsePcapFormat } from "./analytics/pcap.ts";
 import { buildMetrics } from "./web/metrics.ts";
@@ -3540,6 +3542,60 @@ async function main(): Promise<void> {
         dialect,
         format,
         action,
+        nowMs: Date.now(),
+      });
+      if (format === "md") {
+        console.log(model.markdown);
+      } else if (format === "json") {
+        console.log(JSON.stringify(model, null, 2));
+      } else {
+        process.stdout.write(model.text.endsWith("\n") ? model.text : model.text + "\n");
+      }
+      return;
+    }
+    // Zeek (Bro) Intelligence Framework export (feed observed attackers into an NSM's intel framework).
+    const zeekIdx = argv.findIndex((a) => a === "--zeek" || a.startsWith("--zeek="));
+    if (zeekIdx !== -1) {
+      const inline = argv[zeekIdx]!.split("=")[1];
+      const next = argv[zeekIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --zeek hours: "${raw}". Use e.g. --zeek 168`);
+        process.exit(2);
+      }
+      // Optional `--format intel|script|json|md` — the Intel::ADDR `.dat` by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseZeekFormat(fmtRaw);
+      // Optional `--min-severity info|low|medium|high|critical` (default medium).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--limit N` cap on emitted indicators (highest confidence first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--source NAME` overrides the `meta.source` label (default SecTool).
+      const srcIdx = argv.findIndex((a) => a === "--source" || a.startsWith("--source="));
+      const source = srcIdx !== -1 ? (argv[srcIdx]!.split("=")[1] ?? argv[srcIdx + 1]) : undefined;
+      const includeSafe = args.has("--include-safe");
+      // `--notice` adds meta.do_notice=T so a hit also raises a Zeek Notice (off by default).
+      const notice = args.has("--notice");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the intel file / loader (or the JSON model / Markdown twin).
+      const model = buildZeek(hours, {
+        minSeverity,
+        limit,
+        includeSafe,
+        format,
+        notice,
+        source,
         nowMs: Date.now(),
       });
       if (format === "md") {

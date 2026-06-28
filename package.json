@@ -106,6 +106,7 @@
     "stix": "node src/index.ts --stix 168",
     "sigma": "node src/index.ts --sigma 168",
     "snort": "node src/index.ts --snort 168",
+    "zeek": "node src/index.ts --zeek 168",
     "pcap": "node src/index.ts --pcap 168",
     "dns": "node src/index.ts --dns 168",
     "feed": "node src/index.ts --feed 24",

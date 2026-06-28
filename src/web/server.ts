@@ -206,6 +206,8 @@
  *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
  *   GET  /api/snort?hours=N         -> Snort/Suricata native IDS rules (?format=snort|iprep|json|md, ?action=drop, ?consolidated=1) to feed observed attackers back into the sensor
  *   GET  /api/snort.rules?hours=N   -> the same ruleset as a downloadable .rules file
+ *   GET  /api/zeek?hours=N          -> Zeek (Bro) Intelligence Framework export (?format=intel|script|json|md, ?notice=1, ?source=NAME, ?minSeverity=medium, ?limit=N) feeding observed attackers into a Zeek/Corelight NSM
+ *   GET  /api/zeek.dat?hours=N      -> the same intel file (or loader script) as a downloadable file
  *   GET  /api/pcap?hours=N          -> forensic packet-capture filters/commands for your worst attackers (?format=tcpdump|wireshark|tshark|json|md, ?iface=eth0, ?limit=N) — tcpdump/Wireshark/tshark
  *   GET  /api/pcap.txt?hours=N      -> the same filter/command set as a downloadable text file
  *   GET  /api/dns?hours=N           -> DNS sinkhole / blocklist of domains mined from alert payloads (?format=hosts|dnsmasq|unbound|rpz|pihole|json|md, ?sinkhole=IP, ?min=N, ?minSeverity=, ?limit=N, ?includeBenign=1)
@@ -382,6 +384,7 @@ import {
 import { buildStix, stixFilename } from "../analytics/stix.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
 import { buildSnort, snortFilename, parseSnortFormat, parseSnortAction } from "../analytics/snort.ts";
+import { buildZeek, zeekFilename, parseZeekFormat } from "../analytics/zeekExport.ts";
 import { buildDnsExport, dnsFilename, parseDnsFormat } from "../analytics/dnsExport.ts";
 import { buildPcap, pcapFilename, parsePcapFormat } from "../analytics/pcap.ts";
 import {
@@ -3010,6 +3013,53 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         };
         if (path === "/api/snort.rules") {
           headers["content-disposition"] = `attachment; filename="${snortFilename(now, format)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.text);
+        return;
+      }
+
+      // --- Zeek (Bro) Intelligence Framework export (feed attackers into an NSM) ---
+      // ?hours=N · ?format=intel|script|json|md · ?notice=1 · ?source=NAME
+      // ?minSeverity=medium · ?limit=N · ?includeSafe=1
+      if (method === "GET" && (path === "/api/zeek" || path === "/api/zeek.dat")) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const format = parseZeekFormat(url.searchParams.get("format"));
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const notice = url.searchParams.get("notice") === "1";
+        const source = url.searchParams.get("source") ?? undefined;
+        const now = Date.now();
+        const model = buildZeek(hours, {
+          minSeverity,
+          limit,
+          includeSafe,
+          format,
+          notice,
+          source,
+          nowMs: now,
+        });
+        if (format === "md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${zeekFilename(now, "md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        if (format === "json") {
+          send(res, 200, model);
+          return;
+        }
+        const headers: Record<string, string> = {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/zeek.dat") {
+          headers["content-disposition"] = `attachment; filename="${zeekFilename(now, format)}"`;
         }
         res.writeHead(200, headers);
         res.end(model.text);
