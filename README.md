@@ -2117,6 +2117,56 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/concentration.md?hours=N` → the same report as a downloadable `.md` file.
 - `node src/index.ts --concentration 168 [--limit 15] [--quick-wins 10]` (or `npm run concentration`) → print the Markdown to stdout (defaults to a 7-day window so the distribution shape reflects more than one shift).
 
+## 🧬 Threat-landscape diversity / biodiversity report (`GET /api/diversity[.md]`, `--diversity`)
+
+The concentration report measures *inequality* (a Gini coefficient) of one
+distribution at a time; this one measures **diversity** — the ecologist's twin
+question, and one no other report answers. Ten thousand alerts can be effectively
+*one* species or effectively *ten thousand*, and the raw count renders both
+identically — yet the answer flips the whole defensive strategy from block-and-win
+to tune/rate-limit/geo-policy. Diversity captures both halves of that: **richness**
+(how many distinct things exist) *and* **evenness** (how equally they share the
+volume), expressed in plain "effectively N things" units so the diversity of
+attackers and of signatures sit on the **same comparable scale** — something a
+Gini cannot do.
+
+It borrows the standard ecological toolkit and applies it uniformly across **four
+orthogonal dimensions** — **sources** (attacker IPs), **signatures** (which rules
+fire), **categories** (Suricata threat-class) and **targets** (destination hosts).
+For each, from the per-entity alert counts, it computes:
+
+- **Richness (N₀)** — distinct entities (Hill number q=0).
+- **Effective count (N₁ = eᴴ)** — the exponential of the **Shannon index**; the
+  number of *equally-common* entities that would yield the same diversity. The
+  headline figure, in plain entity units.
+- **Inverse-Simpson (N₂ = 1/Σpᵢ²)** — the q=2 effective count, weighting the common
+  entities most. `N₀ ≥ N₁ ≥ N₂` always; the gap between them *is* the unevenness.
+- **Hill evenness (E = N₁/N₀, 0–1)** — effective count as a fraction of richness;
+  1.0 = perfectly even ecosystem, → 0 = monoculture. Drives a one-word **shape**:
+  **🌐 diffuse / 🔀 mixed / 🎯 concentrated / 🧬 monoculture** — plus Pielou's J and
+  the Gini-Simpson index for the stats-minded, and the **dominant** entity by name.
+
+Because a snapshot is only half the story, each dimension also carries a **diversity
+drift**: the effective count (N₁) of the window's *second* half versus its *first*.
+A rising one means the landscape is **📈 diversifying** (a broadening campaign, a new
+botnet fanning in — defend wider); a falling one means it is **📉 consolidating** (a
+few actors/signatures taking over — a blocklist starting to pay off, or one campaign
+drowning out the rest).
+
+Honest about its limits: diversity is measured on alert **counts**, not severity —
+it guides *strategy* (fight narrow vs broad), not triage order (pair with `--risk` /
+`--potency`). These are IPS **detections** (NAT can collapse actors, a rotating
+botnet can inflate richness), and raw richness is bounded by the store's history cap
+(see `--coverage`) — though the effective counts N₁/N₂ are far less sensitive to that
+cap, which is exactly why they are the headline. This is the *effective-count /
+evenness* lens; for the *inequality / quick-win* lens of the same distributions use
+`--concentration`, and for the vital-few share use `--focus`. Pure offline math over
+the local alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/diversity?hours=N` → the structured model **plus** rendered Markdown (the at-a-glance index matrix and the per-dimension detail block).
+- `GET /api/diversity.md?hours=N` → the same report as a downloadable `.md` file.
+- `node src/index.ts --diversity 168` (or `npm run diversity`) → print the Markdown to stdout (defaults to a 7-day window so a real population of entities spreads across the indices).
+
 ## 🔥 Current-heat / decay-weighted activity report (`GET /api/heat[.md]`, `--heat`)
 
 Every volume-ranked leaderboard treats an alert from an hour ago and one from six

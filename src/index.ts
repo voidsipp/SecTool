@@ -65,6 +65,7 @@
  *   node src/index.ts --timeline 168  # offline daily timeline ledger: one chronological row per UTC day (volume, Δ, serious, unique srcs/dsts, new attackers, top driver) + sparkline & trend (--bucket H) (Markdown)
  *   node src/index.ts --vector 168    # offline entry-vector / first-contact (foot-in-the-door): what fresh attackers try FIRST + the opener→escalation funnel (esc rate, median warning lead, one-and-done, opened-hot) (--limit) (Markdown)
  *   node src/index.ts --potency 168   # offline threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) — quiet-but-deadly snipers vs loud-but-harmless floods (4 quadrants, %volume↔%weight gap) (--limit, --min N) (Markdown)
+ *   node src/index.ts --diversity 168 # offline threat-landscape diversity / biodiversity: Hill-number effective counts + evenness across sources/signatures/categories/targets — monoculture (block-and-win) vs even ecosystem (broad policy) + diversify/consolidate drift (Markdown)
  *   node src/index.ts --origins 168   # offline regional / RIR origin attribution (where in the world): maps each public source IP to its Internet registry (ARIN/RIPE/APNIC/LACNIC/AFRINIC) via the IANA /8 + IPv6 /12 tables — continental distribution, per-region severity & WHOIS pivot (--limit) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
@@ -180,6 +181,7 @@ import { buildSilence } from "./analytics/silence.ts";
 import { buildExposure } from "./analytics/exposure.ts";
 import { buildTimeline } from "./analytics/timeline.ts";
 import { buildPotency } from "./analytics/potency.ts";
+import { buildDiversity } from "./analytics/diversity.ts";
 import { buildVector } from "./analytics/vector.ts";
 import { buildOrigins } from "./analytics/origins.ts";
 import { buildCohort } from "./analytics/cohort.ts";
@@ -2642,6 +2644,23 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown threat-potency report to stdout.
       console.log(buildPotency(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const diversityIdx = argv.findIndex((a) => a === "--diversity" || a.startsWith("--diversity="));
+    if (diversityIdx !== -1) {
+      const inline = argv[diversityIdx]!.split("=")[1];
+      const next = argv[diversityIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a week so a real population of entities spreads across the indices.
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --diversity hours: "${raw}". Use e.g. --diversity 168`);
+        process.exit(2);
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown diversity report to stdout.
+      console.log(buildDiversity(hours, { nowMs: Date.now() }).markdown);
       return;
     }
     const originsIdx = argv.findIndex((a) => a === "--origins" || a.startsWith("--origins="));
