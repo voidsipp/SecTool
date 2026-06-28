@@ -147,6 +147,8 @@ export const REPORT_CATALOG: readonly CatalogEntry[] = [
     "Morning SITREP", "Consolidated security briefing: KPIs, trend, action items and bundled detail reports."),
   entry("Daily driver", "compare", "--compare", "/api/compare", 24,
     "Period comparison", "Period-over-period: this window versus the previous one, what rose and what fell."),
+  entry("Daily driver", "baseline", "--baseline", "/api/baseline", 24,
+    "Self-baseline anomaly scorecard", "Is right now abnormal versus your *own* normal? The smoke-alarm compare (surge does within-window spikes, compare diffs ONE prior window) has no notion of variance — this grades the recent window against the trailing K equal-length windows with a z-score per headline metric (alerts, serious, total risk weight, mean risk density, distinct sources/targets/signatures, and block rate where *lower* is the worry), reads each normal/elevated/anomalous off |z| and folds the concerning direction into one posture (🟢/🟡/🔴/⚪). Decomposes the headline anomaly into the signatures that drove it (recent vs trailing mean) and separately surfaces brand-new sources absent from the whole baseline. Relative alarm, not a forecast — controls for time-of-day but not weekly seasonality (--baselines N, --limit)."),
   entry("Daily driver", "report", null, "/api/report", null,
     "Period overview", "At-a-glance period report that powers the dashboard overview (API-only)."),
   entry("Daily driver", "catalog", "--catalog", "/api/catalog", null,

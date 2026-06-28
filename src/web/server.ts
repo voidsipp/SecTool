@@ -158,6 +158,8 @@
  *   GET  /api/vector.md?hours=N&limit=N -> the same entry-vector report as a downloadable .md file
  *   GET  /api/potency?hours=N&limit=N&min=N -> threat-potency / severity-density: ranks sources by punch-per-alert (mean risk weight) into sniper/brawler/flood/background quadrants with the %volume↔%weight gap (model + Markdown)
  *   GET  /api/potency.md?hours=N&limit=N&min=N -> the same threat-potency report as a downloadable .md file
+ *   GET  /api/baseline?hours=N&baselines=K&limit=N -> self-baseline anomaly scorecard: is the recent window abnormal vs the trailing K equal-length windows? per-metric z-scores + headline drivers + brand-new sources (model + Markdown)
+ *   GET  /api/baseline.md?hours=N&baselines=K&limit=N -> the same anomaly scorecard as a downloadable .md file
  *   GET  /api/lexicon?hours=N&limit=N&min=N -> threat-lexicon / signature vocabulary: tokenises signature text into a ranked term-frequency table bucketed into threat themes + the vendor rule-class taxonomy parsed from ET/GPL prefixes (model + Markdown)
  *   GET  /api/lexicon.md?hours=N&limit=N&min=N -> the same threat-lexicon report as a downloadable .md file
  *   GET  /api/pivot?hours=N&limit=N&min=N&includeSafe=1 -> OSINT investigation pivot sheet: worst public sources deep-linked into AbuseIPDB/VirusTotal/GreyNoise/Shodan/… + whois/dig/--profile commands (model + Markdown)
@@ -336,6 +338,7 @@ import { buildSilence, silenceFilename } from "../analytics/silence.ts";
 import { buildExposure, exposureFilename } from "../analytics/exposure.ts";
 import { buildTimeline, timelineFilename } from "../analytics/timeline.ts";
 import { buildPotency, potencyFilename } from "../analytics/potency.ts";
+import { buildBaseline, baselineFilename } from "../analytics/baseline.ts";
 import { buildLexicon, lexiconFilename } from "../analytics/lexicon.ts";
 import { buildPivot, pivotFilename } from "../analytics/pivot.ts";
 import { buildDiversity, diversityFilename } from "../analytics/diversity.ts";
@@ -2449,6 +2452,28 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "no-store",
           "content-disposition": `attachment; filename="${potencyFilename(now)}"`,
+        });
+        res.end(markdown);
+        return;
+      }
+
+      // --- self-baseline anomaly scorecard (is right now abnormal vs my normal?) ---
+      if (method === "GET" && path === "/api/baseline") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const baselineWindows = Number(url.searchParams.get("baselines")) || undefined;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        return send(res, 200, buildBaseline(hours, { baselineWindows, limit, nowMs: Date.now() }));
+      }
+      if (method === "GET" && path === "/api/baseline.md") {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const baselineWindows = Number(url.searchParams.get("baselines")) || undefined;
+        const limit = Number(url.searchParams.get("limit")) || undefined;
+        const now = Date.now();
+        const { markdown } = buildBaseline(hours, { baselineWindows, limit, nowMs: now });
+        res.writeHead(200, {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `attachment; filename="${baselineFilename(now)}"`,
         });
         res.end(markdown);
         return;
