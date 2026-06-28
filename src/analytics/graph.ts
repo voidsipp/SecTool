@@ -540,7 +540,7 @@ export function buildAttackGraph(hours: number, opts: AttackGraphOptions = {}): 
     t.sevMax = maxSeverity(t.sevMax, a.severity);
     tgtAcc.set(dst, t);
 
-    const key = `${src} ${dst}`;
+    const key = `${src}|${dst}`;
     const e = edgeAcc.get(key) ?? { from: src, to: dst, alerts: 0, sevMax: "info" as Severity, sig: new Map() };
     e.alerts++;
     e.sevMax = maxSeverity(e.sevMax, a.severity);

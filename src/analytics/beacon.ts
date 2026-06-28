@@ -424,7 +424,7 @@ export function buildBeacon(hours: number, opts: BeaconOptions = {}): BeaconRepo
     if (a.time < windowStartMs || a.time > windowEndMs) continue;
     totalWindowAlerts++;
     if (!a.srcIp || !a.dstIp) continue;
-    const key = `${a.srcIp} ${a.dstIp}`;
+    const key = `${a.srcIp}|${a.dstIp}`;
     let e = pairs.get(key);
     if (!e) {
       e = {

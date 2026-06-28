@@ -703,7 +703,7 @@ export function buildTraffic(hours: number, opts: TrafficOptions = {}): TrafficR
     dAcc.peers.add(src);
 
     // Per-conversation.
-    const ckey = `${src} ${dst}`;
+    const ckey = `${src}|${dst}`;
     const cAcc =
       convs.get(ckey) ??
       ({ src, dst, direction: dir, totals: newTotals(), dstPorts: new Map(), protos: new Map() } satisfies ConvAcc);
