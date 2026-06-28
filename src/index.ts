@@ -93,6 +93,7 @@
  *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
+ *   node src/index.ts --snort 168     # offline Snort/Suricata native IDS-rule export: ready-to-load .rules feeding observed attackers back into the sensor (bidirectional <> $HOME_NET, deterministic sids); --format snort|iprep|md, --action drop|reject, --consolidated (rules)
  *   node src/index.ts --feed 24       # offline alert syndication feed (RSS 2.0 by default; --format atom|json) for any feed reader / Slack / Teams; --min-severity X, --limit N (XML/JSON)
  *   node src/index.ts --cef 168       # offline CEF/LEEF SIEM event export: one normalized log-forwarding line per alert for ArcSight/Splunk/Sentinel (CEF) or QRadar (LEEF); --format leef|json|md (CEF)
  */
@@ -196,6 +197,7 @@ import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./anal
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { buildStix } from "./analytics/stix.ts";
 import { buildSigma } from "./analytics/sigma.ts";
+import { buildSnort, parseSnortFormat, parseSnortAction } from "./analytics/snort.ts";
 import { buildMetrics } from "./web/metrics.ts";
 import { buildCatalog, type ReportCategory } from "./analytics/catalog.ts";
 import { buildRuleset } from "./analytics/ruleset.ts";
@@ -3191,6 +3193,63 @@ async function main(): Promise<void> {
         console.log(model.markdown);
       } else {
         process.stdout.write(model.yaml.endsWith("\n") ? model.yaml : model.yaml + "\n");
+      }
+      return;
+    }
+    // Snort / Suricata native IDS-rule export (feed observed attackers back into the sensor).
+    const snortIdx = argv.findIndex((a) => a === "--snort" || a.startsWith("--snort="));
+    if (snortIdx !== -1) {
+      const inline = argv[snortIdx]!.split("=")[1];
+      const next = argv[snortIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --snort hours: "${raw}". Use e.g. --snort 168`);
+        process.exit(2);
+      }
+      // Optional `--format suricata|snort|iprep|json|md` — suricata `.rules` by default.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : undefined;
+      const format = parseSnortFormat(fmtRaw);
+      // The `snort` format is also a dialect; iprep is Suricata-only (coerced in buildSnort).
+      const dialect = format === "snort" ? "snort" : "suricata";
+      // Optional `--action alert|drop|reject` — alert (IDS-safe) by default.
+      const actIdx = argv.findIndex((a) => a === "--action" || a.startsWith("--action="));
+      const actRaw = actIdx !== -1 ? (argv[actIdx]!.split("=")[1] ?? argv[actIdx + 1]) : undefined;
+      const action = parseSnortAction(actRaw);
+      // Optional `--min-severity info|low|medium|high|critical` (default medium).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--limit N` cap on emitted indicators (highest confidence first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const includeSafe = args.has("--include-safe");
+      const consolidated = args.has("--consolidated");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the ruleset (or the JSON model / Markdown review twin).
+      const model = buildSnort(hours, {
+        minSeverity,
+        limit,
+        includeSafe,
+        consolidated,
+        dialect,
+        format,
+        action,
+        nowMs: Date.now(),
+      });
+      if (format === "md") {
+        console.log(model.markdown);
+      } else if (format === "json") {
+        console.log(JSON.stringify(model, null, 2));
+      } else {
+        process.stdout.write(model.text.endsWith("\n") ? model.text : model.text + "\n");
       }
       return;
     }
