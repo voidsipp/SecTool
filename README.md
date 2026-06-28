@@ -534,6 +534,39 @@ Four serializations cover the whole Elastic ingestion surface:
 - `GET /api/ecs?hours=N&format=bulk|ndjson|json|markdown&limit=N&index=NAME` → the document stream in the requested format (`json` returns the model inline; `.ndjson` / `.json` / `.md` path suffixes download as a file). Served as `application/x-ndjson`, the content type Elastic's `_bulk` endpoint expects.
 - `node src/index.ts --ecs 168 [--format ndjson] [--index my-alerts] [--limit 500]` (or `npm run ecs`) → print the document stream to stdout (defaults to a 7-day window and the `_bulk`-ready format). Pipe straight into a cluster: `npm run ecs | curl -H 'Content-Type: application/x-ndjson' -XPOST localhost:9200/_bulk --data-binary @-`.
 
+## 🗓️ iCalendar (.ics) security calendar (`GET /api/ics`, `--ics`)
+
+The one downstream the other exports skip — the **calendar**. Every analyst,
+manager and on-call lead already lives in **Outlook / Google Calendar / Apple
+Calendar / Thunderbird** all day, yet nothing put the security picture *there*.
+This export renders the recent alert history as a valid **RFC 5545 iCalendar**:
+one **all-day event per UTC day** carrying that day's headline numbers — volume,
+the serious (high+critical) count, unique sources / targets / signatures, the
+busiest source, the top signature, the dominant category, and how many brand-new
+attackers arrived — plus a **day-over-day delta** and **notable-day flags**
+(busiest day 📈, day-over-day spike ⚡, critical-severity day 🔴, new-attacker
+influx 🆕). Days at/above the alarm floor raise a reminder (`VALARM`); every event
+is marked free/`TRANSPARENT` so it never blocks your availability. Pure offline
+math over the local alert history — **no SSH, no Claude, no live gateway query**.
+
+This is deliberately distinct from its neighbours: **`--feed`** (RSS/Atom/JSON
+Feed) is a *newest-first per-alert item stream* for a feed reader, while a
+calendar is the opposite shape — *time-anchored day blocks* you scroll by date,
+with alarms and free/busy semantics a feed cannot express. **`--timeline`**
+answers the same chronological question as a *Markdown ledger you read*; this
+turns that ledger into an artefact your calendar app *renders and reminds you
+about*.
+
+- **Subscribe (recommended):** point your calendar app at
+  `webcal://<host>/api/ics.ics` (Apple Calendar / Outlook / Google "From URL").
+  The calendar declares `X-PUBLISHED-TTL`/`REFRESH-INTERVAL` of one hour, so it
+  keeps itself current with zero manual re-import.
+- **One-off import:** download `/api/ics.ics` (or `npm run ics > sectool.ics`) and
+  open it in any calendar app to import the events once.
+
+- `GET /api/ics?hours=N&format=ics|json|md&limit=N&includeQuiet=1&alarms=0` → the calendar in the requested format (`json` returns the model inline; the `.ics` / `.json` / `.md` path suffixes download as a file). The `.ics` is served as `text/calendar` so a browser opens it straight into the calendar app.
+- `node src/index.ts --ics 168 [--format md|json] [--include-quiet] [--no-alarms] [--limit 120]` (or `npm run ics`) → print the iCalendar document to stdout (defaults to a 7-day window; quiet days are skipped unless `--include-quiet`). Save and open: `npm run ics > sectool-calendar.ics`.
+
 ## 📈 Prometheus / OpenMetrics endpoint (`GET /metrics`, `--metrics`)
 
 Every other surface answers a question **after the fact** — a Markdown report you
