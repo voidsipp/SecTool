@@ -567,6 +567,44 @@ alert history — **no SSH, no Claude, no live gateway query**.
 - `GET /api/dns?hours=N&format=hosts|dnsmasq|unbound|rpz|pihole|json|md&sinkhole=0.0.0.0&min=N&minSeverity=&limit=N[&includeBenign=1]` → the blocklist in the requested format (`json` returns the structured model inline; `md` and the `/api/dns.txt` suffix download as a file with a format-appropriate extension).
 - `node src/index.ts --dns 168 [--format dnsmasq] [--sinkhole 0.0.0.0] [--min 2] [--min-severity medium] [--include-benign]` (or `npm run dns`) → print the blocklist to stdout (defaults to a 7-day window and the `hosts` format). Save and load: `npm run dns -- --format dnsmasq > /etc/dnsmasq.d/sectool-blocklist.conf`.
 
+## 🦓 Zeek (Bro) Intelligence Framework export (`GET /api/zeek`, `--zeek`)
+
+The **network-security-monitor** sibling of `--snort` — the one sensor surface
+the export family could not reach. Where `--snort` writes native rules for an
+**inline signature IDS/IPS** (Snort / Suricata) and `--fwrules` writes
+firewall-drop config, **Zeek** is a different animal: a passive NSM whose
+purpose-built **Intelligence Framework** continuously cross-references every
+address, domain, URL and file hash it sees — across connections, DNS queries,
+HTTP requests, TLS handshakes and file transfers — against a loaded indicator
+set, raising an `intel.log` hit (and optionally a Notice) on a match. It is, in
+practice, the most common way a SOC operationalises an IP feed on the
+*monitoring* side, and SecTool spoke every export dialect except this one.
+
+This export reuses the exact same `--iocs` scoring engine (severity floor,
+0–100 confidence, safelist exclusion, dismissed-alert handling) that `--snort`,
+`--sigma` and `--stix` build on, then renders the worklist as a **strictly-valid
+Zeek intel file**: a single `#fields` header followed by one TAB-delimited
+`Intel::ADDR` row per attacker, `meta.desc` carrying the confidence / severity /
+lead-signature provenance and `meta.url` pre-filled with the AbuseIPDB lookup so
+an analyst can pivot straight off a hit. The file is deliberately
+**comment-free** — Zeek's ASCII input reader only understands its header grammar
+and chokes on stray `#` lines, so (unlike the `--snort` / `--iocs` text outputs)
+all human provenance lives in the Markdown twin and the loader script, never in
+the `.dat`. Pure offline math over the local alert history — **no SSH, no Claude,
+no live gateway query**.
+
+Output flavours: **intel** (default — the `.dat` to drop into `site/` and add to
+`Intel::read_files`), **script** (a portable `@load`-able `.zeek` loader that
+wires the Intel Framework, the `seen` policy and the file itself in via `@DIR`,
+so the pair is path-independent), **json** (the model) and **md** (the review
+twin). `--notice` adds `meta.do_notice = T` so a hit also raises a Zeek
+`Intel::Notice` (off by default — the IDS-safe choice, mirroring `--snort`'s
+`alert`-by-default); `--source NAME` relabels `meta.source`. Zeek **monitors, it
+does not block** — pair this with `--fwrules` / `--snort` to enforce.
+
+- `GET /api/zeek?hours=N&format=intel|script|json|md&notice=1&source=NAME&minSeverity=&limit=N[&includeSafe=1]` → the intel file (or loader script) in the requested format (`json` returns the model inline; `md` and the `/api/zeek.dat` suffix download as a file with a format-appropriate extension).
+- `node src/index.ts --zeek 168 [--format script] [--notice] [--source SecTool] [--min-severity high] [--limit 500]` (or `npm run zeek`) → print the intel file to stdout (defaults to a 7-day window and the `intel` format). Save into a Zeek site directory: `npm run zeek > /opt/zeek/share/zeek/site/sectool-intel.dat`.
+
 ## 🗓️ iCalendar (.ics) security calendar (`GET /api/ics`, `--ics`)
 
 The one downstream the other exports skip — the **calendar**. Every analyst,
