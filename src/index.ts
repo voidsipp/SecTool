@@ -97,6 +97,7 @@
  *   node src/index.ts --abuse 168     # offline abuse-report / upstream-takedown generator: drafts ready-to-send abuse complaints for the worst public sources, grouped by provider abuse desk (--min-count N, --org "Name") (Markdown)
  *   node src/index.ts --fwrules       # offline firewall-rule export: renders the enforced blocklist into ipset/iptables/nftables/ufw/pf/cisco/mikrotik/vyatta/windows config (--dialect X for one syntax) (Markdown)
  *   node src/index.ts --stix 168      # offline STIX 2.1 threat-intel bundle export (deterministic UUIDv5 Indicator+Identity SDOs for MISP/OpenCTI/TAXII; --format md for review) (JSON)
+ *   node src/index.ts --misp 168      # offline native MISP Event export (ip-src Attributes, deterministic UUIDv5, to_ids from confidence, TLP/taxonomy tags) for PyMISP / a MISP feed; --format md for review (JSON)
  *   node src/index.ts --sigma 168     # offline Sigma detection-rule export: per-indicator (or --consolidated) Sigma YAML for any SIEM (Splunk/Elastic/Sentinel via pySigma); --format md for review (YAML)
  *   node src/index.ts --snort 168     # offline Snort/Suricata native IDS-rule export: ready-to-load .rules feeding observed attackers back into the sensor (bidirectional <> $HOME_NET, deterministic sids); --format snort|iprep|md, --action drop|reject, --consolidated (rules)
  *   node src/index.ts --zeek 168      # offline Zeek (Bro) Intelligence Framework export: ready-to-load Intel::ADDR .dat (+@load-able loader script) feeding observed attackers into a Zeek/Corelight NSM's intel framework; --format script|json|md, --notice, --source NAME, --limit N (intel file)
@@ -212,6 +213,7 @@ import { buildBlockPlan } from "./analytics/blockplan.ts";
 import { buildBriefing, ALL_SECTION_KEYS, type BriefingSectionKey } from "./analytics/briefing.ts";
 import { buildIocExport, renderIoc, parseIocFormat, parseSeverityFloor } from "./analytics/iocExport.ts";
 import { buildStix } from "./analytics/stix.ts";
+import { buildMisp, parseTlp } from "./analytics/mispExport.ts";
 import { buildSigma } from "./analytics/sigma.ts";
 import { buildSnort, parseSnortFormat, parseSnortAction } from "./analytics/snort.ts";
 import { buildZeek, parseZeekFormat } from "./analytics/zeekExport.ts";
@@ -3268,6 +3270,64 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the STIX bundle JSON (or the Markdown review twin).
       const model = buildStix(hours, { minSeverity, limit, includeSafe, nowMs: Date.now() });
+      if (fmtRaw === "md" || fmtRaw === "markdown") {
+        console.log(model.markdown);
+      } else {
+        process.stdout.write(model.json + "\n");
+      }
+      return;
+    }
+    // Native MISP Event export (PyMISP / REST /events/add / a static MISP feed).
+    const mispIdx = argv.findIndex((a) => a === "--misp" || a.startsWith("--misp="));
+    if (mispIdx !== -1) {
+      const inline = argv[mispIdx]!.split("=")[1];
+      const next = argv[mispIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      const hours = raw ? Number(raw) : 168;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --misp hours: "${raw}". Use e.g. --misp 168`);
+        process.exit(2);
+      }
+      // Optional `--format json|md` — json (the event) by default, md is the human review twin.
+      const fmtIdx = argv.findIndex((a) => a === "--format" || a.startsWith("--format="));
+      const fmtRaw = (fmtIdx !== -1 ? (argv[fmtIdx]!.split("=")[1] ?? argv[fmtIdx + 1]) : "")
+        ?.trim()
+        .toLowerCase();
+      // Optional `--min-severity info|low|medium|high|critical` (default medium).
+      const sevIdx = argv.findIndex((a) => a === "--min-severity" || a.startsWith("--min-severity="));
+      const sevRaw = sevIdx !== -1 ? (argv[sevIdx]!.split("=")[1] ?? argv[sevIdx + 1]) : undefined;
+      const minSeverity = parseSeverityFloor(sevRaw);
+      // Optional `--limit N` cap on emitted attributes (highest confidence first).
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      // Optional `--tlp white|clear|green|amber|amber+strict|red` (default amber).
+      const tlpIdx = argv.findIndex((a) => a === "--tlp" || a.startsWith("--tlp="));
+      const tlp = tlpIdx !== -1 ? parseTlp(argv[tlpIdx]!.split("=")[1] ?? argv[tlpIdx + 1]) : undefined;
+      // Optional `--to-ids N` confidence floor for the to_ids flag (default 60).
+      let toIdsThreshold: number | undefined;
+      const tiIdx = argv.findIndex((a) => a === "--to-ids" || a.startsWith("--to-ids="));
+      if (tiIdx !== -1) {
+        const ti = argv[tiIdx]!.split("=")[1] ?? argv[tiIdx + 1];
+        const n = ti !== undefined ? Number(ti) : NaN;
+        if (Number.isFinite(n) && n >= 0) toIdsThreshold = n;
+      }
+      const includeSafe = args.has("--include-safe");
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the MISP Event JSON (or the Markdown review twin).
+      const model = buildMisp(hours, {
+        minSeverity,
+        limit,
+        includeSafe,
+        tlp,
+        toIdsThreshold,
+        nowMs: Date.now(),
+      });
       if (fmtRaw === "md" || fmtRaw === "markdown") {
         console.log(model.markdown);
       } else {

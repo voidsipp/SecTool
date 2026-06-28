@@ -201,6 +201,9 @@
  *   GET  /api/stix?hours=N          -> OASIS STIX 2.1 threat-intel bundle (deterministic UUIDv5 Indicator+Identity SDOs) for MISP/OpenCTI/TAXII
  *   GET  /api/stix.json?hours=N     -> the same STIX bundle as a downloadable .json file
  *   GET  /api/stix.md?hours=N       -> a human Markdown review twin of the STIX bundle
+ *   GET  /api/misp?hours=N          -> native MISP Event JSON (ip-src Attributes, deterministic UUIDv5, to_ids from confidence, TLP/taxonomy tags) for PyMISP / a MISP feed
+ *   GET  /api/misp.json?hours=N     -> the same MISP Event as a downloadable .json file
+ *   GET  /api/misp.md?hours=N       -> a human Markdown review twin of the MISP Event
  *   GET  /api/sigma?hours=N         -> Sigma detection rules (per-indicator; ?consolidated=1 for a single list rule) for any SIEM via pySigma
  *   GET  /api/sigma.yml?hours=N     -> the same Sigma ruleset as a downloadable .yml file
  *   GET  /api/sigma.md?hours=N      -> a human Markdown review twin of the Sigma ruleset
@@ -382,6 +385,7 @@ import {
   type IocFormat,
 } from "../analytics/iocExport.ts";
 import { buildStix, stixFilename } from "../analytics/stix.ts";
+import { buildMisp, mispFilename, parseTlp } from "../analytics/mispExport.ts";
 import { buildSigma, sigmaFilename } from "../analytics/sigma.ts";
 import { buildSnort, snortFilename, parseSnortFormat, parseSnortAction } from "../analytics/snort.ts";
 import { buildZeek, zeekFilename, parseZeekFormat } from "../analytics/zeekExport.ts";
@@ -2926,6 +2930,45 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         };
         if (path === "/api/stix.json") {
           headers["content-disposition"] = `attachment; filename="${stixFilename(now)}"`;
+        }
+        res.writeHead(200, headers);
+        res.end(model.json);
+        return;
+      }
+
+      // --- Native MISP Event export (PyMISP / REST /events/add / a static MISP feed) ---
+      // ?hours=N · ?minSeverity=medium · ?limit=N · ?includeSafe=1 · ?tlp=amber · ?toIds=N
+      if (
+        method === "GET" &&
+        (path === "/api/misp" || path === "/api/misp.json" || path === "/api/misp.md")
+      ) {
+        const hours = Number(url.searchParams.get("hours")) || cfg.web.defaultHours;
+        const minSeverity = parseSeverityFloor(url.searchParams.get("minSeverity"));
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+        const includeSafe = url.searchParams.get("includeSafe") === "1";
+        const tlp = parseTlp(url.searchParams.get("tlp"));
+        const toIdsRaw = Number(url.searchParams.get("toIds"));
+        const toIdsThreshold = Number.isFinite(toIdsRaw) && toIdsRaw >= 0 ? toIdsRaw : undefined;
+        const now = Date.now();
+        const model = buildMisp(hours, { minSeverity, limit, includeSafe, tlp, toIdsThreshold, nowMs: now });
+        if (path === "/api/misp.md") {
+          res.writeHead(200, {
+            "content-type": "text/markdown; charset=utf-8",
+            "cache-control": "no-store",
+            "content-disposition": `attachment; filename="${mispFilename(now).replace(/\.json$/, ".md")}"`,
+          });
+          res.end(model.markdown);
+          return;
+        }
+        // Both /api/misp and /api/misp.json return the event itself (the deliverable);
+        // the .json variant adds a download disposition for "Save as…" convenience.
+        const headers: Record<string, string> = {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        };
+        if (path === "/api/misp.json") {
+          headers["content-disposition"] = `attachment; filename="${mispFilename(now)}"`;
         }
         res.writeHead(200, headers);
         res.end(model.json);

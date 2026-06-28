@@ -104,6 +104,7 @@
     "fwrules": "node src/index.ts --fwrules",
     "iocs": "node src/index.ts --iocs 168 --format plain",
     "stix": "node src/index.ts --stix 168",
+    "misp": "node src/index.ts --misp 168",
     "sigma": "node src/index.ts --sigma 168",
     "snort": "node src/index.ts --snort 168",
     "zeek": "node src/index.ts --zeek 168",
