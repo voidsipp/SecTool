@@ -534,6 +534,39 @@ Four serializations cover the whole Elastic ingestion surface:
 - `GET /api/ecs?hours=N&format=bulk|ndjson|json|markdown&limit=N&index=NAME` → the document stream in the requested format (`json` returns the model inline; `.ndjson` / `.json` / `.md` path suffixes download as a file). Served as `application/x-ndjson`, the content type Elastic's `_bulk` endpoint expects.
 - `node src/index.ts --ecs 168 [--format ndjson] [--index my-alerts] [--limit 500]` (or `npm run ecs`) → print the document stream to stdout (defaults to a 7-day window and the `_bulk`-ready format). Pipe straight into a cluster: `npm run ecs | curl -H 'Content-Type: application/x-ndjson' -XPOST localhost:9200/_bulk --data-binary @-`.
 
+## 🕳️ DNS sinkhole / blocklist export (`GET /api/dns`, `--dns`)
+
+Every enforcement export above stops at the **IP layer** (`iocs` / `fwrules`
+firewall rules, `snort` sensor rules, `pcap` capture filters). This one closes
+the loop at the **DNS layer** — the lowest-collateral, estate-wide control there
+is. An attacker's IP rotates in minutes, but the **C2 / payload / phishing
+domain** riding inside a request (the HTTP `Host`, the TLS SNI, the DNS query, a
+URL in the body) is a far stickier indicator, and a single `0.0.0.0` answer at
+the resolver black-holes it for every host, port and protocol at once. That is
+exactly the surface the `--artifacts` report already *mines* but nothing
+*enforces*. This export reuses the same conservative, low-false-positive domain
+extractor (a structured pass over an embedded Suricata EVE object, then a careful
+regex fallback), rolls every distinct domain up over the window, ranks each by a
+0–100 blocklist confidence (severity, volume, signature diversity, internal
+fan-out), and renders the worklist into the formats every DNS-layer control
+ingests: **hosts** (default — `0.0.0.0 domain` lines for `/etc/hosts`, Pi-hole or
+AdGuard), **dnsmasq** (`address=/domain/0.0.0.0`, wildcards every subdomain),
+**unbound** (`local-zone … always_nxdomain`), **rpz** (a complete BIND Response
+Policy Zone), **pihole** (a bare adlist), plus **json** / **md** (review twin).
+
+Safety first — a DNS blocklist that sinkholes a *legitimate* domain is an outage,
+so the export is deliberately conservative: a built-in **benign-infrastructure
+skip-list** (CDN / OS-update / cloud / certificate / NTP / reverse-DNS suffixes —
+Microsoft, Apple, Google, Cloudflare, Akamai, AWS, GitHub, Let's Encrypt …) is
+excluded by default (`--include-benign` overrides, with a loud caveat), a `--min`
+alert-count floor and a `--min-severity` floor keep one-off noise out, and the
+Markdown twin exists to be **eyeballed before you load it** — a domain in a
+payload is *observed, not adjudicated malicious*. Pure offline math over the local
+alert history — **no SSH, no Claude, no live gateway query**.
+
+- `GET /api/dns?hours=N&format=hosts|dnsmasq|unbound|rpz|pihole|json|md&sinkhole=0.0.0.0&min=N&minSeverity=&limit=N[&includeBenign=1]` → the blocklist in the requested format (`json` returns the structured model inline; `md` and the `/api/dns.txt` suffix download as a file with a format-appropriate extension).
+- `node src/index.ts --dns 168 [--format dnsmasq] [--sinkhole 0.0.0.0] [--min 2] [--min-severity medium] [--include-benign]` (or `npm run dns`) → print the blocklist to stdout (defaults to a 7-day window and the `hosts` format). Save and load: `npm run dns -- --format dnsmasq > /etc/dnsmasq.d/sectool-blocklist.conf`.
+
 ## 🗓️ iCalendar (.ics) security calendar (`GET /api/ics`, `--ics`)
 
 The one downstream the other exports skip — the **calendar**. Every analyst,

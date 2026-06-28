@@ -107,6 +107,7 @@
     "sigma": "node src/index.ts --sigma 168",
     "snort": "node src/index.ts --snort 168",
     "pcap": "node src/index.ts --pcap 168",
+    "dns": "node src/index.ts --dns 168",
     "feed": "node src/index.ts --feed 24",
     "cef": "node src/index.ts --cef 168",
     "ecs": "node src/index.ts --ecs 168",
