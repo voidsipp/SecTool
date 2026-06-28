@@ -36,6 +36,7 @@
     "focus": "node src/index.ts --focus 168",
     "potency": "node src/index.ts --potency 168",
     "lexicon": "node src/index.ts --lexicon 168",
+    "baseline": "node src/index.ts --baseline 24",
     "diversity": "node src/index.ts --diversity 168",
     "origins": "node src/index.ts --origins 168",
     "pivot": "node src/index.ts --pivot 168",

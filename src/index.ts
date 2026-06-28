@@ -69,6 +69,7 @@
  *   node src/index.ts --diversity 168 # offline threat-landscape diversity / biodiversity: Hill-number effective counts + evenness across sources/signatures/categories/targets — monoculture (block-and-win) vs even ecosystem (broad policy) + diversify/consolidate drift (Markdown)
  *   node src/index.ts --origins 168   # offline regional / RIR origin attribution (where in the world): maps each public source IP to its Internet registry (ARIN/RIPE/APNIC/LACNIC/AFRINIC) via the IANA /8 + IPv6 /12 tables — continental distribution, per-region severity & WHOIS pivot (--limit) (Markdown)
  *   node src/index.ts --pivot 168     # offline OSINT investigation pivot sheet: ranks worst public sources (severity-weighted) and deep-links each into AbuseIPDB/VirusTotal/GreyNoise/Shodan/Censys/Talos/OTX/… + whois/dig/--profile commands (--limit, --min N, --format md|links, --include-safe)
+ *   node src/index.ts --baseline 24   # offline self-baseline anomaly scorecard: is the recent window abnormal vs the trailing K equal-length windows? per-metric z-scores (alerts/serious/risk/sources/targets/sigs/block-rate) + headline drivers + brand-new sources (--baselines N, --limit) (Markdown)
  *   node src/index.ts --cohort 168    # offline attacker cohort-retention / churn (revolving-door vs committed base) report (Markdown)
  *   node src/index.ts --suppaudit 168 # offline suppression-rule audit / silence-effectiveness & risk report (Markdown)
  *   node src/index.ts --dismissals 168 # offline dismissal audit (did I hide a serious alert — and did the hidden threat keep firing/escalate afterward?) report (Markdown)
@@ -183,6 +184,7 @@ import { buildSilence } from "./analytics/silence.ts";
 import { buildExposure } from "./analytics/exposure.ts";
 import { buildTimeline } from "./analytics/timeline.ts";
 import { buildPotency } from "./analytics/potency.ts";
+import { buildBaseline } from "./analytics/baseline.ts";
 import { buildLexicon } from "./analytics/lexicon.ts";
 import { buildDiversity } from "./analytics/diversity.ts";
 import { buildVector } from "./analytics/vector.ts";
@@ -2648,6 +2650,39 @@ async function main(): Promise<void> {
       setLogLevel(cfg.runtime.logLevel);
       // Offline, deterministic: print the Markdown threat-potency report to stdout.
       console.log(buildPotency(hours, { limit, minAlerts, nowMs: Date.now() }).markdown);
+      return;
+    }
+    const baselineIdx = argv.findIndex((a) => a === "--baseline" || a.startsWith("--baseline="));
+    if (baselineIdx !== -1) {
+      const inline = argv[baselineIdx]!.split("=")[1];
+      const next = argv[baselineIdx + 1];
+      const raw = inline ?? (next && !next.startsWith("--") ? next : undefined);
+      // Default to a 24h recent window — the natural "is today off?" question.
+      const hours = raw ? Number(raw) : 24;
+      if (!Number.isFinite(hours) || hours <= 0) {
+        log.error(`Invalid --baseline hours: "${raw}". Use e.g. --baseline 24`);
+        process.exit(2);
+      }
+      // Optional `--baselines N`: how many trailing equal-length windows to compare against.
+      let baselineWindows: number | undefined;
+      const bwIdx = argv.findIndex((a) => a === "--baselines" || a.startsWith("--baselines="));
+      if (bwIdx !== -1) {
+        const v = argv[bwIdx]!.split("=")[1] ?? argv[bwIdx + 1];
+        const n = v !== undefined ? Number(v) : NaN;
+        if (Number.isFinite(n) && n > 0) baselineWindows = n;
+      }
+      // Optional `--limit N` to cap how many brand-new source rows print.
+      let limit: number | undefined;
+      const limitIdx = argv.findIndex((a) => a === "--limit" || a.startsWith("--limit="));
+      if (limitIdx !== -1) {
+        const li = argv[limitIdx]!.split("=")[1] ?? argv[limitIdx + 1];
+        const n = li !== undefined ? Number(li) : NaN;
+        if (Number.isFinite(n) && n > 0) limit = n;
+      }
+      const cfg = loadConfig();
+      setLogLevel(cfg.runtime.logLevel);
+      // Offline, deterministic: print the Markdown anomaly-scorecard report to stdout.
+      console.log(buildBaseline(hours, { baselineWindows, limit, nowMs: Date.now() }).markdown);
       return;
     }
     const lexiconIdx = argv.findIndex((a) => a === "--lexicon" || a.startsWith("--lexicon="));
