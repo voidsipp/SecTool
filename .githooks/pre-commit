@@ -1,0 +1,4 @@
+#!/bin/sh
+# SecTool pre-commit guard — parse-check staged sources + full typecheck.
+# Enabled via: git config core.hooksPath .githooks  (auto-set by `npm install`).
+node scripts/preflight-check.mjs

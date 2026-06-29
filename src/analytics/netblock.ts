@@ -17,11 +17,11 @@
  * This report folds every **external** source IP in the window into two CIDR
  * groupings and ranks the resulting blocks:
  *
- *   - **/24 blocks** (256 addresses) — the "tight" grouping. A /24 that spans
+ *   - `/24` blocks (256 addresses) — the "tight" grouping. A /24 that spans
  *     several distinct attacking IPs is almost always one operator / one piece of
  *     infrastructure; blocking the /24 replaces N individual blocks and pre-empts
  *     the *next* address in the range before it ever fires.
- *   - **/16 blocks** (65 536 addresses) — the "wide" grouping, roughly the size of
+ *   - `/16` blocks (65 536 addresses) — the "wide" grouping, roughly the size of
  *     a small provider allocation. Useful for spotting a whole hostile network /
  *     AS-ish region, but far blunter: a /16 can legitimately hold thousands of
  *     unrelated tenants, so it is shown for situational awareness, not as a

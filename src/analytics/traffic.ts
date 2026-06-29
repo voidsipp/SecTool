@@ -435,7 +435,7 @@ function writeHighlights(
     ["inbound", d.inbound.estBytes],
     ["internal", d.internal.estBytes],
     ["transit", d.transit.estBytes],
-  ] as const).sort((a, b) => b[1] - a[1])[0];
+  ] as [string, number][]).sort((a, b) => b[1] - a[1])[0];
   if (big && m.totals.estBytes > 0) {
     out.push(
       `🧭 Traffic is **${pct(big[1] / m.totals.estBytes)} ${big[0]}** by volume ` +

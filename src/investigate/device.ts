@@ -32,7 +32,7 @@ function normalizeIp(ip: string): string {
   let a = ip.trim().toLowerCase();
   if (a.startsWith("[") && a.endsWith("]")) a = a.slice(1, -1); // strip "[::1]" brackets
   const mapped = a.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/); // unwrap IPv4-mapped IPv6
-  return mapped ? mapped[1] : a;
+  return mapped ? mapped[1]! : a;
 }
 
 // Normalise first so the IPv4 private-range checks also catch LAN hosts reported
@@ -550,7 +550,7 @@ function classifyExposure(localAddr: string | undefined): Listener["exposure"] {
   // interface — and then false-flagged as a risky, off-host attack surface.
   if (a.startsWith("[") && a.endsWith("]")) a = a.slice(1, -1); // strip "[::1]" brackets
   const mapped = a.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/); // unwrap IPv4-mapped IPv6
-  if (mapped) a = mapped[1];
+  if (mapped) a = mapped[1]!;
   if (WILDCARD.has(a)) return "all-interfaces";
   if (a.startsWith("127.") || a === "::1") return "localhost";
   return "specific";

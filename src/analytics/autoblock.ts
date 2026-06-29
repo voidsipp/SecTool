@@ -574,7 +574,7 @@ export function buildAutoblock(hours: number, opts: AutoblockOptions = {}): Auto
   const maxBlocks = candidateSources;
   const accList = [...candidates.values()];
 
-  const rawCurve = thresholds.map((threshold) => {
+  const rawCurve: ThresholdPoint[] = thresholds.map((threshold) => {
     let sourcesBlocked = 0;
     let alertsPrevented = 0;
     let severeSourcesBlocked = 0;

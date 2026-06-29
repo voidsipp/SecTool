@@ -73,8 +73,8 @@ function summarizeCapture(lines: string[], hosts: Set<string>): string | undefin
   for (const line of lines) {
     const m = wire.exec(line);
     if (!m) continue;
-    const src = splitEndpoint(m[1]);
-    const dst = splitEndpoint(m[2]);
+    const src = splitEndpoint(m[1]!);
+    const dst = splitEndpoint(m[2]!);
     if (!src.ip || !dst.ip) continue;
     parsed++;
 

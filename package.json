@@ -119,7 +119,9 @@
     "metrics": "node src/index.ts --metrics",
     "catalog": "node src/index.ts --catalog",
     "print-config": "node src/index.ts --print-config",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "node scripts/preflight-check.mjs",
+    "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "keywords": [
     "unifi",

@@ -56,6 +56,7 @@ export interface EntryDelta {
   current: number;
   previous: number;
   delta: number;
+  pctChange: number | null;
   trend: Trend;
 }
 
@@ -201,7 +202,7 @@ function entryDeltas(cur: Map<string, number>, prev: Map<string, number>): Entry
   return unionKeys(cur, prev).map((key) => {
     const c = cur.get(key) ?? 0;
     const p = prev.get(key) ?? 0;
-    return { key, current: c, previous: p, delta: c - p, trend: trendOf(c, p) };
+    return { key, current: c, previous: p, delta: c - p, pctChange: pctChange(c, p), trend: trendOf(c, p) };
   });
 }
 
