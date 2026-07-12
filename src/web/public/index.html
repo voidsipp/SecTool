@@ -1095,7 +1095,8 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
       <div class="section devcard">
         <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
           <span class="mono">${esc(a.hostname||a.ip)}</span>
-          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span></h3>
+          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span>
+          ${killAllowed?(a.auth?`<button class="killtoggle" data-ip="${esc(a.ip)}" data-on="${a.kill?1:''}" ${a.killPinned?'disabled title="pinned by AGENT_ALLOW_KILL env var on the host"':''} style="float:right;font-size:11px;padding:2px 9px;border-radius:6px;cursor:pointer;border:1px solid ${a.kill?'var(--critical,#ff5c7a)':'var(--border)'};background:transparent;color:${a.kill?'var(--critical,#ff5c7a)':'var(--muted)'}">🛑 Kill: ${a.kill?'ON':'off'}${a.killPinned?' 🔒':''}</button>`:`<span class="muted" style="float:right;font-size:11px">enable auth to control kill</span>`):''}</h3>
         <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="devview" data-ip="${esc(a.ip)}" data-kill="${canKill?1:''}">▸ Connections</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="ports">📡 Live ports</button>
@@ -1111,6 +1112,7 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
       </div>`; }).join("");
     document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
     document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
+    document.querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip, !!b.dataset.on, b));
   } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function scanLan(){
@@ -1260,6 +1262,16 @@ async function toggleConns(ip,btn){
     filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
     box.querySelectorAll(".killbtn").forEach(b=>b.onclick=()=>killProcess(b.dataset.ip, Number(b.dataset.pid), b.dataset.proc, b));
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+async function toggleKill(ip, currentlyOn, btn){
+  const want = !currentlyOn;
+  if (want && !confirm(`Enable process-kill on ${ip}?\n\nThis lets the dashboard TERMINATE processes on that device. You can turn it back off here anytime.`)) return;
+  btn.disabled=true; const orig=btn.textContent; btn.textContent="…";
+  try{
+    const j = await api("/api/agents/config",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({host:ip,allowKill:want})});
+    if(!j.ok){ alert("Failed to change kill setting: "+(j.error||"unknown")); btn.disabled=false; btn.textContent=orig; return; }
+    showDevices(); // re-render so the toggle + row buttons reflect the new state
+  }catch(e){ alert("Failed: "+e.message); btn.disabled=false; btn.textContent=orig; }
 }
 async function killProcess(ip, pid, proc, btn){
   const name = proc || "process";

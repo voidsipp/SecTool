@@ -124,14 +124,21 @@ at `http://<device-LAN-IP>:7879`.
   button per row on the Devices → Connections table.
 
 ### Enabling kill on a device
-By default it's off. To allow the dashboard to kill processes on a specific host,
-add `allowKill` to that host's `agent.config.json` (in `%LOCALAPPDATA%\SecToolAgent`
-on Windows, `~/.sectool-agent` on Linux/macOS) and restart the agent:
-```json
-{ "token": "…", "updateUrl": "…", "port": 7879, "allowKill": true }
-```
-Or set `AGENT_ALLOW_KILL=true` in its service environment. The Devices page shows
-**🛑 kill enabled** on hosts where it's active.
+By default it's off. The easiest way is the **Devices page**: each host with a
+token shows a **🛑 Kill: on/off** toggle. Clicking it calls `POST /config`, which
+flips `allowKill` in memory **and persists it** to the host's `agent.config.json`
+(so it survives a restart) — no need to touch files on the device. Requires
+SecTool's own `AGENT_ALLOW_KILL=true` master switch.
+
+Equivalent manual options (still supported):
+- Add `"allowKill": true` to the host's `agent.config.json` (in
+  `%LOCALAPPDATA%\SecToolAgent` on Windows, `~/.sectool-agent` on Linux/macOS).
+- Set `AGENT_ALLOW_KILL=true` in its service environment. **Note:** setting the
+  env var *pins* the value — the dashboard toggle is then locked (shown as 🔒) and
+  returns 409, so the env var always wins.
+
+- `POST /config` (v1.1.1+, token-gated) — body `{ "allowKill": <bool> }`. Persists
+  to `agent.config.json`. Refused (409) if `AGENT_ALLOW_KILL` env pins the value.
 
 ## Security
 

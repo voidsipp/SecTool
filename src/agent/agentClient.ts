@@ -55,6 +55,29 @@ export async function agentConnections(cfg: Config, host: string): Promise<{ ok:
   return { ok: true, host: d.host, connections: d.connections ?? [] };
 }
 
+export async function agentSetConfig(
+  cfg: Config,
+  host: string,
+  patch: { allowKill?: boolean },
+): Promise<{ ok: boolean; host?: string; allowKill?: boolean; persisted?: boolean; error?: string }> {
+  if (isIP(host) === 0 || !isPrivate(host)) return { ok: false, error: "Agent config is only allowed for internal LAN hosts." };
+  if (!cfg.agent.token) return { ok: false, error: "No AGENT_TOKEN configured on the SecTool side." };
+  try {
+    const r = await fetch(`http://${host}:${cfg.agent.port}/config`, {
+      method: "POST",
+      headers: { ...authHeaders(cfg), "content-type": "application/json" },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(6000),
+    });
+    const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.status === 401) return { ok: false, error: "Agent rejected the token." };
+    if (!r.ok) return { ok: false, error: (data["error"] as string) || `Agent returned HTTP ${r.status}.` };
+    return { ok: true, host: data["host"] as string, allowKill: data["allowKill"] as boolean, persisted: data["persisted"] as boolean };
+  } catch (err) {
+    return { ok: false, error: `No agent reachable on ${host}:${cfg.agent.port} (${(err as Error).message})` };
+  }
+}
+
 export async function agentKillProcess(
   cfg: Config,
   host: string,

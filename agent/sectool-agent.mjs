@@ -21,20 +21,37 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.1.0";
+const AGENT_VERSION = "1.1.1";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
 const SELF = fileURLToPath(import.meta.url);
 const SELFDIR = dirname(SELF);
+const CONFIG_PATH = join(SELFDIR, "agent.config.json");
 let fileCfg = {};
 try {
   // strip a UTF-8 BOM (PowerShell's Set-Content -Encoding UTF8 prepends U+FEFF) so JSON.parse doesn't choke
-  let raw = readFileSync(join(SELFDIR, "agent.config.json"), "utf8");
+  let raw = readFileSync(CONFIG_PATH, "utf8");
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   fileCfg = JSON.parse(raw);
 } catch {
   /* no config file — use env/defaults */
+}
+
+/** Merge a patch into agent.config.json (BOM-safe, no BOM out) so a remote
+ *  setting change survives a restart. Returns the merged config. */
+function persistConfig(patch) {
+  let cur = {};
+  try {
+    let raw = readFileSync(CONFIG_PATH, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    cur = JSON.parse(raw);
+  } catch {
+    /* new file */
+  }
+  const next = { ...cur, ...patch };
+  writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2));
+  return next;
 }
 
 const PORT = Number(process.env.AGENT_PORT || fileCfg.port || 7879);
@@ -45,10 +62,12 @@ const POLL_MS = Number(process.env.AGENT_POLL_MS || fileCfg.pollMs || 4000);
 const RETENTION_MS = Number(process.env.AGENT_RETENTION_MIN || fileCfg.retentionMin || 30) * 60000;
 // Destructive: allow POST /kill to terminate processes. OFF unless explicitly
 // enabled AND a token is set (an unauthenticated kill endpoint is never allowed).
-const ALLOW_KILL =
-  process.env.AGENT_ALLOW_KILL !== undefined
-    ? /^(1|true|yes|on)$/i.test(process.env.AGENT_ALLOW_KILL)
-    : !!fileCfg.allowKill;
+// `let`: the dashboard can flip this at runtime via POST /config (persisted).
+// An explicit AGENT_ALLOW_KILL env var pins it and blocks remote toggling.
+const KILL_ENV_PINNED = process.env.AGENT_ALLOW_KILL !== undefined;
+let ALLOW_KILL = KILL_ENV_PINNED
+  ? /^(1|true|yes|on)$/i.test(process.env.AGENT_ALLOW_KILL)
+  : !!fileCfg.allowKill;
 // Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
 // floor keeps a misconfigured value from hammering the update server.
 const UPDATE_CHECK_RAW = Number(
@@ -247,6 +266,7 @@ const server = http.createServer((req, res) => {
       retentionMin: RETENTION_MS / 60000,
       auth: !!TOKEN,
       kill: ALLOW_KILL && !!TOKEN, // process-kill enabled AND safe (token present)
+      killPinned: KILL_ENV_PINNED, // set via env → can't be toggled from the dashboard
       update: {
         enabled: updateState.enabled,
         intervalMin: updateState.intervalMin,
@@ -315,6 +335,40 @@ const server = http.createServer((req, res) => {
         console.log(`[KILL] ${new Date().toISOString()} pid=${pid} signal=${signal} FAILED: ${err.message}`);
         return json(err.code === "ESRCH" ? 404 : 500, { error: `kill failed: ${err.message}` });
       }
+    });
+    return;
+  }
+  // --- remotely toggle agent settings (currently: allowKill), token-gated + persisted ---
+  if (req.method === "POST" && url.pathname === "/config") {
+    if (!TOKEN) return json(403, { error: "config changes require a token" });
+    let raw = "";
+    req.on("data", (c) => {
+      raw += c;
+      if (raw.length > 10_000) req.destroy();
+    });
+    req.on("end", () => {
+      let body;
+      try {
+        body = JSON.parse(raw || "{}");
+      } catch {
+        return json(400, { error: "invalid JSON body" });
+      }
+      const changes = {};
+      if (typeof body.allowKill === "boolean") {
+        if (KILL_ENV_PINNED) return json(409, { error: "allowKill is pinned by AGENT_ALLOW_KILL env var; unset it to toggle from the dashboard" });
+        ALLOW_KILL = body.allowKill;
+        changes.allowKill = body.allowKill;
+      }
+      if (!Object.keys(changes).length) return json(400, { error: "no recognized settings (expected allowKill:boolean)" });
+      let persisted = true;
+      try {
+        persistConfig(changes);
+      } catch (err) {
+        persisted = false; // still applied in-memory, but won't survive a restart
+        console.log(`[CONFIG] persist failed: ${err.message}`);
+      }
+      console.log(`[CONFIG] ${new Date().toISOString()} ${JSON.stringify(changes)} persisted=${persisted} from=${req.socket.remoteAddress}`);
+      return json(200, { ok: true, host: os.hostname(), allowKill: ALLOW_KILL, kill: ALLOW_KILL && !!TOKEN, persisted });
     });
     return;
   }
