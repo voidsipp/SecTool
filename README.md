@@ -2733,7 +2733,13 @@ IPs. See [agent/README.md](agent/README.md).
 The **📟 Devices** page (`GET /api/agents`) discovers which internal hosts are
 running an agent (probing hosts seen in flows), shows each one's version / platform
 / health, and lets you browse its **live connections → owning process**
-(`GET /api/agents/connections?host=`) with a filter box.
+(`GET /api/agents/connections?host=`) with a filter box. On hosts where kill is
+explicitly enabled, each connection row gets a 🛑 **Kill** button
+(`POST /api/agents/kill`) to terminate the owning process. It's **off by default**
+and hard-gated: the agent needs `AGENT_ALLOW_KILL=true` **and** a token, rejects
+system/own PIDs, and verifies the process name against the PID before killing.
+Deliberately **not** exposed to the "Ask" LLM tools (kill is human-click only, so
+attacker-controllable log text can't trigger it).
 
 ### 🔍 LAN auto-discovery (`DISCOVERY_ENABLED`, `GET /api/discovery`)
 

@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.0.3";
+const AGENT_VERSION = "1.1.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -43,6 +43,12 @@ const TOKEN = process.env.AGENT_TOKEN || fileCfg.token || "";
 const UPDATE_URL = (process.env.AGENT_UPDATE_URL || fileCfg.updateUrl || "").replace(/\/+$/, "");
 const POLL_MS = Number(process.env.AGENT_POLL_MS || fileCfg.pollMs || 4000);
 const RETENTION_MS = Number(process.env.AGENT_RETENTION_MIN || fileCfg.retentionMin || 30) * 60000;
+// Destructive: allow POST /kill to terminate processes. OFF unless explicitly
+// enabled AND a token is set (an unauthenticated kill endpoint is never allowed).
+const ALLOW_KILL =
+  process.env.AGENT_ALLOW_KILL !== undefined
+    ? /^(1|true|yes|on)$/i.test(process.env.AGENT_ALLOW_KILL)
+    : !!fileCfg.allowKill;
 // Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
 // floor keeps a misconfigured value from hammering the update server.
 const UPDATE_CHECK_RAW = Number(
@@ -240,6 +246,7 @@ const server = http.createServer((req, res) => {
       tracked: buffer.size,
       retentionMin: RETENTION_MS / 60000,
       auth: !!TOKEN,
+      kill: ALLOW_KILL && !!TOKEN, // process-kill enabled AND safe (token present)
       update: {
         enabled: updateState.enabled,
         intervalMin: updateState.intervalMin,
@@ -266,6 +273,50 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === "/connections") {
     return json(200, { host: os.hostname(), count: buffer.size, connections: [...buffer.values()].slice(0, 500).map(shape) });
+  }
+  // --- destructive: terminate a process (heavily guarded) ---
+  if (req.method === "POST" && url.pathname === "/kill") {
+    // Defence in depth: feature must be enabled AND a token must exist. `ok`
+    // above already required a valid token, but re-assert here so a kill can
+    // never run on a tokenless agent even if the auth check ever changes.
+    if (!ALLOW_KILL) return json(403, { error: "kill is disabled on this agent (set AGENT_ALLOW_KILL=true to enable)" });
+    if (!TOKEN) return json(403, { error: "kill refused: this agent has no AGENT_TOKEN configured" });
+    let raw = "";
+    req.on("data", (c) => {
+      raw += c;
+      if (raw.length > 10_000) req.destroy(); // bound the body
+    });
+    req.on("end", () => {
+      let body;
+      try {
+        body = JSON.parse(raw || "{}");
+      } catch {
+        return json(400, { error: "invalid JSON body" });
+      }
+      const pid = Number(body.pid);
+      const signal = String(body.signal || "SIGTERM").toUpperCase();
+      const expectName = body.process ? String(body.process) : null;
+      if (!Number.isInteger(pid) || pid <= 0) return json(400, { error: "invalid pid" });
+      if (signal !== "SIGTERM" && signal !== "SIGKILL") return json(400, { error: "signal must be SIGTERM or SIGKILL" });
+      if (pid <= 4 || pid === process.pid) return json(403, { error: `refusing to kill protected pid ${pid}` });
+      // Only processes we actually observe with a live connection can be killed,
+      // and the caller-supplied name must match — guards against PID reuse and
+      // blind killing of arbitrary PIDs.
+      const known = [...buffer.values()].find((r) => r.procid === pid);
+      if (!known) return json(404, { error: `pid ${pid} is not among this host's tracked connections` });
+      if (expectName && known.pname && known.pname.toLowerCase() !== expectName.toLowerCase()) {
+        return json(409, { error: `pid ${pid} is now '${known.pname}', not '${expectName}' — refusing (possible PID reuse)` });
+      }
+      try {
+        process.kill(pid, signal);
+        console.log(`[KILL] ${new Date().toISOString()} pid=${pid} name=${known.pname || "?"} signal=${signal} from=${req.socket.remoteAddress} -> sent`);
+        return json(200, { ok: true, host: os.hostname(), pid, process: known.pname, signal });
+      } catch (err) {
+        console.log(`[KILL] ${new Date().toISOString()} pid=${pid} signal=${signal} FAILED: ${err.message}`);
+        return json(err.code === "ESRCH" ? 404 : 500, { error: `kill failed: ${err.message}` });
+      }
+    });
+    return;
   }
   json(404, { error: "not found" });
 });

@@ -145,6 +145,7 @@ export interface Config {
     token?: string;
     distHost: string;
     distPort: number;
+    allowKill: boolean;
   };
   /**
    * Conversational memory for the "Ask" analyst and the action agent. When
@@ -372,6 +373,7 @@ export function loadConfig(): Config {
       token: optStr("AGENT_TOKEN"),
       distHost: str("AGENT_DIST_HOST", "0.0.0.0"),
       distPort: int("AGENT_DIST_PORT", 7878),
+      allowKill: bool("AGENT_ALLOW_KILL", false),
     },
     conversation: {
       memoryEnabled: bool("CONVO_MEMORY_ENABLED", true),

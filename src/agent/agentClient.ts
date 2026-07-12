@@ -55,6 +55,31 @@ export async function agentConnections(cfg: Config, host: string): Promise<{ ok:
   return { ok: true, host: d.host, connections: d.connections ?? [] };
 }
 
+export async function agentKillProcess(
+  cfg: Config,
+  host: string,
+  params: { pid: number; signal?: "SIGTERM" | "SIGKILL"; process?: string },
+): Promise<{ ok: boolean; host?: string; pid?: number; process?: string; signal?: string; error?: string }> {
+  if (isIP(host) === 0 || !isPrivate(host)) return { ok: false, error: "Process kill is only allowed on internal LAN hosts." };
+  if (!cfg.agent.token) return { ok: false, error: "Refusing to kill: no AGENT_TOKEN configured on the SecTool side." };
+  if (!Number.isInteger(params.pid) || params.pid <= 0) return { ok: false, error: "Invalid pid." };
+  const signal = params.signal === "SIGKILL" ? "SIGKILL" : "SIGTERM";
+  try {
+    const r = await fetch(`http://${host}:${cfg.agent.port}/kill`, {
+      method: "POST",
+      headers: { ...authHeaders(cfg), "content-type": "application/json" },
+      body: JSON.stringify({ pid: params.pid, signal, process: params.process }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.status === 401) return { ok: false, error: "Agent rejected the token." };
+    if (!r.ok) return { ok: false, error: (data["error"] as string) || `Agent returned HTTP ${r.status}.` };
+    return { ok: true, host: data["host"] as string, pid: data["pid"] as number, process: data["process"] as string, signal: data["signal"] as string };
+  } catch (err) {
+    return { ok: false, error: `No agent reachable on ${host}:${cfg.agent.port} (${(err as Error).message})` };
+  }
+}
+
 export async function agentLookup(
   cfg: Config,
   host: string,

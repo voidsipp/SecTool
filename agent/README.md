@@ -91,6 +91,7 @@ at `http://<device-LAN-IP>:7879`.
 | `AGENT_UPDATE_CHECK_MIN` | `360` | Recurring update-check heartbeat interval (minutes). `0` disables it; values below `5` are clamped to 5. |
 | `AGENT_UPDATE_URL` | *(from config)* | Update server base URL. Heartbeat is off unless this (or `updateUrl` in `agent.config.json`) is set. |
 | `AGENT_NO_UPDATE` | *(unset)* | Set to any value to disable self-update + the heartbeat entirely. |
+| `AGENT_ALLOW_KILL` | `false` | **Destructive.** Enables `POST /kill` so the dashboard can terminate processes on this host. Refused unless a token is also set. |
 
 ## Keep it running
 
@@ -114,6 +115,23 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+) so SecTool can tell whether a listening port is bound to
   all interfaces or just localhost in the Devices page's **Listeners** audit.
+- `POST /kill` (v1.1.0+, **destructive, opt-in**) — terminate a process.
+  Body: `{ "pid": <n>, "signal": "SIGTERM"|"SIGKILL", "process": "<name>" }`.
+  **Disabled unless `AGENT_ALLOW_KILL=true` AND a token is set.** Additional
+  guards: rejects PIDs ≤ 4 and the agent's own PID; the target must be a process
+  the agent currently tracks (has a live connection); and if `process` is given it
+  must match that PID's real name (defeats PID reuse). Surfaces as a 🛑 **Kill**
+  button per row on the Devices → Connections table.
+
+### Enabling kill on a device
+By default it's off. To allow the dashboard to kill processes on a specific host,
+add `allowKill` to that host's `agent.config.json` (in `%LOCALAPPDATA%\SecToolAgent`
+on Windows, `~/.sectool-agent` on Linux/macOS) and restart the agent:
+```json
+{ "token": "…", "updateUrl": "…", "port": 7879, "allowKill": true }
+```
+Or set `AGENT_ALLOW_KILL=true` in its service environment. The Devices page shows
+**🛑 kill enabled** on hosts where it's active.
 
 ## Security
 

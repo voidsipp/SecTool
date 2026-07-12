@@ -1090,13 +1090,14 @@ async function showDevices(){
 curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS</pre></div>`;
       return;
     }
-    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); return `
+    const killAllowed = !!j.killAllowed;
+    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); const canKill = killAllowed && a.kill; return `
       <div class="section devcard">
         <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
           <span class="mono">${esc(a.hostname||a.ip)}</span>
-          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}</span></h3>
+          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span></h3>
         <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="devview" data-ip="${esc(a.ip)}">▸ Connections</button>
+          <button class="devview" data-ip="${esc(a.ip)}" data-kill="${canKill?1:''}">▸ Connections</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="ports">📡 Live ports</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="traffic">🌐 Traffic</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
@@ -1239,6 +1240,7 @@ async function toggleConns(ip,btn){
     if (!j.ok){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"lookup failed")+'</pre>'; return; }
     const conns = (j.connections||[]).slice();
     if (!conns.length){ box.innerHTML='<div class="empty">No active connections reported.</div>'; return; }
+    const killOn = !!(btn && btn.dataset.kill);
     conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
     const base = name => (name||"").split(/[\\/]/).pop()||"";
     const rows = conns.map(c=>`<tr>
@@ -1247,15 +1249,29 @@ async function toggleConns(ip,btn){
       <td class="mono">${c.localPort||''}</td>
       <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
       <td class="muted">${esc(c.state||'')}</td>
-      <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td></tr>`).join("");
+      <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td>
+      ${killOn?`<td>${c.pid?`<button class="killbtn" data-ip="${esc(ip)}" data-pid="${c.pid}" data-proc="${esc(c.process||'')}" style="background:transparent;border:1px solid var(--critical,#ff5c7a);color:var(--critical,#ff5c7a);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">🛑 Kill</button>`:''}</td>`:''}</tr>`).join("");
     box.innerHTML = `<input class="devfilter" placeholder="filter by process / ip / port…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
-      <div class="muted" style="margin-bottom:6px">${conns.length} connections</div>
+      <div class="muted" style="margin-bottom:6px">${conns.length} connections${killOn?' · 🛑 kill enabled on this host':''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;color:var(--muted)"><th>Process</th><th>Proto</th><th>Local</th><th>Remote</th><th>State</th><th>Binary</th></tr></thead>
+        <thead><tr style="text-align:left;color:var(--muted)"><th>Process</th><th>Proto</th><th>Local</th><th>Remote</th><th>State</th><th>Binary</th>${killOn?'<th>Action</th>':''}</tr></thead>
         <tbody>${rows}</tbody></table>`;
     const filter = box.querySelector(".devfilter");
     filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
+    box.querySelectorAll(".killbtn").forEach(b=>b.onclick=()=>killProcess(b.dataset.ip, Number(b.dataset.pid), b.dataset.proc, b));
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+async function killProcess(ip, pid, proc, btn){
+  const name = proc || "process";
+  if(!confirm(`Kill "${name}" (pid ${pid}) on ${ip}?\n\nThis terminates the process on that device and cannot be undone.`)) return;
+  const force = confirm("Force kill?\n\nOK = SIGKILL (force, immediate)\nCancel = SIGTERM (graceful — lets the process clean up)");
+  const signal = force ? "SIGKILL" : "SIGTERM";
+  const orig = btn.textContent; btn.disabled=true; btn.textContent="…";
+  try{
+    const j = await api("/api/agents/kill",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({host:ip,pid,process:proc,signal})});
+    if(j.ok){ btn.textContent="✓ killed"; btn.style.color="var(--good,#3ad29f)"; btn.style.borderColor="var(--good,#3ad29f)"; }
+    else { alert("Kill failed: "+(j.error||"unknown")); btn.disabled=false; btn.textContent=orig; }
+  }catch(e){ alert("Kill failed: "+e.message); btn.disabled=false; btn.textContent=orig; }
 }
 const DEV_TOOLS = {
   ports:     { label:"📡 Live ports", path:i=>"/api/agents/ports?host="+encodeURIComponent(i), render:renderPorts, loading:"Reading the gateway's live connection table…" },

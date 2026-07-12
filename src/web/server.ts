@@ -271,7 +271,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess } from "../agent/agentClient.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
 import { livePortActivity } from "../investigate/liveports.ts";
 import { discoverDevices } from "../investigate/discovery.ts";
@@ -638,17 +638,33 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             const r = await agentHealth(cfg, ip, 1500);
             if (!r.ok || !r.data) return null;
             const d = r.data as Record<string, unknown>;
-            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], retentionMin: d["retentionMin"] };
+            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, retentionMin: d["retentionMin"] };
           }),
         );
         const agents = probed.filter((a): a is NonNullable<typeof a> => a !== null);
-        return send(res, 200, { enabled: true, port: cfg.agent.port, scanned: list.length, agents });
+        return send(res, 200, { enabled: true, port: cfg.agent.port, killAllowed: cfg.agent.allowKill, scanned: list.length, agents });
       }
 
       // --- a single agent's live connections -> processes ---
       if (method === "GET" && path === "/api/agents/connections") {
         const host = url.searchParams.get("host") ?? "";
         const r = await agentConnections(cfg, host);
+        return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- destructive: terminate a process on an agent host (LAN-only, audited) ---
+      if (method === "POST" && path === "/api/agents/kill") {
+        if (!cfg.agent.allowKill) return send(res, 403, { ok: false, error: "Process kill is disabled in SecTool config (set AGENT_ALLOW_KILL=true and restart)." });
+        const body = await readJson(req);
+        const host = String(body["host"] ?? "");
+        const pid = Number(body["pid"]);
+        const signal = body["signal"] === "SIGKILL" ? "SIGKILL" : "SIGTERM";
+        const procName = typeof body["process"] === "string" ? (body["process"] as string) : undefined;
+        if (isIP(host) === 0) return send(res, 400, { ok: false, error: "Invalid host." });
+        if (!Number.isInteger(pid) || pid <= 0) return send(res, 400, { ok: false, error: "Invalid pid." });
+        log.warn(`[agent-kill] request host=${host} pid=${pid} name=${procName ?? "?"} signal=${signal}`);
+        const r = await agentKillProcess(cfg, host, { pid, signal, process: procName });
+        log.warn(`[agent-kill] result host=${host} pid=${pid} -> ${r.ok ? "KILLED" : "FAILED: " + r.error}`);
         return send(res, r.ok ? 200 : 502, r);
       }
 
