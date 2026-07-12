@@ -233,6 +233,13 @@ export interface CweWeakness {
    * highest-value rows to verify enforcement / virtual-patch on.
    */
   controlGap: boolean;
+  /**
+   * Durable class-level hardening action for this weakness — the fix that no
+   * single CVE patch delivers. Derived from the weakness's parent family via
+   * {@link familyHardening}. Surface this alongside a control gap or top-score
+   * weakness so the reader knows *what to do*, not just *what is firing*.
+   */
+  hardeningAction: string;
 }
 
 /** Per-family coverage roll-up. */
@@ -520,7 +527,8 @@ function writeHighlights(
   out.push(
     `🎯 Top weakness by severity-weighted score is **${lead.id} ${lead.name}** (${lead.family}) — ` +
       `${lead.count} alert(s), ${lead.distinctSources} source(s), worst **${lead.severityMax}**` +
-      (lead.topSignature ? `; dominant signature \`${lead.topSignature}\`.` : `.`),
+      (lead.topSignature ? `; dominant signature \`${lead.topSignature}\`` : ``) +
+      `. Class-level hardening: _${lead.hardeningAction}_.`,
   );
 
   // Control gaps — severe weakness classes mostly let through.
@@ -530,8 +538,8 @@ function writeHighlights(
     out.push(
       `🚩 **${gaps.length} control gap(s)** — medium-or-worse weakness class(es) mostly *detected, not blocked*. ` +
         `Worst: **${g.id} ${g.name}** is ${g.disposition.passRate === null ? "—" : pct(g.disposition.passRate)} ` +
-        `let through (${g.disposition.passed} actioned alerts passed). Verify the IPS policy or virtual-patch this ` +
-        `class first.`,
+        `let through (${g.disposition.passed} actioned alerts passed). Class-level fix: _${g.hardeningAction}_. ` +
+        `Verify the IPS policy or virtual-patch this class first.`,
     );
   }
 
@@ -778,6 +786,7 @@ export function buildCwe(hours: number, opts: CweOptions = {}): CweReport {
         firstSeenMs: Number.isFinite(acc.firstSeenMs) ? acc.firstSeenMs : windowStartMs,
         lastSeenMs: Number.isFinite(acc.lastSeenMs) ? acc.lastSeenMs : windowEndMs,
         controlGap,
+        hardeningAction: familyHardening(def.family),
       } satisfies CweWeakness;
     })
     .sort(
