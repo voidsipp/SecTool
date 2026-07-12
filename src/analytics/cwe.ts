@@ -562,7 +562,7 @@ function writeHighlights(
 
 function familyTable(rows: CweFamily[]): string {
   return mdTable(
-    ["Family", "Coverage", "CWEs", "Alerts", "Share", "Sources", "Hosts", "Severe", "Worst", "Blocked%", "Top CWE"],
+    ["Family", "Coverage", "CWEs", "Alerts", "Share", "Sources", "Hosts", "Severe", "Worst", "Blocked%", "Top CWE", "Hardening action"],
     rows.map((f) => {
       const actioned = f.disposition.blocked + f.disposition.passed;
       const blockRate = actioned ? `${Math.round((f.disposition.blocked / actioned) * 100)}%` : "—";
@@ -578,6 +578,7 @@ function familyTable(rows: CweFamily[]): string {
         cell(f.severityMax),
         blockRate,
         f.topWeaknessId ? cell(`${f.topWeaknessId} ${f.topWeaknessName ?? ""}`.trim()) : "—",
+        cell(f.hardeningAction),
       ];
     }),
   );
@@ -644,7 +645,7 @@ function renderMarkdown(m: CweReport): string {
 
   lines.push(`## Weakness-family coverage`);
   lines.push("");
-  lines.push(`Weakness families in a fixed canonical order, observed cells only. The coverage bar is each family's share of mapped alerts.`);
+  lines.push(`Weakness families in a fixed canonical order, observed cells only. The coverage bar is each family's share of mapped alerts. The **Hardening action** column is the durable class-level fix — what no single CVE patch delivers.`);
   lines.push("");
   lines.push(familyTable(m.families));
   lines.push("");
