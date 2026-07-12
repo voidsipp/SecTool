@@ -98,13 +98,61 @@ at `http://<device-LAN-IP>:7879`.
 - **Windows (NSSM):**
   ```powershell
   nssm install SecToolAgent "C:\Program Files\nodejs\node.exe" "C:\path\to\sectool-agent.mjs"
-  nssm set SecToolAgent AppEnvironmentExtra AGENT_TOKEN=your-secret
+  nssm set SecToolAgent AppEnvironmentExtra "AGENT_TOKEN=your-secret AGENT_ALLOW_KILL=true"
   nssm start SecToolAgent
   ```
-  Or a Task Scheduler "At log on / At startup" task running the same command.
-- **Linux (systemd):** a unit with `Environment=AGENT_TOKEN=...` and
-  `ExecStart=/usr/bin/node /opt/sectool/sectool-agent.mjs`.
-- **macOS (launchd):** a LaunchAgent plist with the env var + program args.
+  Or a Task Scheduler "At log on / At startup" task running the same command. To add `AGENT_ALLOW_KILL=true`, update the environment with:
+  ```powershell
+  nssm set SecToolAgent AppEnvironmentExtra "AGENT_TOKEN=your-secret AGENT_ALLOW_KILL=true"
+  ```
+
+- **Linux (systemd):** Create a service unit at `/etc/systemd/user/sectool-agent.service`:
+  ```ini
+  [Unit]
+  Description=SecTool Agent
+  After=network.target
+
+  [Service]
+  Type=simple
+  ExecStart=/usr/bin/node /opt/sectool/sectool-agent.mjs
+  Environment="AGENT_TOKEN=your-secret"
+  Environment="AGENT_ALLOW_KILL=true"
+  Restart=on-failure
+  RestartSec=10
+
+  [Install]
+  WantedBy=default.target
+  ```
+  Then: `systemctl --user enable sectool-agent && systemctl --user start sectool-agent`
+
+- **macOS (launchd):** Create a LaunchAgent plist at `~/Library/LaunchAgents/com.sectool.agent.plist`:
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  <plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.sectool.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/bin/node</string>
+      <string>/opt/sectool/sectool-agent.mjs</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>AGENT_TOKEN</key>
+      <string>your-secret</string>
+      <key>AGENT_ALLOW_KILL</key>
+      <string>true</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+  </dict>
+  </plist>
+  ```
+  Then: `launchctl load ~/Library/LaunchAgents/com.sectool.agent.plist`
 
 ## API (token via `Authorization: Bearer <token>`)
 
