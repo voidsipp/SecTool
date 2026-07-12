@@ -63,8 +63,8 @@ import { SEVERITY_ORDER, type Severity } from "../types.ts";
 /** Which investigative axis a lookup serves. */
 export type PivotCategory = "reputation" | "recon" | "network";
 
-/** A static description of one external OSINT service we deep-link into. */
-export interface PivotService {
+/** Serializable metadata for an external OSINT service. */
+export interface PivotServiceInfo {
   /** Stable id / display key, e.g. "abuseipdb". */
   key: string;
   /** Human label, e.g. "AbuseIPDB". */
@@ -73,6 +73,10 @@ export interface PivotService {
   category: PivotCategory;
   /** One-line note on what the analyst gets from it. */
   note: string;
+}
+
+/** A static description of one external OSINT service we deep-link into. */
+export interface PivotService extends PivotServiceInfo {
   /** Builds the deep link for a given address (already URL-safe). */
   url: (ip: string) => string;
 }
@@ -132,7 +136,7 @@ export interface PivotReport {
   /** True when more qualifying sources exist than were shown. */
   truncated: boolean;
   /** The catalog of services every target was linked into. */
-  services: { key: string; label: string; category: PivotCategory; note: string }[];
+  services: PivotServiceInfo[];
   /** Ranked targets (most-investigate-worthy first), capped at {@link limit}. */
   targets: PivotTarget[];
   /** Flat, de-duplicated list of every external URL across all targets. */
@@ -694,7 +698,7 @@ export function buildPivot(hours: number, opts: PivotOptions = {}): PivotReport 
     }
   }
 
-  const services = PIVOT_SERVICES.map((s) => ({ key: s.key, label: s.label, category: s.category, note: s.note }));
+  const services: PivotServiceInfo[] = PIVOT_SERVICES.map((s) => ({ key: s.key, label: s.label, category: s.category, note: s.note }));
 
   const base: Omit<PivotReport, "highlights" | "markdown"> = {
     hours: safeHours,
