@@ -259,6 +259,13 @@ export interface CweFamily {
   topWeaknessId?: string;
   /** Name of {@link topWeaknessId}. */
   topWeaknessName?: string;
+  /**
+   * The durable class-level hardening action for this family — the fix that no
+   * single CVE patch delivers. Use this to drive WAF rules, auth-rate limits,
+   * input-validation or compiler-mitigation work at the *class* level, not just
+   * the specific exploit instance. Derived from {@link familyHardening}.
+   */
+  hardeningAction: string;
 }
 
 export interface CweReport {
@@ -367,8 +374,12 @@ function bar(frac: number, width = 16): string {
   return "█".repeat(filled) + "·".repeat(width - filled);
 }
 
-/** Durable hardening hint per weakness family — what fixes the *class*, not one bug. */
-function familyHardening(family: WeaknessFamily): string {
+/**
+ * Durable hardening hint per weakness family — what fixes the *class*, not one bug.
+ * Exported so callers (dashboard, report templates, summarise) can surface the action
+ * alongside the structured {@link CweFamily} data without re-deriving it from text.
+ */
+export function familyHardening(family: WeaknessFamily): string {
   switch (family) {
     case "Injection":
       return "parameterise queries, encode output, deploy a WAF injection ruleset";
@@ -792,6 +803,7 @@ export function buildCwe(hours: number, opts: CweOptions = {}): CweReport {
       disposition: dispOf(acc.blocked, acc.passed, acc.unknown),
       topWeaknessId,
       topWeaknessName: topWeaknessId ? WEAKNESSES[topWeaknessId]?.name : undefined,
+      hardeningAction: familyHardening(f),
     } satisfies CweFamily;
   });
 
