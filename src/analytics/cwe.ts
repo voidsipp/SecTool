@@ -169,8 +169,11 @@ const RULES: Array<{ weakness: string; re: RegExp }> = [
   { weakness: "CWE-190", re: /integer (overflow|underflow|wraparound)/i },
   { weakness: "CWE-787", re: /buffer overflow|stack overflow|heap (overflow|spray)|out.?of.?bounds|\bbof\b|overflow attempt|shellcode/i },
   // Authentication & access control.
-  { weakness: "CWE-307", re: /brute.?force|password (guess|spray)|credential stuffing|excessive login|login attempt|auth.*\bfail|\bhydra\b/i },
-  { weakness: "CWE-287", re: /authentication (bypass|fail)|auth bypass|improper authentication|default (password|credential)|weak (password|credential)/i },
+  // CWE-307 = *excessive* attempts (brute force, stuffing, sprays) — keep patterns
+  // specific to repeated/targeted tries. Generic "auth fail/failure" signals a broken
+  // auth mechanism (CWE-287), not excessive attempts, so it lives one rule lower.
+  { weakness: "CWE-307", re: /brute.?force|password (guess|spray)|credential stuffing|excessive login|login attempt|\bhydra\b/i },
+  { weakness: "CWE-287", re: /authentication (bypass|fail)|auth bypass|auth.*\bfail|improper authentication|default (password|credential)|weak (password|credential)/i },
   { weakness: "CWE-269", re: /privilege (gain|escalation)|priv.?esc|elevation of privilege/i },
   { weakness: "CWE-862", re: /authorization bypass|missing authorization|broken access control|\bidor\b|insecure direct object|forced browsing/i },
   // Information disclosure.
