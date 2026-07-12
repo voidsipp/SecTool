@@ -86,6 +86,13 @@ Set-Content -Path $vbsPath -Value $vbs -Encoding ASCII
 $action   = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbsPath + '"')
 $trigger  = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+# Stop any prior agent first so the fresh build can bind the port. Without this a
+# stale process holding $port makes the new agent exit (EADDRINUSE) and the old
+# version keeps running — reinstalling would appear to do nothing.
+Get-ScheduledTask -TaskName 'SecToolAgent' -ErrorAction SilentlyContinue | Stop-ScheduledTask -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*sectool-agent.mjs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 700
 Register-ScheduledTask -TaskName 'SecToolAgent' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName 'SecToolAgent'
 Start-Sleep -Seconds 3
@@ -115,6 +122,11 @@ curl -fsSL "$SERVER/agent" -o "$DIR/sectool-agent.mjs"
 cat > "$DIR/agent.config.json" <<CFG
 {"token":"$TOKEN","updateUrl":"$SERVER","port":$PORT}
 CFG
+# stop any prior agent so the fresh build can bind the port
+systemctl --user stop sectool-agent 2>/dev/null || true
+launchctl unload "$HOME/Library/LaunchAgents/com.sectool.agent.plist" 2>/dev/null || true
+pkill -f 'sectool-agent.mjs' 2>/dev/null || true
+sleep 1
 if command -v systemctl >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
   cat > "$HOME/.config/systemd/user/sectool-agent.service" <<UNIT
