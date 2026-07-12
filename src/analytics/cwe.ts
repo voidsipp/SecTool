@@ -594,7 +594,7 @@ function familyTable(rows: CweFamily[]): string {
 
 function weaknessTable(rows: CweWeakness[]): string {
   return mdTable(
-    ["#", "Weakness", "CWE", "Family", "Alerts", "Sources", "Hosts", "Severe", "Worst", "Blocked", "Pass rate", "Top signature", "Flags"],
+    ["#", "Weakness", "CWE", "Family", "Alerts", "Sources", "Hosts", "Severe", "Worst", "Blocked", "Pass rate", "Top signature", "Hardening action", "Flags"],
     rows.map((w, i) => {
       const flags = (w.internalSources ? "🏠" : "") + (w.controlGap ? "🚩" : "");
       return [
@@ -610,6 +610,7 @@ function weaknessTable(rows: CweWeakness[]): string {
         String(w.disposition.blocked),
         w.disposition.passRate === null ? "—" : pct(w.disposition.passRate),
         cell(w.topSignature ?? "—"),
+        cell(w.hardeningAction),
         flags || "—",
       ];
     }),
@@ -664,9 +665,11 @@ function renderMarkdown(m: CweReport): string {
   lines.push("");
   lines.push(
     `**Legend:** ranked by severity-weighted score so a small but dangerous weakness class outranks a flood of ` +
-      `low-severity noise. _Pass rate_ = share of *actioned* (blocked + passed) alerts let through. **Flags:** 🏠 an ` +
-      `*internal* host is the source of the probe (compromise / pivot tell) · 🚩 control gap (medium-or-worse but ` +
-      `mostly detected, not blocked — a virtual-patch candidate).`,
+      `low-severity noise. _Pass rate_ = share of *actioned* (blocked + passed) alerts let through. ` +
+      `_Hardening action_ = the durable class-level fix a CVE patch alone cannot deliver — a WAF rule, ` +
+      `input-validation mandate, auth rate-limit, or compiler mitigation applied across the whole weakness class. ` +
+      `**Flags:** 🏠 an *internal* host is the source of the probe (compromise / pivot tell) · 🚩 control gap ` +
+      `(medium-or-worse but mostly detected, not blocked — a virtual-patch candidate).`,
   );
   lines.push("");
 
