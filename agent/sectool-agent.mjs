@@ -17,11 +17,12 @@
 import http from "node:http";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, createReadStream, statSync, readlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.2.0";
+const AGENT_VERSION = "1.3.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -68,6 +69,20 @@ const KILL_ENV_PINNED = process.env.AGENT_ALLOW_KILL !== undefined;
 let ALLOW_KILL = KILL_ENV_PINNED
   ? /^(1|true|yes|on)$/i.test(process.env.AGENT_ALLOW_KILL)
   : !!fileCfg.allowKill;
+// Destructive: allow POST /isolate to network-quarantine this host. Same gating
+// model as kill (needs a token). OFF unless explicitly enabled.
+const ISO_ENV_PINNED = process.env.AGENT_ALLOW_ISOLATE !== undefined;
+let ALLOW_ISOLATE = ISO_ENV_PINNED
+  ? /^(1|true|yes|on)$/i.test(process.env.AGENT_ALLOW_ISOLATE)
+  : !!fileCfg.allowIsolate;
+let isolated = false; // current quarantine state (set by /isolate, cleared by /release)
+// Real-time push: agent diffs its own snapshots and POSTs notable host events
+// (new external connection / new listener) to the SecTool dist server's /event.
+// On by default whenever an update URL is known (that's the LAN-reachable base).
+const PUSH_ENABLED =
+  process.env.AGENT_PUSH !== undefined
+    ? /^(1|true|yes|on)$/i.test(process.env.AGENT_PUSH)
+    : fileCfg.push !== false;
 // Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
 // floor keeps a misconfigured value from hammering the update server.
 const UPDATE_CHECK_RAW = Number(
@@ -156,13 +171,48 @@ function run(cmd, args) {
   });
 }
 
+// --- Feature #1: background SHA-256 of process executables (cached by path) ---
+// Malware masquerades by name; the hash is checked against threat intel by SecTool.
+const HASH_MAX_BYTES = 256 * 1024 * 1024; // skip absurdly large files
+const hashCache = new Map(); // path -> { sha256 } | { pending } | { error } | { skipped }
+const hashQueue = [];
+let hashingNow = false;
+function queueHash(path) {
+  if (!path || hashCache.has(path)) return;
+  hashCache.set(path, { pending: true });
+  hashQueue.push(path);
+  drainHashQueue();
+}
+function drainHashQueue() {
+  if (hashingNow) return;
+  const path = hashQueue.shift();
+  if (!path) return;
+  hashingNow = true;
+  const done = (v) => { hashCache.set(path, v); hashingNow = false; drainHashQueue(); };
+  let st;
+  try { st = statSync(path); } catch { return done({ error: true }); }
+  if (st.size > HASH_MAX_BYTES) return done({ skipped: "too-large" });
+  const h = createHash("sha256");
+  const s = createReadStream(path);
+  s.on("data", (d) => h.update(d));
+  s.on("error", () => done({ error: true }));
+  s.on("end", () => done({ sha256: h.digest("hex") }));
+}
+function hashOf(path) {
+  const c = path && hashCache.get(path);
+  return c && c.sha256 ? c.sha256 : null;
+}
+
 async function snapshotWindows() {
   const ps = [
     "$ErrorActionPreference='SilentlyContinue';",
     "$p=@{}; Get-Process | ForEach-Object { $p[[int]$_.Id]=@{n=$_.ProcessName;path=$_.Path} };",
+    // Win32_Process gives the command line + parent PID (feature #2).
+    "$ci=@{}; Get-CimInstance Win32_Process | ForEach-Object { $ci[[int]$_.ProcessId]=@{cmd=$_.CommandLine;ppid=[int]$_.ParentProcessId} };",
     "$r=New-Object System.Collections.ArrayList;",
-    "Get-NetTCPConnection | ForEach-Object { $x=$p[[int]$_.OwningProcess]; [void]$r.Add([pscustomobject]@{proto='TCP';laddr=$_.LocalAddress;lport=$_.LocalPort;raddr=$_.RemoteAddress;rport=$_.RemotePort;state=[string]$_.State;procid=$_.OwningProcess;pname=$x.n;ppath=$x.path}) };",
-    "Get-NetUDPEndpoint | ForEach-Object { $x=$p[[int]$_.OwningProcess]; [void]$r.Add([pscustomobject]@{proto='UDP';laddr=$_.LocalAddress;lport=$_.LocalPort;raddr='*';rport=0;state='Listen';procid=$_.OwningProcess;pname=$x.n;ppath=$x.path}) };",
+    "function Row($proto,$la,$lp,$ra,$rp,$st,$pid2){ $x=$p[[int]$pid2]; $c=$ci[[int]$pid2]; $pp=if($c){$c.ppid}else{0}; [void]$r.Add([pscustomobject]@{proto=$proto;laddr=$la;lport=$lp;raddr=$ra;rport=$rp;state=[string]$st;procid=$pid2;pname=$x.n;ppath=$x.path;cmdline=$(if($c){$c.cmd}else{''});ppid=$pp;parent=$p[[int]$pp].n}) }",
+    "Get-NetTCPConnection | ForEach-Object { Row 'TCP' $_.LocalAddress $_.LocalPort $_.RemoteAddress $_.RemotePort $_.State $_.OwningProcess };",
+    "Get-NetUDPEndpoint | ForEach-Object { Row 'UDP' $_.LocalAddress $_.LocalPort '*' 0 'Listen' $_.OwningProcess };",
     "$r | ConvertTo-Json -Depth 3 -Compress",
   ].join("");
   const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps]);
@@ -186,6 +236,24 @@ async function snapshotLinux() {
     const [raddr, rport] = splitAddr(m[4]);
     const pm = (m[5] || "").match(/\(\("([^"]+)",pid=(\d+)/);
     rows.push({ proto, laddr, lport, raddr, rport, state: m[2] === "UNCONN" ? "Listen" : m[2], procid: pm ? Number(pm[2]) : 0, pname: pm ? pm[1] : "", ppath: "" });
+  }
+  // Enrich from /proc: exe path (also enables hashing), command line, parent.
+  const nameOf = {};
+  for (const r of rows) if (r.procid && r.pname) nameOf[r.procid] = r.pname;
+  for (const r of rows) {
+    if (!r.procid) continue;
+    try {
+      r.ppath = readlinkSync(`/proc/${r.procid}/exe`);
+    } catch { /* permission / gone */ }
+    try {
+      r.cmdline = readFileSync(`/proc/${r.procid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+    } catch { /* */ }
+    try {
+      const stat = readFileSync(`/proc/${r.procid}/stat`, "utf8");
+      const ppid = Number((stat.match(/\)\s+\S+\s+(\d+)/) || [])[1]) || 0;
+      r.ppid = ppid;
+      r.parent = nameOf[ppid] || "";
+    } catch { /* */ }
   }
   return rows;
 }
@@ -227,6 +295,7 @@ async function poll() {
   const now = Date.now();
   for (const r of rows) {
     if (!r || r.lport == null) continue;
+    if (r.ppath) queueHash(r.ppath); // feature #1: hash new binaries in the background
     const key = `${r.proto}|${r.lport}|${r.raddr}|${r.rport}|${r.procid}`;
     const ex = buffer.get(key);
     if (ex) {
@@ -234,10 +303,40 @@ async function poll() {
       ex.state = r.state;
     } else {
       buffer.set(key, { ...r, firstSeen: now, lastSeen: now });
+      if (!firstPoll) emitEvent(r); // feature #3: push newly-appeared connections/listeners
     }
   }
+  firstPoll = false;
   const cutoff = now - RETENTION_MS;
   for (const [k, v] of buffer) if (v.lastSeen < cutoff) buffer.delete(k);
+}
+
+// --- Feature #3: real-time push of notable host events to SecTool ---
+let firstPoll = true; // suppress a flood of "new" events on the very first snapshot
+const pushRecent = new Map(); // dedupe key -> ts, so we don't spam the same event
+function isPublic(ip) {
+  if (!ip || ip === "*" || ip === "0.0.0.0" || ip === "::") return false;
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.|::1|fe80:|f[cd])/i.test(ip)) return false;
+  return /\d+\.\d+\.\d+\.\d+/.test(ip) || ip.includes(":");
+}
+function emitEvent(r) {
+  if (!PUSH_ENABLED || !UPDATE_URL) return;
+  let type = null;
+  if (r.proto === "TCP" && r.state !== "Listen" && isPublic(r.raddr)) type = "new-external-connection";
+  else if (r.state === "Listen" && (r.laddr === "0.0.0.0" || r.laddr === "::" || r.laddr === "*")) type = "new-listener";
+  if (!type) return;
+  const dedupe = `${type}|${r.procid}|${r.raddr}|${r.rport}|${r.lport}`;
+  const now = Date.now();
+  if (pushRecent.has(dedupe) && now - pushRecent.get(dedupe) < 300000) return;
+  pushRecent.set(dedupe, now);
+  if (pushRecent.size > 500) for (const [k, t] of pushRecent) if (now - t > 600000) pushRecent.delete(k);
+  const body = JSON.stringify({
+    type, host: os.hostname(), time: now, proto: r.proto,
+    process: r.pname, pid: r.procid, path: r.ppath, sha256: hashOf(r.ppath),
+    cmdline: r.cmdline || "", parent: r.parent || "",
+    localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport,
+  });
+  fetch(`${UPDATE_URL}/event`, { method: "POST", headers: { ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}), "content-type": "application/json" }, body, signal: AbortSignal.timeout(5000) }).catch(() => {});
 }
 
 // Never delete OS-critical binaries or the node runtime the agent runs on.
@@ -248,6 +347,103 @@ function isProtectedPath(p) {
   if (process.execPath && lp === process.execPath.replace(/\\/g, "/").toLowerCase()) return true; // our own node
   const guarded = ["c:/windows/", "/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/boot/", "/etc/", "/system/", "/library/apple/"];
   return guarded.some((g) => lp.startsWith(g));
+}
+
+// --- Feature #4: network isolation / quarantine ---
+// Block all traffic except loopback, the agent's own port, and the SecTool
+// management host, so a compromised device is cut off but still controllable.
+async function applyIsolate(mgmtIp) {
+  const plat = os.platform();
+  if (plat === "win32") {
+    const ip = /^[0-9.]+$/.test(mgmtIp || "") ? mgmtIp : null;
+    const ps = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      "Get-NetFirewallRule -DisplayName 'SecToolIsolate*' | Remove-NetFirewallRule;",
+      `New-NetFirewallRule -DisplayName 'SecToolIsolate-Agent' -Direction Inbound -LocalPort ${PORT} -Protocol TCP -Action Allow | Out-Null;`,
+      ip ? `New-NetFirewallRule -DisplayName 'SecToolIsolate-MgmtOut' -Direction Outbound -RemoteAddress ${ip} -Action Allow | Out-Null;` : "",
+      ip ? `New-NetFirewallRule -DisplayName 'SecToolIsolate-MgmtIn' -Direction Inbound -RemoteAddress ${ip} -Action Allow | Out-Null;` : "",
+      "netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound | Out-Null;",
+      "'ISOLATED'",
+    ].join("");
+    return (await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps])).includes("ISOLATED");
+  }
+  if (plat === "linux") {
+    const ip = /^[0-9.]+$/.test(mgmtIp || "") ? mgmtIp : null;
+    const sh =
+      `iptables -N SECTOOLISO 2>/dev/null; iptables -F SECTOOLISO; ` +
+      `iptables -A SECTOOLISO -i lo -j ACCEPT; iptables -A SECTOOLISO -o lo -j ACCEPT; ` +
+      `iptables -A SECTOOLISO -p tcp --dport ${PORT} -j ACCEPT; ` +
+      (ip ? `iptables -A SECTOOLISO -s ${ip} -j ACCEPT; iptables -A SECTOOLISO -d ${ip} -j ACCEPT; ` : "") +
+      `iptables -A SECTOOLISO -j DROP; ` +
+      `iptables -I INPUT 1 -j SECTOOLISO; iptables -I OUTPUT 1 -j SECTOOLISO; echo ISOLATED`;
+    return (await run("sh", ["-c", sh])).includes("ISOLATED");
+  }
+  return false;
+}
+async function applyRelease() {
+  const plat = os.platform();
+  if (plat === "win32") {
+    const ps = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      "netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null;",
+      "Get-NetFirewallRule -DisplayName 'SecToolIsolate*' | Remove-NetFirewallRule;",
+      "'RELEASED'",
+    ].join("");
+    return (await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps])).includes("RELEASED");
+  }
+  if (plat === "linux") {
+    const sh = `iptables -D INPUT -j SECTOOLISO 2>/dev/null; iptables -D OUTPUT -j SECTOOLISO 2>/dev/null; iptables -F SECTOOLISO 2>/dev/null; iptables -X SECTOOLISO 2>/dev/null; echo RELEASED`;
+    return (await run("sh", ["-c", sh])).includes("RELEASED");
+  }
+  return false;
+}
+
+// --- Feature #5: persistence / autoruns enumeration ---
+async function listAutoruns() {
+  const plat = os.platform();
+  if (plat === "win32") {
+    const ps = [
+      "$ErrorActionPreference='SilentlyContinue'; $o=New-Object System.Collections.ArrayList;",
+      "foreach($h in 'HKLM','HKCU'){ foreach($k in 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run','SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce'){ $p=\"$h`:\\$k\"; if(Test-Path $p){ (Get-Item $p).Property | ForEach-Object { [void]$o.Add([pscustomobject]@{type='run-key';name=$_;location=\"$h\\$k\";command=[string](Get-ItemProperty $p).$_;removable=$true}) } } } }",
+      "Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.Settings.Enabled } | ForEach-Object { $a=($_.Actions | ForEach-Object { $_.Execute } ) -join ' '; if($a){ [void]$o.Add([pscustomobject]@{type='scheduled-task';name=$_.TaskName;location=$_.TaskPath;command=[string]$a;removable=$true}) } };",
+      "Get-CimInstance Win32_Service | Where-Object { $_.StartMode -eq 'Auto' } | ForEach-Object { [void]$o.Add([pscustomobject]@{type='service';name=$_.Name;location='services';command=[string]$_.PathName;removable=$false}) };",
+      "$sf=@([Environment]::GetFolderPath('Startup'),[Environment]::GetFolderPath('CommonStartup')); foreach($d in $sf){ if(Test-Path $d){ Get-ChildItem $d -File | ForEach-Object { [void]$o.Add([pscustomobject]@{type='startup-folder';name=$_.Name;location=$d;command=$_.FullName;removable=$true}) } } };",
+      "$o | ConvertTo-Json -Depth 3 -Compress",
+    ].join("");
+    const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps]);
+    try { const j = JSON.parse(out); return Array.isArray(j) ? j : [j]; } catch { return []; }
+  }
+  if (plat === "linux") {
+    const out = await run("sh", ["-c", "for f in /etc/cron.d/* /etc/crontab $HOME/.config/autostart/*.desktop; do echo \"::$f::\"; cat \"$f\" 2>/dev/null; done; systemctl list-unit-files --type=service --state=enabled 2>/dev/null"]);
+    return [{ type: "raw", name: "linux-autoruns", location: "cron/systemd/autostart", command: out.slice(0, 8000), removable: false }];
+  }
+  return [];
+}
+// Remove a persistence entry (Windows). Gated by the same switch as kill/delete.
+async function removeAutorun(entry) {
+  if (os.platform() !== "win32") return { ok: false, error: "autorun removal is Windows-only for now" };
+  const t = entry.type, name = String(entry.name || ""), loc = String(entry.location || "");
+  if (!name) return { ok: false, error: "missing name" };
+  let ps;
+  if (t === "run-key") {
+    const parts = loc.split("\\"); const hive = parts.shift();
+    ps = `Remove-ItemProperty -Path '${hive}:\\${parts.join("\\").replace(/'/g, "''")}' -Name '${name.replace(/'/g, "''")}' -ErrorAction Stop; 'OK'`;
+  } else if (t === "scheduled-task") {
+    ps = `Unregister-ScheduledTask -TaskName '${name.replace(/'/g, "''")}' -TaskPath '${loc.replace(/'/g, "''")}' -Confirm:$false -ErrorAction Stop; 'OK'`;
+  } else if (t === "startup-folder") {
+    ps = `Remove-Item -LiteralPath '${String(entry.command || "").replace(/'/g, "''")}' -Force -ErrorAction Stop; 'OK'`;
+  } else {
+    return { ok: false, error: `'${t}' entries can't be auto-removed (remove the service manually)` };
+  }
+  const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; try { ${ps} } catch { "ERR:$($_.Exception.Message)" }`]);
+  if (out.includes("OK")) return { ok: true };
+  return { ok: false, error: (out.match(/ERR:(.*)/) || [, "removal failed"])[1].trim() };
+}
+
+function readBody(req, cb) {
+  let raw = "";
+  req.on("data", (c) => { raw += c; if (raw.length > 20_000) req.destroy(); });
+  req.on("end", () => { try { cb(JSON.parse(raw || "{}")); } catch { cb(null); } });
 }
 
 function matches(rec, q) {
@@ -276,6 +472,10 @@ const server = http.createServer((req, res) => {
       retentionMin: RETENTION_MS / 60000,
       auth: !!TOKEN,
       kill: ALLOW_KILL && !!TOKEN, // process-kill enabled AND safe (token present)
+      isolate: ALLOW_ISOLATE && !!TOKEN, // network-quarantine enabled AND safe
+      isolated, // is this host currently quarantined?
+      push: PUSH_ENABLED && !!UPDATE_URL, // real-time event push active
+      hashing: hashCache.size, // # of binaries fingerprinted so far
       killPinned: KILL_ENV_PINNED, // set via env → can't be toggled from the dashboard
       update: {
         enabled: updateState.enabled,
@@ -291,7 +491,7 @@ const server = http.createServer((req, res) => {
     });
   }
   if (!ok) return json(401, { error: "unauthorized" });
-  const shape = (r) => ({ proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, firstSeen: r.firstSeen, lastSeen: r.lastSeen });
+  const shape = (r) => ({ proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, sha256: hashOf(r.ppath), cmdline: r.cmdline || "", ppid: r.ppid || 0, parent: r.parent || "", firstSeen: r.firstSeen, lastSeen: r.lastSeen });
   if (url.pathname === "/lookup") {
     const q = Object.fromEntries(url.searchParams);
     const found = [...buffer.values()]
@@ -387,6 +587,42 @@ const server = http.createServer((req, res) => {
       };
       if (deleteFile) setTimeout(finish, 600);
       else finish();
+    });
+    return;
+  }
+  // --- feature #4: network isolation / quarantine (destructive, opt-in) ---
+  if (req.method === "POST" && (url.pathname === "/isolate" || url.pathname === "/release")) {
+    if (!TOKEN) return json(403, { error: "isolation requires a token" });
+    const release = url.pathname === "/release";
+    if (!release && !ALLOW_ISOLATE) return json(403, { error: "isolation is disabled on this agent (set AGENT_ALLOW_ISOLATE=true)" });
+    readBody(req, async (body) => {
+      // Keep the caller (SecTool) reachable so we don't lock ourselves out.
+      const mgmtIp = (body && body.mgmtIp) || (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+      try {
+        const ok2 = release ? await applyRelease() : await applyIsolate(mgmtIp);
+        if (ok2) isolated = !release;
+        console.log(`[ISOLATE] ${new Date().toISOString()} ${release ? "release" : "isolate"} mgmt=${mgmtIp} -> ${ok2 ? "ok" : "failed"}`);
+        return json(ok2 ? 200 : 500, { ok: ok2, host: os.hostname(), isolated, mgmtIp });
+      } catch (err) {
+        return json(500, { ok: false, error: err.message });
+      }
+    });
+    return;
+  }
+  // --- feature #5: persistence / autoruns enumeration (read-only) ---
+  if (req.method === "GET" && url.pathname === "/autoruns") {
+    listAutoruns().then((items) => json(200, { host: os.hostname(), count: items.length, autoruns: items }));
+    return;
+  }
+  // --- feature #5: remove a persistence entry (destructive, same gate as kill) ---
+  if (req.method === "POST" && url.pathname === "/autoruns/remove") {
+    if (!ALLOW_KILL) return json(403, { error: "autorun removal is disabled (needs AGENT_ALLOW_KILL=true)" });
+    if (!TOKEN) return json(403, { error: "autorun removal requires a token" });
+    readBody(req, async (body) => {
+      if (!body || !body.type || !body.name) return json(400, { error: "provide {type,name,location,command}" });
+      const r = await removeAutorun(body);
+      console.log(`[AUTORUN-RM] ${new Date().toISOString()} type=${body.type} name=${body.name} -> ${r.ok ? "removed" : "FAIL: " + r.error}`);
+      return json(r.ok ? 200 : 500, { ...r, host: os.hostname() });
     });
     return;
   }

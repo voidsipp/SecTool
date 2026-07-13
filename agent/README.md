@@ -91,7 +91,9 @@ at `http://<device-LAN-IP>:7879`.
 | `AGENT_UPDATE_CHECK_MIN` | `360` | Recurring update-check heartbeat interval (minutes). `0` disables it; values below `5` are clamped to 5. |
 | `AGENT_UPDATE_URL` | *(from config)* | Update server base URL. Heartbeat is off unless this (or `updateUrl` in `agent.config.json`) is set. |
 | `AGENT_NO_UPDATE` | *(unset)* | Set to any value to disable self-update + the heartbeat entirely. |
-| `AGENT_ALLOW_KILL` | `false` | **Destructive.** Enables `POST /kill` so the dashboard can terminate processes on this host. Refused unless a token is also set. |
+| `AGENT_ALLOW_KILL` | `false` | **Destructive.** Enables `POST /kill` (terminate/delete) and `POST /autoruns/remove`. Refused unless a token is set. |
+| `AGENT_ALLOW_ISOLATE` | `false` | **Destructive.** Enables `POST /isolate` (network-quarantine the host). Refused unless a token is set. |
+| `AGENT_PUSH` | `true`* | Push real-time host events (new external connection / new listener) to SecTool. *On when an update URL is known. |
 
 ## Keep it running
 
@@ -161,8 +163,18 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /lookup?remoteIp=&remotePort=&localPort=&proto=` — connections matching the
   filter, each with `process`, `pid`, `path`, `state`, `firstSeen`/`lastSeen`.
 - `GET /connections` — current connection→process snapshot. Each record includes
-  `localAddr` (v1.0.2+) so SecTool can tell whether a listening port is bound to
-  all interfaces or just localhost in the Devices page's **Listeners** audit.
+  `localAddr` (v1.0.2+), and (v1.3.0+) `sha256` of the binary (background-hashed,
+  for reputation lookups), `cmdline`, `ppid`, and `parent` process name.
+- `GET /autoruns` (v1.3.0+) — persistence enumeration: scheduled tasks, Run keys,
+  auto-start services, startup-folder items (Windows; cron/systemd/autostart on Linux).
+- `POST /autoruns/remove` (v1.3.0+, destructive, needs `AGENT_ALLOW_KILL`) — remove a
+  persistence entry `{type,name,location,command}` (tasks / run keys / startup items).
+- `POST /isolate` and `POST /release` (v1.3.0+, destructive, needs
+  `AGENT_ALLOW_ISOLATE`) — network-quarantine the host (allow only SecTool + the
+  agent port) / revert. The agent auto-allows the calling SecTool IP so you can't
+  lock yourself out.
+- **Push** (v1.3.0+): when enabled, the agent POSTs `new-external-connection` /
+  `new-listener` events to the SecTool dist server's `/event` in real time.
 - `POST /kill` (v1.1.0+, **destructive, opt-in**) — terminate process(es), and
   optionally delete their executable. Body:
   `{ "pid": <n>, "process": "<name>", "signal": "SIGTERM"|"SIGKILL", "deleteFile": <bool> }`.

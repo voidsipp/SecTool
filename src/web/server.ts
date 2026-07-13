@@ -271,7 +271,8 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun } from "../agent/agentClient.ts";
+import { recentAgentEvents } from "../agent/events.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
 import { livePortActivity } from "../investigate/liveports.ts";
 import { discoverDevices } from "../investigate/discovery.ts";
@@ -638,7 +639,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             const r = await agentHealth(cfg, ip, 1500);
             if (!r.ok || !r.data) return null;
             const d = r.data as Record<string, unknown>;
-            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, retentionMin: d["retentionMin"] };
+            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, isolate: d["isolate"] === true, isolated: d["isolated"] === true, push: d["push"] === true, retentionMin: d["retentionMin"] };
           }),
         );
         const agents = probed.filter((a): a is NonNullable<typeof a> => a !== null);
@@ -669,6 +670,40 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const summary = r.results ? `${r.results.filter((x) => x.killed).length} killed, ${r.results.filter((x) => x.deleted).length} deleted` : r.error;
         log.warn(`[agent-kill] result host=${host} -> ${r.ok ? summary : "FAILED: " + r.error}`);
         return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- feature #5: persistence / autoruns on a host ---
+      if (method === "GET" && path === "/api/agents/autoruns") {
+        const r = await agentAutoruns(cfg, url.searchParams.get("host") ?? "");
+        return send(res, r.ok ? 200 : 502, r);
+      }
+      if (method === "POST" && path === "/api/agents/autoruns/remove") {
+        if (!cfg.agent.allowKill) return send(res, 403, { ok: false, error: "Autorun removal is disabled in SecTool config (set AGENT_ALLOW_KILL=true)." });
+        const body = await readJson(req);
+        const host = String(body["host"] ?? "");
+        if (isIP(host) === 0) return send(res, 400, { ok: false, error: "Invalid host." });
+        log.warn(`[agent-autorun-rm] host=${host} type=${body["type"]} name=${body["name"]}`);
+        const r = await agentRemoveAutorun(cfg, host, body);
+        return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- feature #4: network isolation / quarantine ---
+      if (method === "POST" && path === "/api/agents/isolate") {
+        const body = await readJson(req);
+        const host = String(body["host"] ?? "");
+        const release = body["release"] === true;
+        if (isIP(host) === 0) return send(res, 400, { ok: false, error: "Invalid host." });
+        if (!release && !cfg.agent.allowIsolate) return send(res, 403, { ok: false, error: "Network isolation is disabled in SecTool config (set AGENT_ALLOW_ISOLATE=true)." });
+        log.warn(`[agent-isolate] host=${host} action=${release ? "release" : "isolate"}`);
+        const r = await agentIsolate(cfg, host, release);
+        log.warn(`[agent-isolate] host=${host} -> ${r.ok ? "OK" : "FAILED: " + r.error}`);
+        return send(res, r.ok ? 200 : 502, r);
+      }
+
+      // --- feature #3: real-time host events pushed by agents ---
+      if (method === "GET" && path === "/api/agent/events") {
+        const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
+        return send(res, 200, { events: recentAgentEvents(limit) });
       }
 
       // --- toggle an agent's settings (allowKill) from the dashboard ---

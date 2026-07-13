@@ -1104,16 +1104,30 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="traffic">🌐 Traffic</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="egress">🚨 Egress</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="autoruns">🧬 Autoruns</button>
+          ${a.isolate?`<button class="isobtn" data-ip="${esc(a.ip)}" data-rel="${a.isolated?1:''}" style="margin-left:auto;border:1px solid ${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};color:${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};background:transparent;border-radius:6px;padding:2px 9px;font-size:11px;cursor:pointer">${a.isolated?'🔓 Release':'🔒 Isolate'}</button>`:''}
         </div>
+        ${a.isolated?'<div class="muted" style="color:var(--critical,#ff5c7a);margin-top:6px;font-size:12px">🔒 This host is network-quarantined (only SecTool can reach it).</div>':''}
         <div class="devconns" id="conns-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="ports-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="traffic-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="listeners-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="egress-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="autoruns-${id}" style="display:none; margin-top:10px"></div>
       </div>`; }).join("");
     document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
     document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
     document.querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip, !!b.dataset.on, b));
+    document.querySelectorAll(".isobtn").forEach(b=>b.onclick=()=>isolateHost(b.dataset.ip, !!b.dataset.rel, b));
+    try {
+      const ev = await api("/api/agent/events?limit=15");
+      if (ev.events && ev.events.length){
+        const evh = `<div class="section" style="border-color:var(--accent)"><h3 style="margin:0 0 8px;font-size:14px">🔔 Recent host events (pushed live by agents)</h3>`
+          + ev.events.map(e=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><span class="muted">${fmt(e.time)}</span> · <b>${esc(e.type)}</b> · <span class="mono">${esc(e.host)}</span> · <span class="mono" style="color:var(--cyan,#46d6ff)">${esc(e.process||'?')}</span>${e.remoteIp?` → <span class="mono">${esc(e.remoteIp)}:${e.remotePort||''}</span>`:''}${e.localPort&&!e.remoteIp?` :${e.localPort}`:''}</div>`).join("")
+          + `</div>`;
+        $("#devicesBody").insertAdjacentHTML("afterbegin", evh);
+      }
+    } catch(e){}
   } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 async function scanLan(){
@@ -1247,7 +1261,7 @@ async function toggleConns(ip,btn){
     conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
     const base = name => (name||"").split(/[\\/]/).pop()||"";
     const rows = conns.map(c=>`<tr>
-      <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}</td>
+      <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="muted" style="font-size:10px" title="${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
       <td class="mono">${esc(c.proto||'')}</td>
       <td class="mono">${c.localPort||''}</td>
       <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
@@ -1310,7 +1324,43 @@ const DEV_TOOLS = {
   traffic:   { label:"🌐 Traffic",   path:i=>"/api/agents/traffic?host="+encodeURIComponent(i)+"&hours=24", render:renderTraffic, loading:"Reading collected flows…" },
   listeners: { label:"🛰️ Listeners", path:i=>"/api/agents/listeners?host="+encodeURIComponent(i), render:renderListeners, loading:"Auditing open ports…" },
   egress:    { label:"🚨 Egress",    path:i=>"/api/agents/egress?host="+encodeURIComponent(i),    render:renderEgress,    loading:"Scoring public peers against threat intel…" },
+  autoruns:  { label:"🧬 Autoruns",  path:i=>"/api/agents/autoruns?host="+encodeURIComponent(i),  render:renderAutoruns,  loading:"Enumerating persistence (tasks, run keys, services, startup)…" },
 };
+function renderAutoruns(j, ctx){
+  const items = j.autoruns||[];
+  if (!items.length) return '<div class="empty">No autoruns reported.</div>';
+  const canKill = !!(ctx && ctx.canKill);
+  const TYPE={'run-key':'Run key','scheduled-task':'Task','service':'Service','startup-folder':'Startup'};
+  const row=a=>`<tr>
+    <td><span class="badge" style="background:var(--accent)">${esc(TYPE[a.type]||a.type)}</span></td>
+    <td class="mono">${esc(a.name||'')}</td>
+    <td class="muted" style="font-size:11px">${esc(a.location||'')}</td>
+    <td class="mono" title="${esc(a.command||'')}" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cyan,#46d6ff)">${esc(a.command||'')}</td>
+    ${canKill?`<td>${a.removable?`<button class="autorm" data-ip="${esc(ctx.ip)}" data-a='${esc(JSON.stringify({type:a.type,name:a.name,location:a.location,command:a.command}))}' style="background:transparent;border:1px solid var(--high,#ff9e3d);color:var(--high,#ff9e3d);border-radius:6px;padding:1px 7px;font-size:11px;cursor:pointer">🗑 Remove</button>`:'<span class="muted" style="font-size:10px">manual</span>'}</td>`:''}</tr>`;
+  return `<div class="muted" style="margin-bottom:6px">${items.length} persistence entr${items.length===1?'y':'ies'}${canKill?' · 🗑 removes tasks / run keys / startup items':''}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Type</th><th>Name</th><th>Location</th><th>Command</th>${canKill?'<th>Action</th>':''}</tr></thead><tbody>${items.map(row).join("")}</tbody></table>`;
+}
+async function isolateHost(ip, release, btn){
+  const msg = release
+    ? `Release ${ip} from network quarantine?\n\nRestores normal network access to this host.`
+    : `⚠ Network-QUARANTINE ${ip}?\n\nCuts this host off from ALL network traffic except SecTool — for a compromised device. Reversible with Release.`;
+  if(!confirm(msg)) return;
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='…';
+  try{
+    const j=await api('/api/agents/isolate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip,release})});
+    if(j.ok){ showDevices(); }
+    else { alert((release?'Release':'Isolate')+' failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; }
+  }catch(e){ alert('Failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
+}
+async function removeAutorun(ip, entry, btn){
+  if(!confirm(`Remove persistence "${entry.name}" (${entry.type}) on ${ip}?\n\nThis deletes the autorun entry. Cannot be undone.`)) return;
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='…';
+  try{
+    const j=await api('/api/agents/autoruns/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip,...entry})});
+    if(j.ok){ btn.textContent='✓ removed'; btn.style.color='var(--good,#3ad29f)'; btn.style.borderColor='var(--good,#3ad29f)'; }
+    else { alert('Remove failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; }
+  }catch(e){ alert('Remove failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
+}
 async function toggleTool(ip, tool, btn){
   const spec = DEV_TOOLS[tool]; if(!spec) return;
   const box = $("#"+tool+"-"+ip.replace(/\./g,'-'));
@@ -1322,6 +1372,7 @@ async function toggleTool(ip, tool, btn){
     if (j.ok===false){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"failed")+'</pre>'; return; }
     box.innerHTML = spec.render(j, {ip, canKill: !!AGENT_KILL[ip]});
     wireProcBtns(box);
+    box.querySelectorAll('.autorm').forEach(b=>b.onclick=()=>removeAutorun(b.dataset.ip, JSON.parse(b.dataset.a), b));
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 const WELLKNOWN={20:'ftp-data',21:'ftp',22:'ssh',23:'telnet',25:'smtp',53:'dns',67:'dhcp',68:'dhcp',80:'http',110:'pop3',123:'ntp',135:'msrpc',139:'netbios',143:'imap',161:'snmp',443:'https',445:'smb',465:'smtps',587:'submission',993:'imaps',995:'pop3s',1433:'mssql',1883:'mqtt',3306:'mysql',3389:'rdp',5060:'sip',5432:'postgres',5900:'vnc',6379:'redis',8080:'http-alt',8443:'https-alt',8883:'mqtts',9000:'',27017:'mongodb'};

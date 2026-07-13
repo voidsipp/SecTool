@@ -17,6 +17,31 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
 import { log } from "../logger.ts";
+import { recordAgentEvent } from "./events.ts";
+
+// Lightweight Discord webhook for a pushed agent event (feature #3). Kept minimal
+// (not the full alert embed) — this is a heads-up, not a correlated alert.
+async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promise<void> {
+  if (!cfg.discord.webhookUrl) return;
+  const title = e["type"] === "new-listener" ? "🛰️ New listener on a host" : "📡 New external connection";
+  const desc =
+    `**Host:** ${e["host"]}\n` +
+    `**Process:** ${e["process"] ?? "?"}${e["pid"] ? ` (pid ${e["pid"]})` : ""}${e["parent"] ? ` — parent ${e["parent"]}` : ""}\n` +
+    (e["remoteIp"] ? `**Remote:** ${e["remoteIp"]}:${e["remotePort"] ?? ""}\n` : "") +
+    (e["localPort"] ? `**Local port:** ${e["localPort"]}\n` : "") +
+    (e["path"] ? `**Path:** \`${String(e["path"]).slice(0, 200)}\`\n` : "") +
+    (e["sha256"] ? `**SHA-256:** \`${e["sha256"]}\`` : "");
+  if (cfg.runtime.dryRun) {
+    log.info(`[dry-run] would post agent event to Discord: ${title}`);
+    return;
+  }
+  await fetch(cfg.discord.webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: cfg.discord.username, embeds: [{ title, description: desc, color: 0x9d6bff, timestamp: new Date().toISOString() }] }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err: Error) => log.warn(`agent-event Discord post failed: ${err.message}`));
+}
 
 const AGENT_FILE = fileURLToPath(new URL("../../agent/sectool-agent.mjs", import.meta.url));
 
@@ -185,6 +210,32 @@ export function startAgentDistServer(cfg: Config): void {
           `Linux/macOS: curl -fsSL ${base}/install.sh | bash\n`,
         "text/plain; charset=utf-8",
       );
+    }
+    // Feature #3: real-time event push from agents (token-gated).
+    if (path === "/event" && req.method === "POST") {
+      if (token && req.headers["authorization"] !== `Bearer ${token}`) return send(401, JSON.stringify({ error: "unauthorized" }), "application/json");
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+        if (raw.length > 20_000) req.destroy();
+      });
+      req.on("end", () => {
+        try {
+          const e = JSON.parse(raw || "{}") as Record<string, unknown>;
+          if (typeof e["type"] === "string" && typeof e["host"] === "string") {
+            recordAgentEvent({
+              type: e["type"] as string, host: e["host"] as string, time: Number(e["time"]) || Date.now(),
+              process: e["process"] as string, pid: Number(e["pid"]) || undefined, path: e["path"] as string,
+              sha256: e["sha256"] as string, cmdline: e["cmdline"] as string, parent: e["parent"] as string,
+              localPort: Number(e["localPort"]) || undefined, remoteIp: e["remoteIp"] as string, remotePort: Number(e["remotePort"]) || undefined,
+            });
+            log.warn(`[agent-event] ${e["type"]} on ${e["host"]}: ${e["process"] ?? "?"} -> ${e["remoteIp"] ?? ""}:${e["remotePort"] ?? ""}`);
+            notifyAgentEvent(cfg, e).catch(() => {});
+          }
+        } catch { /* ignore malformed */ }
+        send(200, JSON.stringify({ ok: true }), "application/json");
+      });
+      return;
     }
     send(404, "not found", "text/plain");
   };

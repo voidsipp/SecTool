@@ -114,6 +114,40 @@ export async function agentKillProcess(
   }
 }
 
+export async function agentAutoruns(cfg: Config, host: string): Promise<{ ok: boolean; host?: string; autoruns?: unknown[]; error?: string }> {
+  const r = await call(cfg, host, "/autoruns", 12000);
+  if (!r.ok) return { ok: false, error: r.error };
+  const d = r.data as { host?: string; autoruns?: unknown[] };
+  return { ok: true, host: d.host, autoruns: d.autoruns ?? [] };
+}
+
+async function post(cfg: Config, host: string, path: string, body: unknown, timeoutMs = 12000): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  if (isIP(host) === 0 || !isPrivate(host)) return { ok: false, error: "Action is only allowed on internal LAN hosts." };
+  if (!cfg.agent.token) return { ok: false, error: "Refusing: no AGENT_TOKEN configured on the SecTool side." };
+  try {
+    const r = await fetch(`http://${host}:${cfg.agent.port}${path}`, {
+      method: "POST",
+      headers: { ...authHeaders(cfg), "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.status === 401) return { ok: false, error: "Agent rejected the token." };
+    if (!r.ok) return { ok: false, error: (data["error"] as string) || `Agent returned HTTP ${r.status}.` };
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: `No agent reachable on ${host}:${cfg.agent.port} (${(err as Error).message})` };
+  }
+}
+
+export async function agentIsolate(cfg: Config, host: string, release: boolean): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return post(cfg, host, release ? "/release" : "/isolate", {});
+}
+
+export async function agentRemoveAutorun(cfg: Config, host: string, entry: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return post(cfg, host, "/autoruns/remove", entry);
+}
+
 export async function agentLookup(
   cfg: Config,
   host: string,
