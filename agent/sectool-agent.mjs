@@ -17,11 +17,11 @@
 import http from "node:http";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.1.1";
+const AGENT_VERSION = "1.2.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -240,6 +240,16 @@ async function poll() {
   for (const [k, v] of buffer) if (v.lastSeen < cutoff) buffer.delete(k);
 }
 
+// Never delete OS-critical binaries or the node runtime the agent runs on.
+function isProtectedPath(p) {
+  if (!p) return true;
+  const lp = p.replace(/\\/g, "/").toLowerCase();
+  if (/^[a-z]:\/?$/.test(lp) || lp === "/") return true; // a drive root or filesystem root
+  if (process.execPath && lp === process.execPath.replace(/\\/g, "/").toLowerCase()) return true; // our own node
+  const guarded = ["c:/windows/", "/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/boot/", "/etc/", "/system/", "/library/apple/"];
+  return guarded.some((g) => lp.startsWith(g));
+}
+
 function matches(rec, q) {
   if (q.proto && rec.proto !== q.proto.toUpperCase()) return false;
   if (q.localPort && rec.lport !== Number(q.localPort)) return false;
@@ -314,27 +324,69 @@ const server = http.createServer((req, res) => {
         return json(400, { error: "invalid JSON body" });
       }
       const pid = Number(body.pid);
+      const wantName = body.process ? String(body.process) : null;
       const signal = String(body.signal || "SIGTERM").toUpperCase();
-      const expectName = body.process ? String(body.process) : null;
-      if (!Number.isInteger(pid) || pid <= 0) return json(400, { error: "invalid pid" });
+      const deleteFile = body.deleteFile === true;
       if (signal !== "SIGTERM" && signal !== "SIGKILL") return json(400, { error: "signal must be SIGTERM or SIGKILL" });
-      if (pid <= 4 || pid === process.pid) return json(403, { error: `refusing to kill protected pid ${pid}` });
-      // Only processes we actually observe with a live connection can be killed,
-      // and the caller-supplied name must match — guards against PID reuse and
-      // blind killing of arbitrary PIDs.
-      const known = [...buffer.values()].find((r) => r.procid === pid);
-      if (!known) return json(404, { error: `pid ${pid} is not among this host's tracked connections` });
-      if (expectName && known.pname && known.pname.toLowerCase() !== expectName.toLowerCase()) {
-        return json(409, { error: `pid ${pid} is now '${known.pname}', not '${expectName}' — refusing (possible PID reuse)` });
+
+      // Resolve target processes from tracked connections only — never an arbitrary
+      // PID/path. By pid (single, name-verified) or by process name (all matches).
+      const entries = [...buffer.values()];
+      const safe = (r) => r.procid > 4 && r.procid !== process.pid;
+      let targets;
+      if (Number.isInteger(pid) && pid > 0) {
+        if (pid <= 4 || pid === process.pid) return json(403, { error: `refusing to kill protected pid ${pid}` });
+        const known = entries.find((r) => r.procid === pid);
+        if (!known) return json(404, { error: `pid ${pid} is not among this host's tracked connections` });
+        if (wantName && known.pname && known.pname.toLowerCase() !== wantName.toLowerCase()) {
+          return json(409, { error: `pid ${pid} is now '${known.pname}', not '${wantName}' — refusing (possible PID reuse)` });
+        }
+        targets = [known];
+      } else if (wantName) {
+        const nm = wantName.toLowerCase();
+        const byPid = new Map();
+        for (const r of entries) if (safe(r) && (r.pname || "").toLowerCase() === nm) byPid.set(r.procid, r);
+        targets = [...byPid.values()];
+        if (!targets.length) return json(404, { error: `no tracked process named '${wantName}' on this host` });
+      } else {
+        return json(400, { error: "provide a pid or a process name" });
       }
-      try {
-        process.kill(pid, signal);
-        console.log(`[KILL] ${new Date().toISOString()} pid=${pid} name=${known.pname || "?"} signal=${signal} from=${req.socket.remoteAddress} -> sent`);
-        return json(200, { ok: true, host: os.hostname(), pid, process: known.pname, signal });
-      } catch (err) {
-        console.log(`[KILL] ${new Date().toISOString()} pid=${pid} signal=${signal} FAILED: ${err.message}`);
-        return json(err.code === "ESRCH" ? 404 : 500, { error: `kill failed: ${err.message}` });
+
+      // Kill first, then (optionally) delete each target's binary after a short
+      // delay so the OS releases the executable lock.
+      for (const t of targets) {
+        try {
+          process.kill(t.procid, signal);
+          t._killed = true;
+        } catch (err) {
+          t._killErr = err.message;
+        }
       }
+      const finish = () => {
+        const seenPaths = new Set();
+        const results = targets.map((t) => {
+          const r = { pid: t.procid, process: t.pname, killed: !!t._killed };
+          if (t._killErr) r.error = t._killErr;
+          if (deleteFile && t.ppath && !seenPaths.has(t.ppath)) {
+            seenPaths.add(t.ppath);
+            r.path = t.ppath;
+            if (isProtectedPath(t.ppath)) r.deleteError = "refused: protected/system path";
+            else {
+              try {
+                unlinkSync(t.ppath);
+                r.deleted = true;
+              } catch (err) {
+                r.deleteError = err.message;
+              }
+            }
+          }
+          console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.deleteError ? " delErr=" + r.deleteError : ""} from=${req.socket.remoteAddress}`);
+          return r;
+        });
+        json(200, { ok: true, host: os.hostname(), signal, deleteFile, results });
+      };
+      if (deleteFile) setTimeout(finish, 600);
+      else finish();
     });
     return;
   }

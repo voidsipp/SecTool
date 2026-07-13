@@ -1074,6 +1074,7 @@ async function showHosts() {
     });
   } catch(e){ $("#hostsBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
+const AGENT_KILL = {}; // ip -> whether kill/delete is enabled on that agent
 async function showDevices(){
   $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
   $("#devicesView").style.display="block";
@@ -1091,7 +1092,7 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
       return;
     }
     const killAllowed = !!j.killAllowed;
-    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); const canKill = killAllowed && a.kill; return `
+    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); const canKill = killAllowed && a.kill; AGENT_KILL[a.ip]=canKill; return `
       <div class="section devcard">
         <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
           <span class="mono">${esc(a.hostname||a.ip)}</span>
@@ -1252,7 +1253,7 @@ async function toggleConns(ip,btn){
       <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
       <td class="muted">${esc(c.state||'')}</td>
       <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td>
-      ${killOn?`<td>${c.pid?`<button class="killbtn" data-ip="${esc(ip)}" data-pid="${c.pid}" data-proc="${esc(c.process||'')}" style="background:transparent;border:1px solid var(--critical,#ff5c7a);color:var(--critical,#ff5c7a);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">🛑 Kill</button>`:''}</td>`:''}</tr>`).join("");
+      ${killOn?`<td style="white-space:nowrap">${procBtns(ip, c.pid, c.process, true)}</td>`:''}</tr>`).join("");
     box.innerHTML = `<input class="devfilter" placeholder="filter by process / ip / port…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
       <div class="muted" style="margin-bottom:6px">${conns.length} connections${killOn?' · 🛑 kill enabled on this host':''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -1260,7 +1261,7 @@ async function toggleConns(ip,btn){
         <tbody>${rows}</tbody></table>`;
     const filter = box.querySelector(".devfilter");
     filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
-    box.querySelectorAll(".killbtn").forEach(b=>b.onclick=()=>killProcess(b.dataset.ip, Number(b.dataset.pid), b.dataset.proc, b));
+    wireProcBtns(box);
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 async function toggleKill(ip, currentlyOn, btn){
@@ -1273,17 +1274,36 @@ async function toggleKill(ip, currentlyOn, btn){
     showDevices(); // re-render so the toggle + row buttons reflect the new state
   }catch(e){ alert("Failed: "+e.message); btn.disabled=false; btn.textContent=orig; }
 }
-async function killProcess(ip, pid, proc, btn){
-  const name = proc || "process";
-  if(!confirm(`Kill "${name}" (pid ${pid}) on ${ip}?\n\nThis terminates the process on that device and cannot be undone.`)) return;
-  const force = confirm("Force kill?\n\nOK = SIGKILL (force, immediate)\nCancel = SIGTERM (graceful — lets the process clean up)");
-  const signal = force ? "SIGKILL" : "SIGTERM";
-  const orig = btn.textContent; btn.disabled=true; btn.textContent="…";
+// Render a 🛑 kill + 🗑 kill-and-delete pair for a process (by pid and/or name).
+function procBtns(ip, pid, proc, canKill){
+  if(!canKill || (!pid && !proc)) return '';
+  const d=`data-ip="${esc(ip)}" ${pid?`data-pid="${pid}"`:''} ${proc?`data-proc="${esc(proc)}"`:''}`;
+  const base='border-radius:6px;padding:1px 7px;font-size:11px;cursor:pointer;background:transparent';
+  return `<button class="procbtn" ${d} title="kill process" style="${base};border:1px solid var(--critical,#ff5c7a);color:var(--critical,#ff5c7a)">🛑</button> `
+       + `<button class="procbtn" ${d} data-del="1" title="kill process AND delete its executable file" style="${base};border:1px solid var(--high,#ff9e3d);color:var(--high,#ff9e3d)">🗑</button>`;
+}
+function wireProcBtns(root){
+  root.querySelectorAll('.procbtn').forEach(b=>b.onclick=()=>agentProcAction(b.dataset.ip,{pid:b.dataset.pid?Number(b.dataset.pid):undefined,process:b.dataset.proc||undefined},!!b.dataset.del,b));
+}
+async function agentProcAction(ip, target, del, btn){
+  const label = target.process || ('pid '+target.pid);
+  const scope = (!target.pid && target.process) ? ` (every process named "${target.process}")` : '';
+  const msg = del
+    ? `⚠ KILL AND DELETE the binary of ${label}${scope} on ${ip}?\n\nThis force-kills the process AND PERMANENTLY DELETES its executable file from disk. Cannot be undone.`
+    : `Kill ${label}${scope} on ${ip}?\n\nTerminates the process. Cannot be undone.`;
+  if(!confirm(msg)) return;
+  const signal = del ? 'SIGKILL' : (confirm('Force kill?\n\nOK = SIGKILL (force, immediate)\nCancel = SIGTERM (graceful)')?'SIGKILL':'SIGTERM');
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='…';
   try{
-    const j = await api("/api/agents/kill",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({host:ip,pid,process:proc,signal})});
-    if(j.ok){ btn.textContent="✓ killed"; btn.style.color="var(--good,#3ad29f)"; btn.style.borderColor="var(--good,#3ad29f)"; }
-    else { alert("Kill failed: "+(j.error||"unknown")); btn.disabled=false; btn.textContent=orig; }
-  }catch(e){ alert("Kill failed: "+e.message); btn.disabled=false; btn.textContent=orig; }
+    const j = await api('/api/agents/kill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip,pid:target.pid,process:target.process,signal,deleteFile:del})});
+    if(!j.ok){ alert('Failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; return; }
+    const rs=j.results||[]; const killed=rs.filter(x=>x.killed).length, deleted=rs.filter(x=>x.deleted).length;
+    if(!rs.length){ btn.textContent='no live target'; btn.disabled=false; return; }
+    btn.textContent = del?`✓ ${killed}k / ${deleted}d`:`✓ ${killed} killed`;
+    btn.style.color='var(--good,#3ad29f)'; btn.style.borderColor='var(--good,#3ad29f)';
+    const issues=rs.filter(x=>x.error||x.deleteError);
+    if(issues.length) alert('Completed with issues:\n'+issues.map(x=>`pid ${x.pid} (${x.process||'?'}): ${x.error||'killed'}${x.deleteError?' | delete: '+x.deleteError:''}`).join('\n'));
+  }catch(e){ alert('Failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
 }
 const DEV_TOOLS = {
   ports:     { label:"📡 Live ports", path:i=>"/api/agents/ports?host="+encodeURIComponent(i), render:renderPorts, loading:"Reading the gateway's live connection table…" },
@@ -1300,7 +1320,8 @@ async function toggleTool(ip, tool, btn){
   try {
     const j = await api(spec.path(ip));
     if (j.ok===false){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"failed")+'</pre>'; return; }
-    box.innerHTML = spec.render(j);
+    box.innerHTML = spec.render(j, {ip, canKill: !!AGENT_KILL[ip]});
+    wireProcBtns(box);
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 const WELLKNOWN={20:'ftp-data',21:'ftp',22:'ssh',23:'telnet',25:'smtp',53:'dns',67:'dhcp',68:'dhcp',80:'http',110:'pop3',123:'ntp',135:'msrpc',139:'netbios',143:'imap',161:'snmp',443:'https',445:'smb',465:'smtps',587:'submission',993:'imaps',995:'pop3s',1433:'mssql',1883:'mqtt',3306:'mysql',3389:'rdp',5060:'sip',5432:'postgres',5900:'vnc',6379:'redis',8080:'http-alt',8443:'https-alt',8883:'mqtts',9000:'',27017:'mongodb'};
@@ -1362,8 +1383,9 @@ function renderTraffic(j){
     <table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${j.alerts.map(alert).join("")}</tbody></table>`;
   return h;
 }
-function renderListeners(j){
+function renderListeners(j, ctx){
   if (!(j.listeners||[]).length) return '<div class="empty">No listening sockets reported by the agent.</div>';
+  const canKill = !!(ctx && ctx.canKill);
   const EXP={'all-interfaces':['ALL IFACES','var(--critical,#ff5c7c)'],'localhost':['LOCALHOST','var(--muted)'],'specific':['BOUND','var(--accent)'],'unknown':['?','var(--muted)']};
   const row=l=>{ const e=EXP[l.exposure]||EXP.unknown;
     // When the agent couldn't report a bind address but NetFlow proved the port
@@ -1376,16 +1398,18 @@ function renderListeners(j){
     <td class="mono">${l.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${esc(l.proto)} ${l.port}</td>
     <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
     <td>${expBadge}</td>
-    <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td></tr>`; };
+    <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td>
+    ${canKill?`<td style="white-space:nowrap">${procBtns(ctx.ip, (l.pids&&l.pids[0]), l.process, true)}</td>`:''}</tr>`; };
   let h=`<div class="muted" style="margin-bottom:8px">${j.count} listening service(s)${j.internetExposed?` · <span style="color:var(--critical,#ff5c7c)" title="Sensitive service(s) NetFlow proves were reached from a public peer — treat as internet-exposed">🌐 ${j.internetExposed} internet-exposed</span>`:''}${j.risky?` · <span style="color:var(--critical,#ff5c7c)">${j.risky} risky</span>`:''}${j.networkReachable?` · <span style="color:var(--high,#ff9e3d)" title="Listeners reachable from off this host — bound to a network interface, or confirmed reachable by gateway NetFlow. The device's externally-facing attack surface (includes the all-interfaces and risky subsets).">${j.networkReachable} network-reachable</span>`:''}${j.exposed?` · <span style="color:var(--critical,#ff5c7c)">${j.exposed} on all interfaces</span>`:''}</div>`;
-  h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Port</th><th>Process</th><th>Exposure</th><th>Binary</th></tr></thead><tbody>${j.listeners.map(row).join("")}</tbody></table>`;
+  h+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Port</th><th>Process</th><th>Exposure</th><th>Binary</th>${canKill?'<th>Action</th>':''}</tr></thead><tbody>${j.listeners.map(row).join("")}</tbody></table>`;
   const risky=(j.listeners||[]).filter(l=>l.risk);
   if (risky.length) h+=`<div style="margin-top:6px;font-size:11px"><span style="color:var(--critical,#ff5c7c)">⚠ Sensitive services reachable off-host:</span> ${esc(risky.map(l=>(l.riskReasons||[]).join('; ')).join(' · '))}</div>`;
   if (j.note) h+=`<div class="muted" style="margin-top:6px;font-size:11px">${esc(j.note)}</div>`;
   return h;
 }
-function renderEgress(j){
+function renderEgress(j, ctx){
   if (!(j.peers||[]).length) return '<div class="empty">No connections to public IPs reported by the agent.</div>';
+  const canKill = !!(ctx && ctx.canKill);
   const row=p=>{ const g=p.geo||{}; const loc=[g.country,g.city].filter(Boolean).join(' / ');
     const rep=p.riskReasons&&p.riskReasons.length?p.riskReasons.join(', '):(p.feeds&&p.feeds.length?p.feeds.join(', '):'clean');
     const sus=new Set(p.suspiciousPorts||[]);
@@ -1396,7 +1420,7 @@ function renderEgress(j){
     <td class="mono">${p.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${p.blocked?'<span class="badge" style="background:var(--muted)">BLOCKED</span> ':''}${p.watched?`<span class="badge" style="background:var(--accent)" title="${esc('On the watchlist'+(p.watchNote?': '+p.watchNote:''))}">WATCH</span> `:''}${(p.suspiciousPorts||[]).length?'<span class="badge" style="background:var(--high,#ff9e3d)" title="Reached on a suspicious destination port (backdoor/C2/should-not-traverse-WAN)">BAD PORT</span> ':''}${esc(p.ip)}</td>
     <td class="muted">${esc(loc||'?')}</td>
     <td class="muted" title="${esc(g.org||g.isp||'')}">${esc((g.asname||g.org||g.isp||'').slice(0,28))}${g.hosting?' <span class="badge" style="background:var(--accent)">HOST</span>':''}</td>
-    <td class="mono" style="color:var(--cyan,#46d6ff)">${esc((p.processes||[]).slice(0,3).join(', '))}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${(p.processes||[]).slice(0,3).map(nm=>{const kb=canKill&&nm&&!/^(\?|kernel|system|idle)$/i.test(nm);return esc(nm)+(kb?' '+procBtns(ctx.ip,null,nm,true):'')}).join('<br>')||'?'}</td>
     <td class="mono">${portsCell}</td>
     <td class="muted">${p.conns}</td>
     <td style="color:${p.risk?'var(--critical,#ff5c7c)':'var(--muted)'}">${esc(rep)}</td></tr>`; };

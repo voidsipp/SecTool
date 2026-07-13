@@ -163,13 +163,21 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+) so SecTool can tell whether a listening port is bound to
   all interfaces or just localhost in the Devices page's **Listeners** audit.
-- `POST /kill` (v1.1.0+, **destructive, opt-in**) — terminate a process.
-  Body: `{ "pid": <n>, "signal": "SIGTERM"|"SIGKILL", "process": "<name>" }`.
-  **Disabled unless `AGENT_ALLOW_KILL=true` AND a token is set.** Additional
-  guards: rejects PIDs ≤ 4 and the agent's own PID; the target must be a process
-  the agent currently tracks (has a live connection); and if `process` is given it
-  must match that PID's real name (defeats PID reuse). Surfaces as a 🛑 **Kill**
-  button per row on the Devices → Connections table.
+- `POST /kill` (v1.1.0+, **destructive, opt-in**) — terminate process(es), and
+  optionally delete their executable. Body:
+  `{ "pid": <n>, "process": "<name>", "signal": "SIGTERM"|"SIGKILL", "deleteFile": <bool> }`.
+  Target **by `pid`** (single, name-verified) **or by `process` name** (kills every
+  tracked process of that name). Returns a `results[]` with per-target
+  `killed` / `deleted` / error fields.
+  **Disabled unless `AGENT_ALLOW_KILL=true` AND a token is set.** Guards: rejects
+  PIDs ≤ 4 and the agent's own PID; the target must be a process the agent
+  currently tracks (has a live connection); a supplied `process` name must match the
+  PID's real name (defeats PID reuse). `deleteFile` deletes only the **tracked
+  binary path** of a killed process (never a caller-supplied path) and **refuses
+  OS-critical locations** (`C:\Windows`, `/bin`, `/usr`, `/lib`, `/etc`, … and the
+  node runtime itself). Surfaces as 🛑 **kill** and 🗑 **kill+delete** buttons on the
+  Devices → **Connections**, **Listeners**, and **Egress** panels (Live ports and
+  Traffic are gateway/NetFlow views with no process attribution, so no buttons).
 
 ### Enabling kill on a device
 By default it's off. The easiest way is the **Devices page**: each host with a

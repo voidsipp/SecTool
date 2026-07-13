@@ -2734,8 +2734,10 @@ The **📟 Devices** page (`GET /api/agents`) discovers which internal hosts are
 running an agent (probing hosts seen in flows), shows each one's version / platform
 / health, and lets you browse its **live connections → owning process**
 (`GET /api/agents/connections?host=`) with a filter box. On hosts where kill is
-explicitly enabled, each connection row gets a 🛑 **Kill** button
-(`POST /api/agents/kill`) to terminate the owning process. It's **off by default**
+explicitly enabled, the **Connections**, **Listeners**, and **Egress** panels get
+🛑 **kill** and 🗑 **kill+delete-binary** buttons (`POST /api/agents/kill`) to
+terminate the owning process — by PID or by process name — and optionally remove
+its executable (guarded against OS-critical paths). It's **off by default**
 and hard-gated: the agent needs `AGENT_ALLOW_KILL=true` **and** a token, rejects
 system/own PIDs, and verifies the process name against the PID before killing.
 Deliberately **not** exposed to the "Ask" LLM tools (kill is human-click only, so

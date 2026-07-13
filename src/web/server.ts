@@ -658,13 +658,16 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
         const body = await readJson(req);
         const host = String(body["host"] ?? "");
         const pid = Number(body["pid"]);
+        const hasPid = Number.isInteger(pid) && pid > 0;
         const signal = body["signal"] === "SIGKILL" ? "SIGKILL" : "SIGTERM";
         const procName = typeof body["process"] === "string" ? (body["process"] as string) : undefined;
+        const deleteFile = body["deleteFile"] === true;
         if (isIP(host) === 0) return send(res, 400, { ok: false, error: "Invalid host." });
-        if (!Number.isInteger(pid) || pid <= 0) return send(res, 400, { ok: false, error: "Invalid pid." });
-        log.warn(`[agent-kill] request host=${host} pid=${pid} name=${procName ?? "?"} signal=${signal}`);
-        const r = await agentKillProcess(cfg, host, { pid, signal, process: procName });
-        log.warn(`[agent-kill] result host=${host} pid=${pid} -> ${r.ok ? "KILLED" : "FAILED: " + r.error}`);
+        if (!hasPid && !procName) return send(res, 400, { ok: false, error: "Provide a pid or a process name." });
+        log.warn(`[agent-kill] request host=${host} pid=${hasPid ? pid : "-"} name=${procName ?? "-"} signal=${signal} delete=${deleteFile}`);
+        const r = await agentKillProcess(cfg, host, { pid: hasPid ? pid : undefined, signal, process: procName, deleteFile });
+        const summary = r.results ? `${r.results.filter((x) => x.killed).length} killed, ${r.results.filter((x) => x.deleted).length} deleted` : r.error;
+        log.warn(`[agent-kill] result host=${host} -> ${r.ok ? summary : "FAILED: " + r.error}`);
         return send(res, r.ok ? 200 : 502, r);
       }
 
