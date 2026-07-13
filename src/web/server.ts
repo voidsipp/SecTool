@@ -271,8 +271,10 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns } from "../agent/agentClient.ts";
 import { recentAgentEvents } from "../agent/events.ts";
+import { recordSeen, knownAgents } from "../agent/fleet.ts";
+import { lookupHash } from "../investigate/hashrep.ts";
 import { trafficProfile, listenerAudit, egressAudit } from "../investigate/device.ts";
 import { livePortActivity } from "../investigate/liveports.ts";
 import { discoverDevices } from "../investigate/discovery.ts";
@@ -639,11 +641,17 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             const r = await agentHealth(cfg, ip, 1500);
             if (!r.ok || !r.data) return null;
             const d = r.data as Record<string, unknown>;
-            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, isolate: d["isolate"] === true, isolated: d["isolated"] === true, push: d["push"] === true, retentionMin: d["retentionMin"] };
+            recordSeen(ip, d); // feature #5: remember this agent for fleet monitoring
+            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, isolate: d["isolate"] === true, isolated: d["isolated"] === true, push: d["push"] === true, signedUpdates: d["signedUpdates"] === true, triage: d["triage"] === true, retentionMin: d["retentionMin"] };
           }),
         );
         const agents = probed.filter((a): a is NonNullable<typeof a> => a !== null);
-        return send(res, 200, { enabled: true, port: cfg.agent.port, killAllowed: cfg.agent.allowKill, scanned: list.length, agents });
+        // Feature #5: include agents we've seen before but that didn't answer now (offline).
+        const onlineIps = new Set(agents.map((a) => a.ip));
+        const offline = knownAgents()
+          .filter((k) => !onlineIps.has(k.ip))
+          .map((k) => ({ ip: k.ip, online: false, hostname: k.host, version: k.version, platform: k.platform, lastSeen: k.lastSeen, isolated: k.isolated }));
+        return send(res, 200, { enabled: true, port: cfg.agent.port, killAllowed: cfg.agent.allowKill, scanned: list.length, agents, offline });
       }
 
       // --- a single agent's live connections -> processes ---
@@ -704,6 +712,43 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       if (method === "GET" && path === "/api/agent/events") {
         const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
         return send(res, 200, { events: recentAgentEvents(limit) });
+      }
+
+      // --- feature #1: SHA-256 reputation via VirusTotal ---
+      if (method === "GET" && path === "/api/agents/hashrep") {
+        return send(res, 200, await lookupHash(cfg, url.searchParams.get("sha256") ?? ""));
+      }
+      // --- feature #1: distinct binaries running across the fleet ---
+      if (method === "GET" && path === "/api/agents/binaries") {
+        const isPrivate = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+        const targets = knownAgents().filter((k) => isPrivate(k.ip)).map((k) => k.ip).slice(0, 32);
+        const bins = new Map<string, { sha256: string; process: string; path: string; hosts: Set<string>; count: number }>();
+        await Promise.all(
+          targets.map(async (ip) => {
+            const r = await agentConnections(cfg, ip);
+            if (!r.ok) return;
+            for (const c of r.connections ?? []) {
+              const key = (c.sha256 || c.path || c.process || "").toLowerCase();
+              if (!key) continue;
+              const b = bins.get(key) ?? { sha256: c.sha256 || "", process: c.process || "", path: c.path || "", hosts: new Set<string>(), count: 0 };
+              b.hosts.add(r.host || ip);
+              b.count++;
+              bins.set(key, b);
+            }
+          }),
+        );
+        const binaries = [...bins.values()].map((b) => ({ sha256: b.sha256, process: b.process, path: b.path, hosts: [...b.hosts], count: b.count })).sort((a, b) => a.process.localeCompare(b.process));
+        return send(res, 200, { count: binaries.length, scanned: targets.length, binaries });
+      }
+      // --- feature #3: IR triage bundle (downloadable) ---
+      if (method === "GET" && path === "/api/agents/triage") {
+        const r = await agentTriage(cfg, url.searchParams.get("host") ?? "");
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- feature #4: DNS attribution ---
+      if (method === "GET" && path === "/api/agents/dns") {
+        const r = await agentDns(cfg, url.searchParams.get("host") ?? "");
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
       }
 
       // --- toggle an agent's settings (allowKill) from the dashboard ---

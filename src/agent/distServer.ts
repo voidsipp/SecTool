@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
 import { log } from "../logger.ts";
 import { recordAgentEvent } from "./events.ts";
+import { signAgent, agentPublicKeyB64 } from "./signing.ts";
 
 // Lightweight Discord webhook for a pushed agent event (feature #3). Kept minimal
 // (not the full alert embed) — this is a heads-up, not a correlated alert.
@@ -101,7 +102,9 @@ $dir = Join-Path $env:LOCALAPPDATA 'SecToolAgent'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 Write-Host "Downloading agent from $server ..."
 Invoke-WebRequest -UseBasicParsing "$server/agent" -OutFile (Join-Path $dir 'sectool-agent.mjs')
-$cfgJson = @{ token = $token; updateUrl = $server; port = $port } | ConvertTo-Json
+$pub = ''
+try { $pub = (Invoke-WebRequest -UseBasicParsing "$server/pubkey").Content.Trim() } catch {}
+$cfgJson = @{ token = $token; updateUrl = $server; port = $port; publicKey = $pub } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $dir 'agent.config.json'), $cfgJson)  # UTF-8 without BOM (JSON.parse-safe)
 $agent = Join-Path $dir 'sectool-agent.mjs'
 $vbsPath = Join-Path $dir 'launch.vbs'
@@ -144,8 +147,9 @@ if [ -z "$NODE" ]; then echo 'Node.js 18+ is required. Install it, then re-run.'
 DIR="$HOME/.sectool-agent"; mkdir -p "$DIR"
 echo "Downloading agent from $SERVER ..."
 curl -fsSL "$SERVER/agent" -o "$DIR/sectool-agent.mjs"
+PUB="$(curl -fsSL "$SERVER/pubkey" 2>/dev/null || true)"
 cat > "$DIR/agent.config.json" <<CFG
-{"token":"$TOKEN","updateUrl":"$SERVER","port":$PORT}
+{"token":"$TOKEN","updateUrl":"$SERVER","port":$PORT,"publicKey":"$PUB"}
 CFG
 # stop any prior agent so the fresh build can bind the port
 systemctl --user stop sectool-agent 2>/dev/null || true
@@ -200,6 +204,9 @@ export function startAgentDistServer(cfg: Config): void {
     };
     if (path === "/version") return send(200, JSON.stringify({ version: versionOf(readAgent()) }), "application/json");
     if (path === "/agent" || path === "/sectool-agent.mjs") return send(200, readAgent(), "text/javascript; charset=utf-8");
+    // Feature #2: signed updates — serve the Ed25519 signature of the agent + the public key.
+    if (path === "/agent.sig") return send(200, signAgent(readAgent()), "text/plain; charset=utf-8");
+    if (path === "/pubkey") return send(200, agentPublicKeyB64(), "text/plain; charset=utf-8");
     if (path === "/install.ps1") return send(200, psInstall(base, token, cfg.agent.port), "text/plain; charset=utf-8");
     if (path === "/install.sh") return send(200, shInstall(base, token, cfg.agent.port), "text/plain; charset=utf-8");
     if (path === "/") {

@@ -17,6 +17,10 @@ export interface AgentMatch {
   pid: number;
   process: string;
   path: string;
+  sha256?: string; // agent v1.3.0+
+  cmdline?: string;
+  ppid?: number;
+  parent?: string;
   firstSeen: number;
   lastSeen: number;
 }
@@ -112,6 +116,14 @@ export async function agentKillProcess(
   } catch (err) {
     return { ok: false, error: `No agent reachable on ${host}:${cfg.agent.port} (${(err as Error).message})` };
   }
+}
+
+export async function agentTriage(cfg: Config, host: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return call(cfg, host, "/triage", 60000);
+}
+
+export async function agentDns(cfg: Config, host: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return call(cfg, host, "/dns", 15000);
 }
 
 export async function agentAutoruns(cfg: Config, host: string): Promise<{ ok: boolean; host?: string; autoruns?: unknown[]; error?: string }> {

@@ -175,6 +175,22 @@ at `http://<device-LAN-IP>:7879`.
   lock yourself out.
 - **Push** (v1.3.0+): when enabled, the agent POSTs `new-external-connection` /
   `new-listener` events to the SecTool dist server's `/event` in real time.
+- `GET /connections` records (v1.3.0+) carry `sha256` (background-hashed), `cmdline`,
+  `ppid`, `parent`. SecTool checks the hash against VirusTotal (unknown-to-VT is
+  surfaced as a hunting signal), clickable in the Connections table.
+- `GET /dns` (v1.4.0+) — recently-resolved domains (host DNS cache) correlated with
+  the processes doing DNS (port-53 sockets).
+- `GET /triage` (v1.4.0+) — one-shot IR bundle: connections, autoruns, DNS, hosts
+  file, and running binaries with Authenticode signature status + hashes. Downloadable
+  from the Devices page (🧾 Triage).
+- **Signed updates** (v1.4.0+): the agent pins an Ed25519 public key (installed from
+  the dist server's `/pubkey`) and **refuses any self-update whose signature
+  (`/agent.sig`) doesn't verify** — so a LAN MITM can't push a malicious update.
+  Legacy installs with no pinned key still update (with a warning); re-run the
+  installer to pin a key. Shows as 🔏 signed / 🔓 unsigned on the Devices page.
+- **Fleet monitoring** (v1.4.0+): SecTool remembers every agent it has seen and
+  alerts (Discord) when one goes dark, drifts below the latest version, or reports
+  itself isolated. Offline agents are listed on the Devices page.
 - `POST /kill` (v1.1.0+, **destructive, opt-in**) — terminate process(es), and
   optionally delete their executable. Body:
   `{ "pid": <n>, "process": "<name>", "signal": "SIGTERM"|"SIGKILL", "deleteFile": <bool> }`.

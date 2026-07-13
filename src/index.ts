@@ -110,6 +110,7 @@
  *   node src/index.ts --ics 168       # offline iCalendar (.ics) export: one all-day VEVENT per UTC day (volume/serious/sources/new attackers + notable-day flags & alarms) to subscribe in Outlook/Google/Apple Calendar; --format json|md, --include-quiet, --no-alarms, --limit N (RFC 5545)
  */
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadEnvFile } from "./util/env.ts";
 import { loadConfig, redactConfig, ConfigError } from "./config.ts";
@@ -128,6 +129,7 @@ import { startReactiveBlocker } from "./respond/reactiveBlock.ts";
 import { startHoneypot } from "./deception/honeypot.ts";
 import { startBaselineMonitor } from "./anomaly/baseline.ts";
 import { startAgentDistServer } from "./agent/distServer.ts";
+import { startFleetMonitor, setLatestVersion } from "./agent/fleet.ts";
 import { runDigest } from "./digest/digest.ts";
 import { buildComparison } from "./analytics/compare.ts";
 import { buildProfile } from "./analytics/profile.ts";
@@ -342,6 +344,11 @@ async function runService(): Promise<void> {
   if (cfg.agent.enabled) {
     try {
       startAgentDistServer(cfg);
+      // Feature #5: fleet health + tamper monitor. Seed it with the latest agent
+      // version so it can flag version drift.
+      const agentSrc = readFileSync(fileURLToPath(new URL("../agent/sectool-agent.mjs", import.meta.url)), "utf8");
+      setLatestVersion((agentSrc.match(/AGENT_VERSION\s*=\s*["']([\d.]+)["']/) ?? [])[1] ?? "");
+      startFleetMonitor(cfg);
     } catch (err) {
       log.error(`Agent dist server failed to start: ${(err as Error).message}`);
     }

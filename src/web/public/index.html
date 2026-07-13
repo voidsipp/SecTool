@@ -1096,7 +1096,7 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
       <div class="section devcard">
         <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
           <span class="mono">${esc(a.hostname||a.ip)}</span>
-          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span>
+          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${a.signedUpdates?' · <span style="color:var(--good,#3ad29f)" title="verifies signed updates">🔏 signed</span>':' · <span class="muted" title="accepts unsigned updates — re-run installer to pin a key">🔓 unsigned</span>'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span>
           ${killAllowed?(a.auth?`<button class="killtoggle" data-ip="${esc(a.ip)}" data-on="${a.kill?1:''}" ${a.killPinned?'disabled title="pinned by AGENT_ALLOW_KILL env var on the host"':''} style="float:right;font-size:11px;padding:2px 9px;border-radius:6px;cursor:pointer;border:1px solid ${a.kill?'var(--critical,#ff5c7a)':'var(--border)'};background:transparent;color:${a.kill?'var(--critical,#ff5c7a)':'var(--muted)'}">🛑 Kill: ${a.kill?'ON':'off'}${a.killPinned?' 🔒':''}</button>`:`<span class="muted" style="float:right;font-size:11px">enable auth to control kill</span>`):''}</h3>
         <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="devview" data-ip="${esc(a.ip)}" data-kill="${canKill?1:''}">▸ Connections</button>
@@ -1105,6 +1105,8 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="egress">🚨 Egress</button>
           <button class="devtool" data-ip="${esc(a.ip)}" data-tool="autoruns">🧬 Autoruns</button>
+          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="dns">🌐 DNS</button>
+          <button class="triagebtn" data-ip="${esc(a.ip)}" data-host="${esc(a.hostname||a.ip)}" style="border:1px solid var(--accent);color:var(--accent);background:transparent;border-radius:6px;padding:2px 9px;font-size:11px;cursor:pointer">🧾 Triage</button>
           ${a.isolate?`<button class="isobtn" data-ip="${esc(a.ip)}" data-rel="${a.isolated?1:''}" style="margin-left:auto;border:1px solid ${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};color:${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};background:transparent;border-radius:6px;padding:2px 9px;font-size:11px;cursor:pointer">${a.isolated?'🔓 Release':'🔒 Isolate'}</button>`:''}
         </div>
         ${a.isolated?'<div class="muted" style="color:var(--critical,#ff5c7a);margin-top:6px;font-size:12px">🔒 This host is network-quarantined (only SecTool can reach it).</div>':''}
@@ -1114,11 +1116,19 @@ curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS<
         <div class="devpanel" id="listeners-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="egress-${id}" style="display:none; margin-top:10px"></div>
         <div class="devpanel" id="autoruns-${id}" style="display:none; margin-top:10px"></div>
+        <div class="devpanel" id="dns-${id}" style="display:none; margin-top:10px"></div>
       </div>`; }).join("");
     document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
     document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
     document.querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip, !!b.dataset.on, b));
     document.querySelectorAll(".isobtn").forEach(b=>b.onclick=()=>isolateHost(b.dataset.ip, !!b.dataset.rel, b));
+    document.querySelectorAll(".triagebtn").forEach(b=>b.onclick=()=>downloadTriage(b.dataset.ip, b.dataset.host, b));
+    if (j.offline && j.offline.length){
+      const off = `<div class="section" style="border-color:var(--critical,#ff5c7a)"><h3 style="margin:0 0 8px;font-size:14px;color:var(--critical,#ff5c7a)">🚨 Offline agents (${j.offline.length})</h3>`
+        + j.offline.map(o=>`<div style="font-size:12px;padding:3px 0"><span class="mono">${esc(o.hostname||o.ip)}</span> <span class="muted">· ${esc(o.ip)} · v${esc(o.version||'?')} · last seen ${o.lastSeen?fmt(o.lastSeen):'?'}</span>${o.isolated?' <span class="badge" style="background:var(--critical,#ff5c7a)">isolated</span>':''}</div>`).join("")
+        + `<div class="muted" style="font-size:11px;margin-top:4px">Seen before but not responding now — possible shutdown, tampering, or a killed agent.</div></div>`;
+      $("#devicesBody").insertAdjacentHTML("beforeend", off);
+    }
     try {
       const ev = await api("/api/agent/events?limit=15");
       if (ev.events && ev.events.length){
@@ -1261,7 +1271,7 @@ async function toggleConns(ip,btn){
     conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
     const base = name => (name||"").split(/[\\/]/).pop()||"";
     const rows = conns.map(c=>`<tr>
-      <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="muted" style="font-size:10px" title="${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
+      <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="hashchk muted" data-h="${esc(c.sha256)}" style="font-size:10px;cursor:pointer;text-decoration:underline dotted" title="click to check VirusTotal · ${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
       <td class="mono">${esc(c.proto||'')}</td>
       <td class="mono">${c.localPort||''}</td>
       <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
@@ -1276,6 +1286,7 @@ async function toggleConns(ip,btn){
     const filter = box.querySelector(".devfilter");
     filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
     wireProcBtns(box);
+    box.querySelectorAll('.hashchk').forEach(s=>s.onclick=()=>checkHash(s.dataset.h,s));
   } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 async function toggleKill(ip, currentlyOn, btn){
@@ -1325,7 +1336,32 @@ const DEV_TOOLS = {
   listeners: { label:"🛰️ Listeners", path:i=>"/api/agents/listeners?host="+encodeURIComponent(i), render:renderListeners, loading:"Auditing open ports…" },
   egress:    { label:"🚨 Egress",    path:i=>"/api/agents/egress?host="+encodeURIComponent(i),    render:renderEgress,    loading:"Scoring public peers against threat intel…" },
   autoruns:  { label:"🧬 Autoruns",  path:i=>"/api/agents/autoruns?host="+encodeURIComponent(i),  render:renderAutoruns,  loading:"Enumerating persistence (tasks, run keys, services, startup)…" },
+  dns:       { label:"🌐 DNS",       path:i=>"/api/agents/dns?host="+encodeURIComponent(i),       render:renderDns,       loading:"Reading DNS cache + attributing to processes…" },
 };
+function renderDns(j){
+  const procs=j.dnsProcesses||[], cache=j.cache||[];
+  let h=`<div class="muted" style="margin-bottom:8px">${procs.length} process(es) doing DNS · ${cache.length} cached record(s)</div>`;
+  if(procs.length) h+=`<div class="muted" style="margin:4px 0">Processes making DNS queries (attributed via port-53 sockets)</div>`+
+    `<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${procs.map(p=>`<tr><td class="mono" style="color:var(--cyan,#46d6ff)">${esc(p.process)}</td><td class="muted">${p.queries} queries</td></tr>`).join("")}</tbody></table>`;
+  if(cache.length) h+=`<div class="muted" style="margin:8px 0 4px">Recently resolved (host DNS cache)</div>`+
+    `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Name</th><th>Resolved to</th></tr></thead><tbody>${cache.slice(0,120).map(c=>`<tr><td class="mono">${esc(c.name||'')}</td><td class="mono muted">${esc(c.data||'')}</td></tr>`).join("")}</tbody></table>`;
+  if(!procs.length&&!cache.length) h+='<div class="empty">No DNS activity reported.</div>';
+  h+='<div class="muted" style="margin-top:6px;font-size:11px">Note: per-domain→process attribution requires ETW; this correlates the host DNS cache with processes holding port-53 sockets.</div>';
+  return h;
+}
+// Feature #1: look up a binary hash on VirusTotal on demand.
+async function checkHash(sha256, el){
+  el.textContent='…';
+  try{
+    const v=await api('/api/agents/hashrep?sha256='+encodeURIComponent(sha256));
+    if(v.error){ el.textContent='🔑 '+sha256.slice(0,10)+' ('+v.error+')'; return; }
+    if(!v.known){ el.innerHTML=`🔑 <span style="color:var(--high,#ff9e3d)" title="No VirusTotal record — unknown binary, worth investigating">unknown to VT</span>`; return; }
+    const bad=(v.malicious||0)+(v.suspicious||0);
+    el.innerHTML = bad>0
+      ? `🔑 <a href="${v.link}" target="_blank" style="color:var(--critical,#ff5c7a)">⚠ ${v.malicious}/${(v.malicious+v.harmless+v.undetected+v.suspicious)||'?'} malicious</a>`
+      : `🔑 <a href="${v.link}" target="_blank" style="color:var(--good,#3ad29f)">clean (VT)</a>`;
+  }catch(e){ el.textContent='lookup failed'; }
+}
 function renderAutoruns(j, ctx){
   const items = j.autoruns||[];
   if (!items.length) return '<div class="empty">No autoruns reported.</div>';
@@ -1339,6 +1375,17 @@ function renderAutoruns(j, ctx){
     ${canKill?`<td>${a.removable?`<button class="autorm" data-ip="${esc(ctx.ip)}" data-a='${esc(JSON.stringify({type:a.type,name:a.name,location:a.location,command:a.command}))}' style="background:transparent;border:1px solid var(--high,#ff9e3d);color:var(--high,#ff9e3d);border-radius:6px;padding:1px 7px;font-size:11px;cursor:pointer">🗑 Remove</button>`:'<span class="muted" style="font-size:10px">manual</span>'}</td>`:''}</tr>`;
   return `<div class="muted" style="margin-bottom:6px">${items.length} persistence entr${items.length===1?'y':'ies'}${canKill?' · 🗑 removes tasks / run keys / startup items':''}</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Type</th><th>Name</th><th>Location</th><th>Command</th>${canKill?'<th>Action</th>':''}</tr></thead><tbody>${items.map(row).join("")}</tbody></table>`;
+}
+async function downloadTriage(ip, host, btn){
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='… collecting';
+  try{
+    const j=await api('/api/agents/triage?host='+encodeURIComponent(ip));
+    if(j.ok===false){ alert('Triage failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; return; }
+    const blob=new Blob([JSON.stringify(j,null,2)],{type:'application/json'});
+    const u=URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=u; a.download=`triage-${(host||ip).replace(/[^\w.-]/g,'_')}-${Date.now()}.json`; a.click(); URL.revokeObjectURL(u);
+    btn.textContent='✓ downloaded'; setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},2000);
+  }catch(e){ alert('Triage failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
 }
 async function isolateHost(ip, release, btn){
   const msg = release

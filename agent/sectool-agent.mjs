@@ -18,11 +18,11 @@ import http from "node:http";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, createReadStream, statSync, readlinkSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.3.0";
+const AGENT_VERSION = "1.4.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -83,6 +83,21 @@ const PUSH_ENABLED =
   process.env.AGENT_PUSH !== undefined
     ? /^(1|true|yes|on)$/i.test(process.env.AGENT_PUSH)
     : fileCfg.push !== false;
+// Feature #2: pinned Ed25519 public key (base64 SPKI DER) for verifying signed
+// self-updates. Installed by the one-liner installer from the dist /pubkey. When
+// set, an update MUST carry a valid signature or it is rejected.
+const PUBLIC_KEY = (process.env.AGENT_PUBLIC_KEY || fileCfg.publicKey || "").trim();
+function verifyUpdateSignature(codeBuf, sigB64) {
+  if (!PUBLIC_KEY) return { ok: true, unsigned: true }; // legacy install, no key pinned
+  if (!sigB64) return { ok: false, reason: "no signature served" };
+  try {
+    const key = createPublicKey({ key: Buffer.from(PUBLIC_KEY, "base64"), format: "der", type: "spki" });
+    const good = cryptoVerify(null, codeBuf, key, Buffer.from(sigB64, "base64"));
+    return good ? { ok: true } : { ok: false, reason: "signature did not verify" };
+  } catch (err) {
+    return { ok: false, reason: "verify error: " + err.message };
+  }
+}
 // Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
 // floor keeps a misconfigured value from hammering the update server.
 const UPDATE_CHECK_RAW = Number(
@@ -147,6 +162,21 @@ async function selfUpdate(reason = "startup") {
       console.warn("Update payload looked invalid; keeping current version.");
       return;
     }
+    // Feature #2: verify the update is signed by SecTool before trusting it.
+    let sigB64 = "";
+    try {
+      const sr = await fetch(`${UPDATE_URL}/agent.sig`, { signal: AbortSignal.timeout(5000) });
+      if (sr.ok) sigB64 = (await sr.text()).trim();
+    } catch { /* no signature available */ }
+    const v = verifyUpdateSignature(Buffer.from(code, "utf8"), sigB64);
+    if (!v.ok) {
+      updateState.lastResult = "error";
+      updateState.lastError = `update signature rejected: ${v.reason}`;
+      console.warn(`REFUSING update v${version}: ${v.reason}. Keeping v${AGENT_VERSION}.`);
+      return;
+    }
+    if (v.unsigned) console.warn(`Applying UNSIGNED update v${version} (no public key pinned — set publicKey in config to require signatures).`);
+    else console.log(`Update signature verified ✓`);
     updateState.lastResult = "updating";
     writeFileSync(SELF, code);
     console.log(`Updated to v${version}; relaunching…`);
@@ -163,9 +193,9 @@ async function selfUpdate(reason = "startup") {
 /** key -> { proto, lport, raddr, rport, state, pid, pname, ppath, firstSeen, lastSeen } */
 const buffer = new Map();
 
-function run(cmd, args) {
+function run(cmd, args, timeout = 12000) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { maxBuffer: 16e6, windowsHide: true, timeout: 12000 }, (err, stdout) =>
+    execFile(cmd, args, { maxBuffer: 32e6, windowsHide: true, timeout }, (err, stdout) =>
       resolve(err ? "" : String(stdout)),
     );
   });
@@ -440,6 +470,61 @@ async function removeAutorun(entry) {
   return { ok: false, error: (out.match(/ERR:(.*)/) || [, "removal failed"])[1].trim() };
 }
 
+// --- Feature #4: DNS attribution (best-effort correlation) ---
+// True per-query→PID attribution needs ETW; we correlate the host DNS cache
+// (what was resolved) with which processes are doing DNS (port-53 sockets).
+async function collectDns() {
+  const dnsProcs = {};
+  for (const r of buffer.values()) {
+    if (r.rport === 53 || r.lport === 53) {
+      const k = r.pname || `pid ${r.procid}`;
+      dnsProcs[k] = (dnsProcs[k] || 0) + 1;
+    }
+  }
+  let cache = [];
+  if (os.platform() === "win32") {
+    const ps = "$ErrorActionPreference='SilentlyContinue'; Get-DnsClientCache | Select-Object -First 300 | ForEach-Object { [pscustomobject]@{name=$_.Entry;data=[string]$_.Data;type=[string]$_.Type} } | ConvertTo-Json -Compress";
+    try { const j = JSON.parse(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps])); cache = Array.isArray(j) ? j : [j]; } catch { /* */ }
+  } else if (os.platform() === "linux") {
+    const out = await run("sh", ["-c", "resolvectl statistics 2>/dev/null; getent hosts 2>/dev/null | head -50"]);
+    if (out) cache = [{ name: "resolver", data: out.slice(0, 4000), type: "raw" }];
+  }
+  return { host: os.hostname(), dnsProcesses: Object.entries(dnsProcs).map(([process, queries]) => ({ process, queries })).sort((a, b) => b.queries - a.queries), cache };
+}
+
+// --- Feature #3: on-demand IR triage bundle ---
+async function collectTriage() {
+  const bundle = { host: os.hostname(), platform: os.platform(), time: Date.now(), agentVersion: AGENT_VERSION };
+  bundle.connections = [...buffer.values()].slice(0, 500).map(shapeRec);
+  bundle.autoruns = await listAutoruns();
+  bundle.dns = await collectDns();
+  try {
+    const hp = os.platform() === "win32" ? "C:/Windows/System32/drivers/etc/hosts" : "/etc/hosts";
+    bundle.hostsFile = readFileSync(hp, "utf8").split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith("#"));
+  } catch { bundle.hostsFile = []; }
+  // Process list w/ Authenticode signature status (feature #1 "unsigned"), limited
+  // to processes we've seen with a live socket so the signature scan stays bounded.
+  const paths = [...new Set([...buffer.values()].map((r) => r.ppath).filter(Boolean))].slice(0, 150);
+  if (os.platform() === "win32" && paths.length) {
+    const list = paths.map((p) => `'${p.replace(/'/g, "''")}'`).join(",");
+    const ps = `$ErrorActionPreference='SilentlyContinue'; @(${list}) | ForEach-Object { $s=(Get-AuthenticodeSignature $_); [pscustomobject]@{path=$_;signed=[string]$s.Status;signer=[string]$s.SignerCertificate.Subject} } | ConvertTo-Json -Compress`;
+    try {
+      const j = JSON.parse(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 45000));
+      const arr = Array.isArray(j) ? j : [j];
+      bundle.binaries = arr.map((b) => ({ path: b.path, signed: b.signed, signer: (b.signer || "").replace(/,.*$/, ""), sha256: hashOf(b.path) }));
+    } catch { bundle.binaries = paths.map((p) => ({ path: p, sha256: hashOf(p) })); }
+  } else {
+    bundle.binaries = paths.map((p) => ({ path: p, sha256: hashOf(p) }));
+  }
+  return bundle;
+}
+
+// Shape a raw buffer record into the API connection object (module-scope so both
+// the request handler and collectTriage can use it).
+function shapeRec(r) {
+  return { proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, sha256: hashOf(r.ppath), cmdline: r.cmdline || "", ppid: r.ppid || 0, parent: r.parent || "", firstSeen: r.firstSeen, lastSeen: r.lastSeen };
+}
+
 function readBody(req, cb) {
   let raw = "";
   req.on("data", (c) => { raw += c; if (raw.length > 20_000) req.destroy(); });
@@ -476,6 +561,8 @@ const server = http.createServer((req, res) => {
       isolated, // is this host currently quarantined?
       push: PUSH_ENABLED && !!UPDATE_URL, // real-time event push active
       hashing: hashCache.size, // # of binaries fingerprinted so far
+      signedUpdates: !!PUBLIC_KEY, // agent pins a key and requires signed updates
+      triage: true, // exposes /triage + /dns
       killPinned: KILL_ENV_PINNED, // set via env → can't be toggled from the dashboard
       update: {
         enabled: updateState.enabled,
@@ -491,7 +578,7 @@ const server = http.createServer((req, res) => {
     });
   }
   if (!ok) return json(401, { error: "unauthorized" });
-  const shape = (r) => ({ proto: r.proto, localAddr: r.laddr, localPort: r.lport, remoteIp: r.raddr, remotePort: r.rport, state: r.state, pid: r.procid, process: r.pname, path: r.ppath, sha256: hashOf(r.ppath), cmdline: r.cmdline || "", ppid: r.ppid || 0, parent: r.parent || "", firstSeen: r.firstSeen, lastSeen: r.lastSeen });
+  const shape = shapeRec;
   if (url.pathname === "/lookup") {
     const q = Object.fromEntries(url.searchParams);
     const found = [...buffer.values()]
@@ -607,6 +694,16 @@ const server = http.createServer((req, res) => {
         return json(500, { ok: false, error: err.message });
       }
     });
+    return;
+  }
+  // --- feature #4: DNS attribution (read-only) ---
+  if (req.method === "GET" && url.pathname === "/dns") {
+    collectDns().then((d) => json(200, d));
+    return;
+  }
+  // --- feature #3: IR triage bundle (read-only) ---
+  if (req.method === "GET" && url.pathname === "/triage") {
+    collectTriage().then((b) => json(200, b)).catch((e) => json(500, { error: e.message }));
     return;
   }
   // --- feature #5: persistence / autoruns enumeration (read-only) ---
