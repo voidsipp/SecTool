@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.4.1";
+const AGENT_VERSION = "1.4.2";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -765,9 +765,19 @@ const server = http.createServer((req, res) => {
 await selfUpdate("startup"); // check for a newer agent on every startup
 // Recurring update-check heartbeat: keep long-lived agents current without a
 // restart. selfUpdate() relaunches + exits the process if it pulls a new build.
-if (UPDATE_CHECK_MS > 0 && updateState.enabled) {
-  setInterval(() => selfUpdate("heartbeat"), UPDATE_CHECK_MS).unref();
+// Self-scheduling so a FAILED check (e.g. the agent started before SecTool was
+// reachable) retries in minutes instead of waiting the full interval — otherwise
+// one transient startup failure leaves the agent stale for up to 6h.
+const UPDATE_RETRY_MS = Math.min(UPDATE_CHECK_MS || 300000, 300000); // ≤5 min on failure
+function scheduleNextCheck() {
+  if (!(UPDATE_CHECK_MS > 0 && updateState.enabled)) return;
+  const delay = updateState.lastResult === "error" ? UPDATE_RETRY_MS : UPDATE_CHECK_MS;
+  setTimeout(async () => {
+    await selfUpdate("heartbeat");
+    scheduleNextCheck();
+  }, delay).unref();
 }
+scheduleNextCheck();
 await poll();
 setInterval(poll, POLL_MS);
 server.on("error", (e) => {
