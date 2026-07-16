@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.4.0";
+const AGENT_VERSION = "1.4.1";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -353,7 +353,9 @@ function emitEvent(r) {
   if (!PUSH_ENABLED || !UPDATE_URL) return;
   let type = null;
   if (r.proto === "TCP" && r.state !== "Listen" && isPublic(r.raddr)) type = "new-external-connection";
-  else if (r.state === "Listen" && (r.laddr === "0.0.0.0" || r.laddr === "::" || r.laddr === "*")) type = "new-listener";
+  // Only TCP listeners are meaningful services. Every UDP socket reports as
+  // "Listen", so counting those flooded the feed — exclude UDP.
+  else if (r.proto === "TCP" && r.state === "Listen" && (r.laddr === "0.0.0.0" || r.laddr === "::" || r.laddr === "*")) type = "new-listener";
   if (!type) return;
   const dedupe = `${type}|${r.procid}|${r.raddr}|${r.rport}|${r.lport}`;
   const now = Date.now();

@@ -61,7 +61,10 @@ async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promis
   const remoteIp = e["remoteIp"] ? String(e["remoteIp"]) : "";
   const feeds = remoteIp ? feedMatch(remoteIp) : [];
   const isNewListener = e["type"] === "new-listener";
-  if (cfg.agent.eventNotify === "notable" && feeds.length === 0 && !isNewListener) return;
+  // "notable" = threat-feed-listed remote IPs ONLY. New listeners are far too
+  // frequent (every service/UDP socket) to Discord — they stay in the dashboard
+  // feed. Use "all" if you really want the firehose.
+  if (cfg.agent.eventNotify === "notable" && feeds.length === 0) return;
 
   const now = Date.now();
   const key = agentEventDedupeKey(e);
