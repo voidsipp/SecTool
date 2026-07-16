@@ -171,6 +171,12 @@ Set-Content -Path $vbsPath -Value $vbs -Encoding ASCII
 $action   = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbsPath + '"')
 $trigger  = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+# Run the agent elevated (RunLevel Highest) so it can kill service/protected
+# processes, delete binaries under Program Files, and remove HKLM autoruns. Only
+# takes effect if this installer is run from an elevated shell; otherwise it falls
+# back to a normal-privilege task and the agent reports elevated:false.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$principal = if ($isAdmin) { New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest } else { $null }
 # Stop any prior agent first so the fresh build can bind the port. Without this a
 # stale process holding $port makes the new agent exit (EADDRINUSE) and the old
 # version keeps running — reinstalling would appear to do nothing.
@@ -178,10 +184,11 @@ Get-ScheduledTask -TaskName 'SecToolAgent' -ErrorAction SilentlyContinue | Stop-
 Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*sectool-agent.mjs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 700
-Register-ScheduledTask -TaskName 'SecToolAgent' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+if ($principal) { Register-ScheduledTask -TaskName 'SecToolAgent' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null }
+else { Register-ScheduledTask -TaskName 'SecToolAgent' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null }
 Start-ScheduledTask -TaskName 'SecToolAgent'
 Start-Sleep -Seconds 3
-try { $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5; Write-Host ('SecTool agent v' + $h.version + ' installed and running on ' + $h.host + '.') -ForegroundColor Green }
+try { $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5; $lvl = if ($h.elevated) { 'elevated' } else { 'NOT elevated (re-run this installer from an Administrator PowerShell to enable deleting system-path binaries + HKLM autoruns)' }; Write-Host ('SecTool agent v' + $h.version + ' installed and running on ' + $h.host + ' — ' + $lvl + '.') -ForegroundColor $(if ($h.elevated) { 'Green' } else { 'Yellow' }) }
 catch { Write-Host 'SecTool agent installed (Scheduled Task: SecToolAgent). It will start on next logon.' -ForegroundColor Yellow }
 `;
 }

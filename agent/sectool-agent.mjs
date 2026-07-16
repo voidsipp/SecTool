@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.5.0";
+const AGENT_VERSION = "1.6.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -381,6 +381,56 @@ function isProtectedPath(p) {
   return guarded.some((g) => lp.startsWith(g));
 }
 
+// Whether the agent process holds admin/root — deletes in Program Files, HKLM
+// autorun removal, and killing service/protected processes require it.
+let ELEVATED = false;
+async function checkElevated() {
+  try {
+    if (os.platform() === "win32") {
+      const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"], 8000);
+      ELEVATED = /true/i.test(out);
+    } else {
+      ELEVATED = typeof process.getuid === "function" && process.getuid() === 0;
+    }
+  } catch { ELEVATED = false; }
+}
+
+// Delete a file, escalating past permission/lock errors: take ownership + grant
+// rights and retry, then a hard cmd delete, then schedule removal on next reboot
+// for a still-locked file. The escalation steps only succeed when elevated.
+async function forceDelete(path) {
+  try { unlinkSync(path); return { deleted: true }; }
+  catch (e1) {
+    const code = e1.code || "";
+    if (os.platform() !== "win32") {
+      try { execFileSync("chmod", ["u+w", path]); unlinkSync(path); return { deleted: true, forced: true }; }
+      catch { return { deleteError: (ELEVATED ? "" : "agent not elevated — ") + e1.message }; }
+    }
+    // Windows escalation. Tier 1 — user-level (no elevation needed for files the
+    // current user owns): clear read-only/deny ACEs, take ownership to self, grant self.
+    const me = process.env.USERNAME || "";
+    await run("cmd.exe", ["/c", `attrib -r -s -h "${path}" >nul 2>&1`], 10000);
+    if (me) await run("cmd.exe", ["/c", `icacls "${path}" /remove:d "${me}" >nul 2>&1`], 10000);
+    await run("cmd.exe", ["/c", `takeown /F "${path}" >nul 2>&1`], 15000);
+    if (me) await run("cmd.exe", ["/c", `icacls "${path}" /grant "${me}:F" /C >nul 2>&1`], 10000);
+    try { unlinkSync(path); return { deleted: true, forced: true }; } catch { /* still blocked */ }
+    // Tier 2 — admin-level (needs elevation): ownership to Administrators + grant, then hard delete.
+    await run("cmd.exe", ["/c", `takeown /F "${path}" /A >nul 2>&1`], 15000);
+    await run("cmd.exe", ["/c", `icacls "${path}" /grant *S-1-5-32-544:F /C >nul 2>&1`], 15000);
+    try { unlinkSync(path); return { deleted: true, forced: true }; } catch { /* still blocked */ }
+    await run("cmd.exe", ["/c", `del /f /q "${path}" >nul 2>&1`], 15000);
+    if (!existsPath(path)) return { deleted: true, forced: true };
+    // Last resort: schedule deletion on reboot via PendingFileRenameOperations (needs HKLM).
+    if (code === "EBUSY" || code === "EPERM") {
+      const ps = `$k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager'; $v=(Get-ItemProperty -Path $k -Name PendingFileRenameOperations -EA SilentlyContinue).PendingFileRenameOperations; $n=@('\\??\\${path.replace(/\\/g, "\\\\")}',''); if($v){$n=$v+$n}; Set-ItemProperty -Path $k -Name PendingFileRenameOperations -Value $n -Type MultiString -EA Stop; 'SCHEDULED'`;
+      const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 10000);
+      if (/SCHEDULED/.test(out)) return { deleteError: "locked — scheduled for deletion on next reboot" };
+    }
+    return { deleteError: (ELEVATED ? "" : "agent not elevated — reinstall elevated; ") + e1.message };
+  }
+}
+function existsPath(p) { try { statSync(p); return true; } catch { return false; } }
+
 // --- Feature #4: network isolation / quarantine ---
 // Block all traffic except loopback, the agent's own port, and the SecTool
 // management host, so a compromised device is cut off but still controllable.
@@ -469,7 +519,11 @@ async function removeAutorun(entry) {
   }
   const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; try { ${ps} } catch { "ERR:$($_.Exception.Message)" }`]);
   if (out.includes("OK")) return { ok: true };
-  return { ok: false, error: (out.match(/ERR:(.*)/) || [, "removal failed"])[1].trim() };
+  let msg = (out.match(/ERR:(.*)/) || [, "removal failed"])[1].trim();
+  if (/registry access is not allowed|access is denied|requires elevation|unauthorizedaccess/i.test(msg) && !ELEVATED) {
+    msg += " — the agent is not running elevated (this entry needs admin; reinstall the agent elevated).";
+  }
+  return { ok: false, error: msg };
 }
 
 // --- Feature #4: DNS attribution (best-effort correlation) ---
@@ -611,6 +665,7 @@ const server = http.createServer((req, res) => {
       hashing: hashCache.size, // # of binaries fingerprinted so far
       signedUpdates: !!PUBLIC_KEY, // agent pins a key and requires signed updates
       triage: true, // exposes /triage + /dns
+      elevated: ELEVATED, // admin/root — needed to delete system-path binaries + HKLM autoruns
       killPinned: KILL_ENV_PINNED, // set via env → can't be toggled from the dashboard
       update: {
         enabled: updateState.enabled,
@@ -697,28 +752,28 @@ const server = http.createServer((req, res) => {
           t._killErr = err.message;
         }
       }
-      const finish = () => {
+      const finish = async () => {
         const seenPaths = new Set();
-        const results = targets.map((t) => {
+        const results = [];
+        for (const t of targets) {
           const r = { pid: t.procid, process: t.pname, killed: !!t._killed };
-          if (t._killErr) r.error = t._killErr;
+          // ESRCH means the process was already gone — not a real failure.
+          if (t._killErr && t._killErr.includes("ESRCH")) { r.killed = true; r.alreadyGone = true; }
+          else if (t._killErr) r.error = t._killErr;
           if (deleteFile && t.ppath && !seenPaths.has(t.ppath)) {
             seenPaths.add(t.ppath);
             r.path = t.ppath;
             if (isProtectedPath(t.ppath)) r.deleteError = "refused: protected/system path";
             else {
-              try {
-                unlinkSync(t.ppath);
-                r.deleted = true;
-              } catch (err) {
-                r.deleteError = err.message;
-              }
+              const dr = await forceDelete(t.ppath);
+              if (dr.deleted) { r.deleted = true; if (dr.forced) r.forced = true; }
+              else r.deleteError = dr.deleteError;
             }
           }
-          console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.deleteError ? " delErr=" + r.deleteError : ""} from=${req.socket.remoteAddress}`);
-          return r;
-        });
-        json(200, { ok: true, host: os.hostname(), signal, deleteFile, results });
+          console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.forced ? "(forced)" : ""}${r.deleteError ? " delErr=" + r.deleteError : ""} elevated=${ELEVATED} from=${req.socket.remoteAddress}`);
+          results.push(r);
+        }
+        json(200, { ok: true, host: os.hostname(), signal, deleteFile, elevated: ELEVATED, results });
       };
       if (deleteFile) setTimeout(finish, 600);
       else finish();
@@ -815,6 +870,7 @@ const server = http.createServer((req, res) => {
   json(404, { error: "not found" });
 });
 
+await checkElevated(); // record whether we can delete system-path binaries / HKLM autoruns
 await selfUpdate("startup"); // check for a newer agent on every startup
 // Recurring update-check heartbeat: keep long-lived agents current without a
 // restart. selfUpdate() relaunches + exits the process if it pulls a new build.

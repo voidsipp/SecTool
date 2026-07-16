@@ -166,6 +166,14 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+), and (v1.3.0+) `sha256` of the binary (background-hashed,
   for reputation lookups), `cmdline`, `ppid`, and `parent` process name.
+- **Elevation (v1.6.0+):** deleting binaries under `C:\Program Files`, removing
+  **HKLM** autoruns, and killing service/protected processes require the agent to
+  run as **Administrator/SYSTEM**. The installer registers the Scheduled Task with
+  **RunLevel Highest** — run the one-liner from an **elevated** PowerShell to enable
+  it. `GET /health` reports `elevated`, and the Devices page shows **⬆ elevated** or
+  **⚠ not elevated** per host. When elevated, `deleteFile` escalates past permission
+  errors (take ownership + grant + hard delete, then schedule-on-reboot for locked
+  files); when not, it returns a clear "agent not elevated" message.
 - `GET /process?pid=N` (v1.5.0+) — full detail for one process: command line, parent
   chain, executable path, Authenticode signature + signer, SHA-256, owning user, and
   every socket it holds. Powers the Devices page's clickable process inspector

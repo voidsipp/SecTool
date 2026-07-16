@@ -680,7 +680,7 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
             if (!r.ok || !r.data) return null;
             const d = r.data as Record<string, unknown>;
             recordSeen(ip, d); // feature #5: remember this agent for fleet monitoring
-            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, isolate: d["isolate"] === true, isolated: d["isolated"] === true, push: d["push"] === true, signedUpdates: d["signedUpdates"] === true, triage: d["triage"] === true, retentionMin: d["retentionMin"] };
+            return { ip, online: true, version: d["version"], hostname: d["host"], platform: d["platform"], tracked: d["tracked"], auth: d["auth"], kill: d["kill"] === true, killPinned: d["killPinned"] === true, isolate: d["isolate"] === true, isolated: d["isolated"] === true, push: d["push"] === true, signedUpdates: d["signedUpdates"] === true, triage: d["triage"] === true, elevated: d["elevated"] === true, retentionMin: d["retentionMin"] };
           }),
         );
         const agents = probed.filter((a): a is NonNullable<typeof a> => a !== null);

@@ -1185,6 +1185,7 @@ function renderDetail(d){
     badges.push(`<span class="dv-chip">v${esc(d.version||'?')}</span>`);
     badges.push(d.auth?'<span class="dv-chip" style="color:var(--good,#3ad29f)">auth ✓</span>':'<span class="dv-chip" style="color:var(--high,#ff9e3d)">auth ✗</span>');
     badges.push(d.signedUpdates?'<span class="dv-chip" style="color:var(--good,#3ad29f)">🔏 signed</span>':'<span class="dv-chip">🔓 unsigned</span>');
+    badges.push(d.elevated?'<span class="dv-chip" style="color:var(--good,#3ad29f)" title="admin/SYSTEM — can delete system-path binaries & HKLM autoruns">⬆ elevated</span>':'<span class="dv-chip" style="color:var(--high,#ff9e3d)" title="agent is not admin — deleting Program Files binaries and removing HKLM autoruns will fail. Re-run the installer from an elevated PowerShell.">⚠ not elevated</span>');
     if(d.isolated) badges.push('<span class="badge" style="background:var(--critical,#ff5c7a)">🔒 ISOLATED</span>');
   } else if(d.kind==='offline'){ badges.push('<span class="badge" style="background:var(--critical,#ff5c7a)">● OFFLINE</span>'); if(d.version) badges.push(`<span class="dv-chip">was v${esc(d.version)}</span>`); }
   else { badges.push('<span class="badge" style="background:var(--muted)">AGENTLESS</span>'); if(d.vendor) badges.push(`<span class="dv-chip">${esc(d.vendor)}</span>`); }
