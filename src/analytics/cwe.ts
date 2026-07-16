@@ -7,9 +7,10 @@
  * This is the third leg of SecTool's standards-mapping trio, and it is
  * deliberately orthogonal to the other two — confusing them defeats the point:
  *
- *   - **cve.ts** maps signatures to **specific CVE identifiers** — individual,
- *     already-patched vulnerabilities. Its payload is a *patch worklist*: "this
- *     exact bug, in this exact product, has a fix — apply it."
+ *   - **cve.ts** maps signatures to **specific CVE identifiers** — named,
+ *     individually-catalogued vulnerabilities, each with a publicly-known fix.
+ *     Its payload is a *patch worklist*: "this exact bug, in this exact
+ *     product, has a vendor patch — verify it is applied."
  *   - **mitre.ts** maps alerts to **ATT&CK techniques** — adversary *behaviour*
  *     (how the attacker operates: scan, brute-force, exfiltrate). Its payload is
  *     a *detection-coverage matrix*.
