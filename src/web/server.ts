@@ -247,6 +247,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import type { Config } from "../config.ts";
 import type { SecurityAlert } from "../types.ts";
 import { log } from "../logger.ts";
@@ -500,6 +501,43 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
     const method = req.method ?? "GET";
 
     try {
+      // --- bearer-token authentication (CWE-287 guard) ---
+      // When WEB_TOKEN is set every request must present a matching token via:
+      //   Authorization: Bearer <token>  (preferred; works for API clients)
+      //   ?token=<token>                 (convenience; lets browser download links work)
+      // Comparison is constant-time to prevent timing side-channels.
+      if (cfg.web.token) {
+        const authHeader = req.headers["authorization"] ?? "";
+        const headerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+        const queryToken = url.searchParams.get("token") ?? "";
+        const candidate = headerToken || queryToken;
+        let authed = false;
+        if (candidate.length > 0) {
+          try {
+            const expected = Buffer.from(cfg.web.token, "utf8");
+            const provided = Buffer.from(candidate, "utf8");
+            // timingSafeEqual requires identical lengths; pad to the longer.
+            const maxLen = Math.max(expected.length, provided.length);
+            const a = Buffer.alloc(maxLen);
+            const b = Buffer.alloc(maxLen);
+            expected.copy(a);
+            provided.copy(b);
+            authed = timingSafeEqual(a, b) && provided.length === expected.length;
+          } catch {
+            authed = false;
+          }
+        }
+        if (!authed) {
+          res.writeHead(401, {
+            "content-type": "application/json",
+            "www-authenticate": 'Bearer realm="SecTool"',
+            "cache-control": "no-store",
+          });
+          res.end(JSON.stringify({ error: "Unauthorized — provide a valid WEB_TOKEN." }));
+          return;
+        }
+      }
+
       // --- static ---
       if (method === "GET" && (path === "/" || path === "/index.html")) {
         if (existsSync(INDEX_HTML)) return send(res, 200, readFileSync(INDEX_HTML, "utf8"), "text/html; charset=utf-8");
@@ -3791,7 +3829,14 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
     server.once("error", reject);
     server.listen(cfg.web.port, cfg.web.host, () => {
       server.removeListener("error", reject);
-      log.info(`Web dashboard: http://${cfg.web.host}:${cfg.web.port}`);
+      const isLoopback = cfg.web.host === "127.0.0.1" || cfg.web.host === "::1" || cfg.web.host.toLowerCase() === "localhost";
+      if (!isLoopback && !cfg.web.token) {
+        log.warn(
+          `[web] SECURITY WARNING: dashboard is bound to ${cfg.web.host} (not loopback) without ` +
+          `authentication. Set WEB_TOKEN to enable bearer-token auth, or restrict WEB_HOST to 127.0.0.1.`,
+        );
+      }
+      log.info(`Web dashboard: http://${cfg.web.host}:${cfg.web.port}${cfg.web.token ? " (token auth enabled)" : ""}`);
       resolve();
     });
   });
