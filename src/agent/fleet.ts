@@ -24,6 +24,7 @@ export interface FleetAgent {
   kill?: boolean;
   isolated?: boolean;
   missed: number; // consecutive failed probes
+  driftAlertedFor?: string; // version we've already sent a drift alert about (dedupe)
 }
 
 const fleet = new Map<string, FleetAgent>();
@@ -105,8 +106,14 @@ export function startFleetMonitor(cfg: Config, intervalSec = 180): void {
         a.version = (d["version"] as string) ?? a.version;
         a.isolated = d["isolated"] === true;
         if (wasOffline) await discordLite(cfg, "✅ Agent back online", `**${a.host ?? a.ip}** (${a.ip}) is reporting again.`, 0x3ad29f);
+        // Version drift: alert once per agent per version, not every tick.
         if (latestVersion && a.version && a.version !== latestVersion) {
-          await discordLite(cfg, "⚠️ Agent version drift", `**${a.host ?? a.ip}** is on v${a.version}; latest is v${latestVersion}.`, 0xff9e3d);
+          if (a.driftAlertedFor !== a.version) {
+            await discordLite(cfg, "⚠️ Agent version drift", `**${a.host ?? a.ip}** is on v${a.version}; latest is v${latestVersion}.`, 0xff9e3d);
+            a.driftAlertedFor = a.version;
+          }
+        } else if (a.version === latestVersion) {
+          a.driftAlertedFor = undefined; // caught up — re-arm for any future drift
         }
       } else {
         a.missed++;
