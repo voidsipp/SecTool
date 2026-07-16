@@ -29,9 +29,10 @@ On **every start**, the agent asks `http://<sectool-host>:7878/version`; if SecT
 has a newer agent, it downloads it, replaces itself, and relaunches. So updating
 all your devices is just updating `agent/sectool-agent.mjs` on the SecTool host.
 
-It also runs a recurring **update-check heartbeat** (every 6h by default, see
+It also runs a recurring **update-check heartbeat** (every 1h by default, see
 `AGENT_UPDATE_CHECK_MIN`) so long-lived agents pick up new builds without waiting
-for a restart. The last heartbeat's outcome is reported under `update` in
+for a restart. A *failed* check retries within ~5 minutes rather than waiting the
+full interval. The last heartbeat's outcome is reported under `update` in
 `GET /health` — `result` (`current`/`available`/`error`/…), `latestSeen`,
 `upToDate`, `ageMs` since the last check, and `checks` performed — so the SecTool
 dashboard can flag agents that are stale or failing their checks.
@@ -88,7 +89,7 @@ at `http://<device-LAN-IP>:7879`.
 | `AGENT_HOST` | `0.0.0.0` | Bind address. |
 | `AGENT_POLL_MS` | `4000` | How often to snapshot connections. |
 | `AGENT_RETENTION_MIN` | `30` | How long to keep connection→process history. |
-| `AGENT_UPDATE_CHECK_MIN` | `360` | Recurring update-check heartbeat interval (minutes). `0` disables it; values below `5` are clamped to 5. |
+| `AGENT_UPDATE_CHECK_MIN` | `60` | Recurring update-check heartbeat interval (minutes). `0` disables it; values below `5` are clamped to 5. Failed checks retry within ~5 min. |
 | `AGENT_UPDATE_URL` | *(from config)* | Update server base URL. Heartbeat is off unless this (or `updateUrl` in `agent.config.json`) is set. |
 | `AGENT_NO_UPDATE` | *(unset)* | Set to any value to disable self-update + the heartbeat entirely. |
 | `AGENT_ALLOW_KILL` | `false` | **Destructive.** Enables `POST /kill` (terminate/delete) and `POST /autoruns/remove`. Refused unless a token is set. |

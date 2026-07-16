@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.4.2";
+const AGENT_VERSION = "1.4.3";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -98,10 +98,10 @@ function verifyUpdateSignature(codeBuf, sigB64) {
     return { ok: false, reason: "verify error: " + err.message };
   }
 }
-// Recurring update-check heartbeat. Default every 6h; 0 disables it. A 5-minute
+// Recurring update-check heartbeat. Default every 1h; 0 disables it. A 5-minute
 // floor keeps a misconfigured value from hammering the update server.
 const UPDATE_CHECK_RAW = Number(
-  process.env.AGENT_UPDATE_CHECK_MIN ?? fileCfg.updateCheckMin ?? 360,
+  process.env.AGENT_UPDATE_CHECK_MIN ?? fileCfg.updateCheckMin ?? 60,
 );
 const UPDATE_CHECK_MS = UPDATE_CHECK_RAW > 0 ? Math.max(UPDATE_CHECK_RAW, 5) * 60000 : 0;
 
