@@ -20,10 +20,47 @@ import { log } from "../logger.ts";
 import { recordAgentEvent } from "./events.ts";
 import { signAgent, agentPublicKeyB64 } from "./signing.ts";
 
+// Deduplicate agent-event Discord notifications: same type+host+process+endpoint
+// within this window produces only one notification.
+const AGENT_EVENT_DEDUPE_MS = 10 * 60 * 1000; // 10 minutes
+const agentEventLastSeen = new Map<string, number>();
+
+function agentEventDedupeKey(e: Record<string, unknown>): string {
+  // For external connections: type + host + process + remote ip:port
+  // For listeners: type + host + process + local port
+  // Intentionally excludes pid — the same binary reconnecting gets a new pid but
+  // is still the same logical event (same process name + same remote endpoint).
+  return [
+    e["type"] ?? "",
+    e["host"] ?? "",
+    e["process"] ?? "",
+    e["remoteIp"] ?? "",
+    e["remotePort"] ?? "",
+    e["localPort"] ?? "",
+  ].join("|");
+}
+
+function pruneAgentEventDedupe(now: number): void {
+  for (const [key, ts] of agentEventLastSeen) {
+    if (now - ts >= AGENT_EVENT_DEDUPE_MS) agentEventLastSeen.delete(key);
+  }
+}
+
 // Lightweight Discord webhook for a pushed agent event (feature #3). Kept minimal
 // (not the full alert embed) — this is a heads-up, not a correlated alert.
 async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promise<void> {
   if (!cfg.discord.webhookUrl) return;
+
+  const now = Date.now();
+  const key = agentEventDedupeKey(e);
+  const last = agentEventLastSeen.get(key);
+  if (last !== undefined && now - last < AGENT_EVENT_DEDUPE_MS) {
+    log.debug(`agent-event dedupe suppressed: ${String(e["type"])} ${String(e["host"])} ${String(e["process"] ?? "")}`);
+    return;
+  }
+  agentEventLastSeen.set(key, now);
+  pruneAgentEventDedupe(now);
+
   const title = e["type"] === "new-listener" ? "🛰️ New listener on a host" : "📡 New external connection";
   const desc =
     `**Host:** ${e["host"]}\n` +
