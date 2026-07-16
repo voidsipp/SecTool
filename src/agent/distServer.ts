@@ -19,6 +19,7 @@ import type { Config } from "../config.ts";
 import { log } from "../logger.ts";
 import { recordAgentEvent } from "./events.ts";
 import { signAgent, agentPublicKeyB64 } from "./signing.ts";
+import { feedMatch } from "../intel/feedAccess.ts";
 
 // Deduplicate agent-event Discord notifications: same type+host+process+endpoint
 // within this window produces only one notification.
@@ -50,6 +51,17 @@ function pruneAgentEventDedupe(now: number): void {
 // (not the full alert embed) — this is a heads-up, not a correlated alert.
 async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promise<void> {
   if (!cfg.discord.webhookUrl) return;
+  if (cfg.agent.eventNotify === "off") return;
+
+  // A normal host makes hundreds of connections a minute, so routine
+  // new-connection events must NOT hit Discord (they're still in the dashboard
+  // feed). In "notable" mode we only ping for genuinely interesting events:
+  //  - a connection to a threat-intel-listed remote IP, or
+  //  - a new listening service (rare, and worth knowing about).
+  const remoteIp = e["remoteIp"] ? String(e["remoteIp"]) : "";
+  const feeds = remoteIp ? feedMatch(remoteIp) : [];
+  const isNewListener = e["type"] === "new-listener";
+  if (cfg.agent.eventNotify === "notable" && feeds.length === 0 && !isNewListener) return;
 
   const now = Date.now();
   const key = agentEventDedupeKey(e);
@@ -61,11 +73,16 @@ async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promis
   agentEventLastSeen.set(key, now);
   pruneAgentEventDedupe(now);
 
-  const title = e["type"] === "new-listener" ? "🛰️ New listener on a host" : "📡 New external connection";
+  const title = feeds.length
+    ? "🚨 Host connected to a known-bad IP"
+    : isNewListener
+      ? "🛰️ New listener on a host"
+      : "📡 New external connection";
   const desc =
     `**Host:** ${e["host"]}\n` +
     `**Process:** ${e["process"] ?? "?"}${e["pid"] ? ` (pid ${e["pid"]})` : ""}${e["parent"] ? ` — parent ${e["parent"]}` : ""}\n` +
     (e["remoteIp"] ? `**Remote:** ${e["remoteIp"]}:${e["remotePort"] ?? ""}\n` : "") +
+    (feeds.length ? `**Threat feeds:** ${feeds.join(", ")}\n` : "") +
     (e["localPort"] ? `**Local port:** ${e["localPort"]}\n` : "") +
     (e["path"] ? `**Path:** \`${String(e["path"]).slice(0, 200)}\`\n` : "") +
     (e["sha256"] ? `**SHA-256:** \`${e["sha256"]}\`` : "");
@@ -76,7 +93,7 @@ async function notifyAgentEvent(cfg: Config, e: Record<string, unknown>): Promis
   await fetch(cfg.discord.webhookUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: cfg.discord.username, embeds: [{ title, description: desc, color: 0x9d6bff, timestamp: new Date().toISOString() }] }),
+    body: JSON.stringify({ username: cfg.discord.username, embeds: [{ title, description: desc, color: feeds.length ? 0xff5c7a : 0x9d6bff, timestamp: new Date().toISOString() }] }),
     signal: AbortSignal.timeout(8000),
   }).catch((err: Error) => log.warn(`agent-event Discord post failed: ${err.message}`));
 }

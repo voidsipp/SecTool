@@ -147,6 +147,10 @@ export interface Config {
     distPort: number;
     allowKill: boolean;
     allowIsolate: boolean;
+    /** Which pushed agent events reach Discord: "off" | "notable" | "all".
+     *  "notable" (default) = connections to threat-feed IPs + new listeners only;
+     *  routine connections still show in the dashboard feed but never Discord. */
+    eventNotify: "off" | "notable" | "all";
   };
   /**
    * Conversational memory for the "Ask" analyst and the action agent. When
@@ -376,6 +380,9 @@ export function loadConfig(): Config {
       distPort: int("AGENT_DIST_PORT", 7878),
       allowKill: bool("AGENT_ALLOW_KILL", false),
       allowIsolate: bool("AGENT_ALLOW_ISOLATE", false),
+      eventNotify: (["off", "notable", "all"].includes(str("AGENT_EVENT_NOTIFY", "notable"))
+        ? str("AGENT_EVENT_NOTIFY", "notable")
+        : "notable") as "off" | "notable" | "all",
     },
     conversation: {
       memoryEnabled: bool("CONVO_MEMORY_ENABLED", true),
