@@ -272,7 +272,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns, agentProcess } from "../agent/agentClient.ts";
 import { recentAgentEvents } from "../agent/events.ts";
 import { recordSeen, knownAgents } from "../agent/fleet.ts";
 import { lookupHash } from "../investigate/hashrep.ts";
@@ -786,6 +786,11 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       // --- feature #4: DNS attribution ---
       if (method === "GET" && path === "/api/agents/dns") {
         const r = await agentDns(cfg, url.searchParams.get("host") ?? "");
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- process inspector: full detail for one PID on a host ---
+      if (method === "GET" && path === "/api/agents/process") {
+        const r = await agentProcess(cfg, url.searchParams.get("host") ?? "", Number(url.searchParams.get("pid")) || 0);
         return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
       }
 

@@ -638,6 +638,9 @@
   </div>
 </div>
 <div id="maptip"></div>
+<div id="procModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(3,2,15,.72);align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto">
+  <div id="procModalBox" style="width:min(840px,100%);background:var(--panel,#140f30);border:1px solid var(--accent);border-radius:12px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.55)"></div>
+</div>
 
 <script>
 const $ = (s, el=document) => el.querySelector(s);
@@ -1226,8 +1229,59 @@ function wireTabBody(body,d){
   wireProcBtns(body);
   body.querySelectorAll('.hashchk').forEach(s=>s.onclick=()=>checkHash(s.dataset.h,s));
   body.querySelectorAll('.autorm').forEach(b=>b.onclick=()=>removeAutorun(b.dataset.ip,JSON.parse(b.dataset.a),b));
+  body.querySelectorAll('.procdetail').forEach(s=>s.onclick=()=>{ if(s.dataset.pid) openProcess(s.dataset.ip, Number(s.dataset.pid), s.dataset.name); });
   const flt=body.querySelector('.devfilter');
   if(flt) flt.oninput=()=>{ const q=flt.value.toLowerCase(); body.querySelectorAll('tbody tr').forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none'; }); };
+}
+// A clickable process reference that opens the inspector modal.
+function procLink(ip, pid, name){
+  if(!pid) return esc(name||'?');
+  return `<span class="procdetail" data-ip="${esc(ip)}" data-pid="${pid}" data-name="${esc(name||'')}" style="cursor:pointer;text-decoration:underline dotted" title="inspect this process">${esc(name||'?')}</span>`;
+}
+function pdRow(k,v){ return `<div style="display:flex;gap:12px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)"><span class="muted" style="min-width:92px">${k}</span><span style="text-align:right;flex:1;min-width:0">${v}</span></div>`; }
+function closeProcess(){ $("#procModal").style.display="none"; }
+async function openProcess(ip, pid, name){
+  const m=$("#procModal"); m.style.display="flex";
+  const box=$("#procModalBox");
+  box.innerHTML='<div class="empty" style="padding:30px"><span class="spin"></span> Inspecting '+esc(name||('pid '+pid))+' on '+esc(ip)+'…</div>';
+  try{
+    const d=await api("/api/agents/process?host="+encodeURIComponent(ip)+"&pid="+pid);
+    if(d.ok===false||d.error){ box.innerHTML=`<div style="display:flex;gap:10px;align-items:center"><h2 style="margin:0;font-size:16px">Process ${pid}</h2><span style="flex:1"></span><button id="procClose" class="dv-act">✕</button></div><div style="padding:16px 0;color:var(--critical)">${esc(d.error||'not found — it may have exited')}</div>`; $("#procClose").onclick=closeProcess; return; }
+    const canKill=!!AGENT_KILL[ip];
+    const chain=(d.parents||[]).slice().reverse(); // root → … → parent
+    const bread=[...chain,{pid:d.pid,name:d.name||name,self:1}].map(p=>`<span class="mono"${p.self?' style="color:var(--cyan,#46d6ff);font-weight:600"':''}>${esc(p.name||'?')}<span class="muted" style="font-size:10px"> #${p.pid}</span></span>`).join(' <span class="muted">◂</span> ');
+    const sockets=d.sockets||[];
+    const sig = d.signed ? (d.signed==='Valid'?`<span style="color:var(--good,#3ad29f)">✓ ${esc((d.signer||'signed').replace(/^CN=/,'').replace(/,.*$/,''))}</span>`:`<span style="color:var(--high,#ff9e3d)">${esc(d.signed)}</span>`) : '<span class="muted">unknown</span>';
+    box.innerHTML=`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <h2 class="mono" style="margin:0;font-size:18px;color:var(--cyan,#46d6ff)">${esc(d.name||name||'?')}</h2>
+        <span class="muted" style="font-size:12px">pid ${d.pid} · ${esc(ip)}</span>
+        <span style="flex:1"></span>
+        <button id="procClose" class="dv-act">✕ Close</button>
+      </div>
+      <div class="section" style="margin:0 0 12px">
+        <div class="dv-grp">Command line</div>
+        <div class="mono" style="font-size:12px;word-break:break-all;background:var(--panel,#0e0b24);padding:9px 10px;border-radius:6px">${esc(d.cmdline||'(unavailable)')}</div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div class="section" style="flex:1;min-width:290px;margin:0">
+          ${pdRow('Path', d.path?`<span class="mono" style="word-break:break-all;font-size:11px">${esc(d.path)}</span>`:'—')}
+          ${pdRow('Parent chain', bread||'—')}
+          ${pdRow('User', esc(d.user||'—'))}
+          ${pdRow('Started', d.created?`<span class="mono" style="font-size:11px">${esc(String(d.created).slice(0,19))}</span>`:'—')}
+          ${pdRow('Signature', sig)}
+          ${pdRow('SHA-256', d.sha256?`<span class="hashchk mono" data-h="${esc(d.sha256)}" style="cursor:pointer;font-size:11px">${esc(d.sha256.slice(0,18))}…</span>`:'—')}
+        </div>
+        <div class="section" style="flex:1.25;min-width:300px;margin:0">
+          <div class="dv-grp">Sockets held (${sockets.length})</div>
+          ${sockets.length?`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="text-align:left;color:var(--muted)"><th>Proto</th><th>Local</th><th>Remote</th><th>State</th></tr></thead><tbody>${sockets.map(s=>`<tr><td class="mono">${esc(s.proto||'')}</td><td class="mono">${s.localPort||''}</td><td class="mono">${esc(s.remoteIp||'')}${s.remotePort?':'+s.remotePort:''}</td><td class="muted">${esc(s.state||'')}</td></tr>`).join('')}</tbody></table>`:'<div class="muted" style="font-size:12px">No active sockets tracked for this pid.</div>'}
+        </div>
+      </div>
+      ${canKill?`<div style="display:flex;gap:8px;margin-top:14px;align-items:center"><span class="muted" style="font-size:12px">Actions:</span>${procBtns(ip, d.pid, d.name||name, true)}</div>`:''}`;
+    $("#procClose").onclick=closeProcess;
+    wireProcBtns(box);
+    const hc=box.querySelector('.hashchk'); if(hc){ hc.onclick=()=>checkHash(hc.dataset.h,hc); checkHash(hc.dataset.h,hc); } // auto VT check
+  }catch(e){ box.innerHTML='<div style="padding:20px;color:var(--critical)">'+esc(e.message)+'</div>'; }
 }
 function renderConnections(j, ctx){
   const conns=(j.connections||[]).slice();
@@ -1236,7 +1290,7 @@ function renderConnections(j, ctx){
   conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
   const base=name=>(name||"").split(/[\\/]/).pop()||"";
   const rows=conns.map(c=>`<tr>
-    <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="hashchk muted" data-h="${esc(c.sha256)}" style="font-size:10px;cursor:pointer;text-decoration:underline dotted" title="click to check VirusTotal · ${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${procLink(ctx.ip, c.pid, c.process)}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="hashchk muted" data-h="${esc(c.sha256)}" style="font-size:10px;cursor:pointer;text-decoration:underline dotted" title="click to check VirusTotal · ${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
     <td class="mono">${esc(c.proto||'')}</td>
     <td class="mono">${c.localPort||''}</td>
     <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
@@ -1346,38 +1400,6 @@ async function deployAll(){
     }
   } catch(e){ alert("Deploy-all error: "+e.message); }
   finally { btn.disabled=false; btn.innerHTML=label; await showDevices(); await scanLan(); }
-}
-async function toggleConns(ip,btn){
-  const box = $("#conns-"+ip.replace(/\./g,'-'));
-  if (box.style.display!=="none"){ box.style.display="none"; btn.textContent="▸ Connections"; return; }
-  box.style.display="block"; btn.textContent="▾ Connections";
-  box.innerHTML='<div class="empty">Loading connections…</div>';
-  try {
-    const j = await api("/api/agents/connections?host="+encodeURIComponent(ip));
-    if (!j.ok){ box.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"lookup failed")+'</pre>'; return; }
-    const conns = (j.connections||[]).slice();
-    if (!conns.length){ box.innerHTML='<div class="empty">No active connections reported.</div>'; return; }
-    const killOn = !!(btn && btn.dataset.kill);
-    conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
-    const base = name => (name||"").split(/[\\/]/).pop()||"";
-    const rows = conns.map(c=>`<tr>
-      <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="hashchk muted" data-h="${esc(c.sha256)}" style="font-size:10px;cursor:pointer;text-decoration:underline dotted" title="click to check VirusTotal · ${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
-      <td class="mono">${esc(c.proto||'')}</td>
-      <td class="mono">${c.localPort||''}</td>
-      <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
-      <td class="muted">${esc(c.state||'')}</td>
-      <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td>
-      ${killOn?`<td style="white-space:nowrap">${procBtns(ip, c.pid, c.process, true)}</td>`:''}</tr>`).join("");
-    box.innerHTML = `<input class="devfilter" placeholder="filter by process / ip / port…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
-      <div class="muted" style="margin-bottom:6px">${conns.length} connections${killOn?' · 🛑 kill enabled on this host':''}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;color:var(--muted)"><th>Process</th><th>Proto</th><th>Local</th><th>Remote</th><th>State</th><th>Binary</th>${killOn?'<th>Action</th>':''}</tr></thead>
-        <tbody>${rows}</tbody></table>`;
-    const filter = box.querySelector(".devfilter");
-    filter.oninput = ()=>{ const q=filter.value.toLowerCase(); box.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display = tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
-    wireProcBtns(box);
-    box.querySelectorAll('.hashchk').forEach(s=>s.onclick=()=>checkHash(s.dataset.h,s));
-  } catch(e){ box.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
 }
 async function toggleKill(ip, currentlyOn, btn){
   const want = !currentlyOn;
@@ -1584,7 +1606,7 @@ function renderListeners(j, ctx){
       : `<span class="badge" style="background:${e[1]}">${e[0]}</span>`;
     return `<tr style="${l.risk?'background:rgba(255,92,124,.08)':''}" title="${esc((l.riskReasons||[]).join('; '))}">
     <td class="mono">${l.risk?'<span class="badge" style="background:var(--critical,#ff5c7c)">RISK</span> ':''}${esc(l.proto)} ${l.port}</td>
-    <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
+    <td class="mono" style="color:var(--cyan,#46d6ff)">${(ctx&&ctx.ip&&l.pids&&l.pids.length)?procLink(ctx.ip,l.pids[0],l.process):esc(l.process)}${l.pids&&l.pids.length?` <span class="muted">#${l.pids.join(',')}</span>`:''}</td>
     <td>${expBadge}</td>
     <td class="muted" title="${esc(l.path||'')}">${esc((l.path||'').split(/[\\/]/).pop()||'')}</td>
     ${canKill?`<td style="white-space:nowrap">${procBtns(ctx.ip, (l.pids&&l.pids[0]), l.process, true)}</td>`:''}</tr>`; };
@@ -2635,6 +2657,8 @@ $("#discoScan").onclick = scanLan;
 $("#discoDeployAll").onclick = deployAll;
 $("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });
 $("#deploySettingsBtn").onclick = ()=>{ const p=$("#deployPanel"); p.style.display = p.style.display==="none"?"block":"none"; };
+$("#procModal").addEventListener("click", e=>{ if(e.target===$("#procModal")) closeProcess(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && $("#procModal").style.display!=="none") closeProcess(); });
 $("#evtToggle").onclick = async ()=>{
   const p=$("#evtPanel");
   if(p.style.display!=="none"){ p.style.display="none"; return; }

@@ -166,6 +166,10 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+), and (v1.3.0+) `sha256` of the binary (background-hashed,
   for reputation lookups), `cmdline`, `ppid`, and `parent` process name.
+- `GET /process?pid=N` (v1.5.0+) — full detail for one process: command line, parent
+  chain, executable path, Authenticode signature + signer, SHA-256, owning user, and
+  every socket it holds. Powers the Devices page's clickable process inspector
+  (click a process under Connections or Listeners).
 - `GET /autoruns` (v1.3.0+) — persistence enumeration: scheduled tasks, Run keys,
   auto-start services, startup-folder items (Windows; cron/systemd/autostart on Linux).
 - `POST /autoruns/remove` (v1.3.0+, destructive, needs `AGENT_ALLOW_KILL`) — remove a

@@ -126,6 +126,11 @@ export async function agentDns(cfg: Config, host: string): Promise<{ ok: boolean
   return call(cfg, host, "/dns", 15000);
 }
 
+export async function agentProcess(cfg: Config, host: string, pid: number): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  if (!Number.isInteger(pid) || pid <= 0) return { ok: false, error: "invalid pid" };
+  return call(cfg, host, `/process?pid=${pid}`, 25000);
+}
+
 export async function agentAutoruns(cfg: Config, host: string): Promise<{ ok: boolean; host?: string; autoruns?: unknown[]; error?: string }> {
   const r = await call(cfg, host, "/autoruns", 12000);
   if (!r.ok) return { ok: false, error: r.error };

@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.4.3";
+const AGENT_VERSION = "1.5.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -494,6 +494,52 @@ async function collectDns() {
   return { host: os.hostname(), dnsProcesses: Object.entries(dnsProcs).map(([process, queries]) => ({ process, queries })).sort((a, b) => b.queries - a.queries), cache };
 }
 
+// --- Process inspector: full detail for a single PID ---
+// Answers "what actually is this process?" — command line, parent chain,
+// signature, hash, owner, and every socket it holds.
+async function processDetail(pid) {
+  const detail = { pid, sockets: [...buffer.values()].filter((r) => r.procid === pid).map(shapeRec) };
+  const plat = os.platform();
+  if (plat === "win32") {
+    const ps = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      `$pr=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}";`,
+      "if(-not $pr){ 'null' } else {",
+      "$chain=@(); $cur=$pr; $seen=@{}; $seen[[int]$pr.ProcessId]=$true;",
+      "for($i=0;$i -lt 8 -and $cur.ParentProcessId;$i++){ if($seen[[int]$cur.ParentProcessId]){break}; $seen[[int]$cur.ParentProcessId]=$true; $par=Get-CimInstance Win32_Process -Filter \"ProcessId=$($cur.ParentProcessId)\"; if(-not $par){break}; $chain+=[pscustomobject]@{pid=$par.ProcessId;name=$par.Name}; $cur=$par }",
+      "$sig=if($pr.ExecutablePath){Get-AuthenticodeSignature $pr.ExecutablePath}else{$null};",
+      "$own=''; try{$o=Invoke-CimMethod -InputObject $pr -MethodName GetOwner; if($o.User){$own=\"$($o.Domain)\\$($o.User)\"}}catch{};",
+      "[pscustomobject]@{name=$pr.Name;path=$pr.ExecutablePath;cmdline=$pr.CommandLine;ppid=$pr.ParentProcessId;created=[string]$pr.CreationDate;user=$own;signed=[string]$sig.Status;signer=[string]$sig.SignerCertificate.Subject;parents=$chain} | ConvertTo-Json -Depth 5 -Compress",
+      "}",
+    ].join("");
+    try {
+      const out = (await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 20000)).trim();
+      if (out && out !== "null") Object.assign(detail, JSON.parse(out));
+    } catch { /* leave what we have */ }
+  } else if (plat === "linux") {
+    try { detail.cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim(); } catch { /* */ }
+    try { detail.path = readlinkSync(`/proc/${pid}/exe`); } catch { /* */ }
+    try {
+      const st = readFileSync(`/proc/${pid}/stat`, "utf8");
+      detail.name = (st.match(/\(([^)]+)\)/) || [])[1] || "";
+      detail.ppid = Number((st.match(/\)\s+\S+\s+(\d+)/) || [])[1]) || 0;
+    } catch { /* */ }
+    const chain = [];
+    let cur = detail.ppid || 0;
+    for (let i = 0; i < 8 && cur > 1; i++) {
+      try {
+        const st = readFileSync(`/proc/${cur}/stat`, "utf8");
+        chain.push({ pid: cur, name: (st.match(/\(([^)]+)\)/) || [])[1] || "" });
+        cur = Number((st.match(/\)\s+\S+\s+(\d+)/) || [])[1]) || 0;
+      } catch { break; }
+    }
+    detail.parents = chain;
+    try { detail.user = "uid " + (readFileSync(`/proc/${pid}/status`, "utf8").match(/Uid:\s+(\d+)/) || [])[1]; } catch { /* */ }
+  }
+  detail.sha256 = hashOf(detail.path);
+  return detail;
+}
+
 // --- Feature #3: on-demand IR triage bundle ---
 async function collectTriage() {
   const bundle = { host: os.hostname(), platform: os.platform(), time: Date.now(), agentVersion: AGENT_VERSION };
@@ -701,6 +747,13 @@ const server = http.createServer((req, res) => {
   // --- feature #4: DNS attribution (read-only) ---
   if (req.method === "GET" && url.pathname === "/dns") {
     collectDns().then((d) => json(200, d));
+    return;
+  }
+  // --- process inspector: full detail for one PID ---
+  if (req.method === "GET" && url.pathname === "/process") {
+    const pid = Number(url.searchParams.get("pid"));
+    if (!Number.isInteger(pid) || pid <= 0) return json(400, { error: "invalid pid" });
+    processDetail(pid).then((d) => json(200, d)).catch((e) => json(500, { error: e.message }));
     return;
   }
   // --- feature #3: IR triage bundle (read-only) ---
