@@ -217,9 +217,8 @@ SecTool's own `AGENT_ALLOW_KILL=true` master switch.
 Equivalent manual options (still supported):
 - Add `"allowKill": true` to the host's `agent.config.json` (in
   `%LOCALAPPDATA%\SecToolAgent` on Windows, `~/.sectool-agent` on Linux/macOS).
-- Set `AGENT_ALLOW_KILL=true` in its service environment. **Note:** setting the
-  env var *pins* the value — the dashboard toggle is then locked (shown as 🔒) and
-  returns 409, so the env var always wins.
+- Set `AGENT_ALLOW_KILL=true` in its service environment.
+  **Note:** When set, this env var *pins* the value—the dashboard toggle becomes locked (shown as 🔒), and `POST /config` requests to change it are refused with HTTP 409. The env var always takes precedence.
 
 - `POST /config` (v1.1.1+, token-gated) — body `{ "allowKill": <bool> }`. Persists
   to `agent.config.json`. Refused (409) if `AGENT_ALLOW_KILL` env pins the value.
