@@ -74,6 +74,14 @@ export interface Config {
     host: string;
     port: number;
     defaultHours: number;
+    /**
+     * Optional bearer token that all API requests must present via an
+     * `Authorization: Bearer <token>` header (or `?token=` query param for
+     * browser-navigable download links). When unset the server is unauthenticated
+     * — safe only when bound to 127.0.0.1. Required whenever WEB_HOST is not
+     * localhost, because the server can execute privileged gateway commands.
+     */
+    token?: string;
   };
   netflow: {
     enabled: boolean;
@@ -309,6 +317,7 @@ export function loadConfig(): Config {
       host: str("WEB_HOST", "127.0.0.1"),
       port: int("WEB_PORT", 8787),
       defaultHours: int("WEB_DEFAULT_HOURS", 48),
+      token: optStr("WEB_TOKEN"),
     },
     netflow: {
       enabled: bool("NETFLOW_ENABLED", false),
