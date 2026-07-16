@@ -303,46 +303,58 @@
   <div class="muted" style="margin-bottom:12px;">Internal devices ranked by signs of compromise from collected flows (bad-outbound, beaconing, fan-out). Forward-only &amp; 1:512-sampled.</div>
   <div id="hostsBody"><div class="empty">Loading…</div></div>
 </div>
-<div id="devicesView" style="display:none; padding:22px 26px; overflow-y:auto; height:calc(100vh - 53px);">
-  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+<style>
+#devicesView .dv-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 22px;border-bottom:1px solid var(--border)}
+#devicesView .dv-split{display:flex;height:calc(100vh - 54px - 57px)}
+#devicesView .dv-roster{width:310px;min-width:270px;border-right:1px solid var(--border);overflow-y:auto;padding:8px 8px 20px;box-sizing:border-box}
+#devicesView .dv-detail{flex:1;overflow-y:auto;padding:16px 22px}
+#devicesView .dv-grp{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:12px 6px 4px}
+#devicesView .dv-item{display:block;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:8px 10px;margin-bottom:3px;cursor:pointer;color:var(--text);font:inherit}
+#devicesView .dv-item:hover{background:var(--panel2,#140f30)}
+#devicesView .dv-item.sel{background:var(--panel2,#140f30);border-color:var(--accent)}
+#devicesView .dv-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}
+#devicesView .dv-name{font-weight:600;font-size:13px}
+#devicesView .dv-sub{color:var(--muted);font-size:11px;margin-top:2px}
+#devicesView .dv-chips{margin-top:4px;display:flex;gap:4px;flex-wrap:wrap}
+#devicesView .dv-chip{font-size:9px;padding:1px 5px;border-radius:4px;background:var(--panel,#0e0b24);border:1px solid var(--border)}
+#devicesView .dv-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin:14px 0 12px}
+#devicesView .dv-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);padding:7px 13px;cursor:pointer;font-size:13px;border-radius:6px 6px 0 0}
+#devicesView .dv-tab:hover{color:var(--text);background:var(--panel2,#140f30)}
+#devicesView .dv-tab.sel{color:var(--text);border-bottom-color:var(--accent)}
+#devicesView .dv-act{border:1px solid var(--border);background:transparent;color:var(--text);border-radius:7px;padding:5px 11px;font-size:12px;cursor:pointer}
+#devicesView .dv-act:hover{background:var(--panel2,#140f30)}
+#devicesView .dv-input{background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px}
+</style>
+<div id="devicesView" style="display:none; height:calc(100vh - 53px); overflow:hidden;">
+  <div class="dv-toolbar">
     <button id="backAlerts8">← Alerts</button>
-    <h2 style="margin:0; font-size:18px;">📟 Devices <span id="devCount" class="muted"></span></h2>
-    <input id="devProbe" placeholder="probe extra host(s), e.g. 192.168.0.50" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; min-width:240px;" />
-    <button id="devRefresh">↻ Rescan</button>
+    <h2 style="margin:0; font-size:18px;">📟 Devices</h2>
+    <span id="devCount" class="muted" style="font-size:12px"></span>
+    <span style="flex:1"></span>
+    <input id="devProbe" class="dv-input" placeholder="add host to probe…" style="width:170px" />
+    <button id="devRefresh" class="dv-act">↻ Rescan</button>
+    <button id="discoScan" class="dv-act">🔍 Scan LAN</button>
+    <button id="evtToggle" class="dv-act">🔔 Events</button>
+    <button id="deploySettingsBtn" class="dv-act" title="Agent push-deploy credentials">⚙ Deploy</button>
   </div>
-  <div class="muted" style="margin-bottom:12px;">Internal hosts running the SecTool agent. SecTool probes devices it has seen in flows; install the agent (📟 one-liner) to attribute connections to the owning process. Per device you can inspect <b>live ports</b> (real-time gateway conntrack — works without an agent), <b>connections</b>, its <b>traffic</b> footprint (from gateway flows), <b>listeners</b> (open-port attack surface) and <b>egress</b> to public IPs scored against threat intel. For a host that isn't running the agent, use <b>📡 Live port activity</b> below.</div>
-
-  <div class="section" style="margin-bottom:16px;">
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-      <h3 style="margin:0; font-size:15px;">🔍 LAN auto-discovery <span id="discoCount" class="muted" style="font-weight:400"></span></h3>
-      <input id="discoSubnet" placeholder="subnet override, e.g. 192.168.1.0/24" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; min-width:220px;" />
-      <button id="discoScan">🔍 Scan LAN</button>
+  <div id="evtPanel" style="display:none;padding:8px 22px;border-bottom:1px solid var(--border);max-height:200px;overflow-y:auto"></div>
+  <div id="deployPanel" style="display:none;padding:10px 22px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="discoSubnet" class="dv-input" placeholder="subnet override e.g. 192.168.1.0/24" style="min-width:210px" />
+      <input id="discoUser" class="dv-input" placeholder="ssh user (root)" style="width:110px" />
+      <input id="discoPass" type="password" class="dv-input" placeholder="ssh password (optional)" style="min-width:170px" />
+      <input id="discoWinUser" class="dv-input" placeholder="win admin" style="width:120px" />
+      <input id="discoWinPass" type="password" class="dv-input" placeholder="win password" style="min-width:150px" />
+      <button id="discoDeployAll" class="dv-act">⬇ Push to all eligible <span id="discoEligible" class="muted"></span></button>
+      <span id="deployHint" class="muted" style="font-size:11px"></span>
     </div>
-    <div class="muted" style="margin-bottom:8px; font-size:12px;">Active sweep of this host's directly-connected private subnet(s): a TCP-connect ping finds live hosts (even agent-less ones), the ARP cache attaches MAC + vendor, and NetFlow fills in devices that are quiet right now. Only RFC1918 ranges are ever scanned.</div>
-    <div id="deployBar" style="display:none; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel2,#140f30);">
-      <span style="font-size:12px;">⬇ <b>Push agent</b></span>
-      <input id="discoUser" placeholder="ssh user (root)" title="SSH login for Linux/macOS hosts" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:120px;" />
-      <input id="discoPass" type="password" placeholder="ssh password (optional, needs sshpass)" title="SSH password — only used if sshpass is installed; otherwise key auth" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:200px;" />
-      <span class="muted" style="font-size:11px;">·</span>
-      <input id="discoWinUser" placeholder="win admin (Administrator)" title="WinRM admin login for SSH-less Windows hosts" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; width:150px;" />
-      <input id="discoWinPass" type="password" placeholder="win password (for WinRM)" title="WinRM admin password — required to deploy to Windows hosts without SSH" style="background:var(--panel,#0e0b24); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:180px;" />
-      <button id="discoDeployAll" title="Install the SecTool agent on every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it">⬇ Push to all eligible <span id="discoEligible" class="muted" style="font-weight:400"></span></button>
-      <span id="deployHint" class="muted" style="font-size:11px;"></span>
-    </div>
-    <div id="discoBody"><div class="empty">Click <b>Scan LAN</b> to enumerate every device on your local network.</div></div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Scan LAN finds agentless hosts (added to the roster, marked ⬇). Push installs the agent over SSH / WinRM. Needs <code>DEPLOY_ENABLED=true</code>. <span id="discoCount"></span></div>
+    <div id="discoBody" style="display:none"></div>
   </div>
-
-  <div class="section" style="margin-bottom:16px;">
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-      <h3 style="margin:0; font-size:15px;">📡 Live port activity</h3>
-      <input id="livePortHost" placeholder="host IP, e.g. 192.168.0.60" style="background:var(--panel2,#140f30); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; min-width:220px;" />
-      <button id="livePortBtn">📡 Show ports</button>
-    </div>
-    <div class="muted" style="margin-bottom:8px; font-size:12px;">Real-time outbound/inbound ports for <b>any</b> internal host, read live from the gateway's connection-tracking table — no agent and no NetFlow required. Use this when an alert fires for a host that isn't running the agent (e.g. the source of an outbound-port alert).</div>
-    <div id="livePortBody"><div class="empty">Enter a LAN host IP to see the connections the gateway is routing for it right now.</div></div>
+  <div class="dv-split">
+    <div class="dv-roster" id="devRoster"><div class="empty" style="padding:16px 8px">Scanning…</div></div>
+    <div class="dv-detail" id="devDetail"><div class="empty" style="padding:40px 8px">Select a device from the list.</div></div>
   </div>
-
-  <div id="devicesBody"><div class="empty">Loading…</div></div>
 </div>
 <div id="askView" style="display:none; height:calc(100vh - 53px); flex-direction:column;">
   <div style="display:flex; align-items:center; gap:12px; padding:16px 26px 8px; flex-wrap:wrap;">
@@ -1075,124 +1087,209 @@ async function showHosts() {
   } catch(e){ $("#hostsBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
 }
 const AGENT_KILL = {}; // ip -> whether kill/delete is enabled on that agent
+const DEV_STATE = { agents:[], offline:[], discovered:[], killAllowed:false, deployEnabled:false, selected:null, tab:'overview' };
+let devFilterVal='';
+const DEV_TABS = [
+  { key:'overview',    label:'Overview',    kinds:['agent','offline','discovered'] },
+  { key:'connections', label:'Connections', kinds:['agent'],               path:i=>"/api/agents/connections?host="+encodeURIComponent(i), render:renderConnections },
+  { key:'ports',       label:'Ports',       kinds:['agent','discovered'],   path:i=>"/api/agents/ports?host="+encodeURIComponent(i),       render:renderPorts },
+  { key:'traffic',     label:'Traffic',     kinds:['agent','discovered'],   path:i=>"/api/agents/traffic?host="+encodeURIComponent(i)+"&hours=24", render:renderTraffic },
+  { key:'listeners',   label:'Listeners',   kinds:['agent'],               path:i=>"/api/agents/listeners?host="+encodeURIComponent(i),   render:renderListeners },
+  { key:'egress',      label:'Egress',      kinds:['agent'],               path:i=>"/api/agents/egress?host="+encodeURIComponent(i),     render:renderEgress },
+  { key:'dns',         label:'DNS',         kinds:['agent'],               path:i=>"/api/agents/dns?host="+encodeURIComponent(i),        render:renderDns },
+  { key:'autoruns',    label:'Autoruns',    kinds:['agent'],               path:i=>"/api/agents/autoruns?host="+encodeURIComponent(i),   render:renderAutoruns },
+];
+
 async function showDevices(){
-  $("#alertsView").style.display="none"; $("#blockedView").style.display="none"; $("#hostsView").style.display="none"; $("#askView").style.display="none"; $("#warView").style.display="none"; $("#watchView").style.display="none"; $("#suppView").style.display="none"; $("#trendsView").style.display="none"; $("#campaignsView").style.display="none"; $("#assetsView").style.display="none"; $("#reportView").style.display="none"; $("#intelView").style.display="none"; $("#searchView").style.display="none";
+  ["alertsView","blockedView","hostsView","askView","warView","watchView","suppView","trendsView","campaignsView","assetsView","reportView","intelView","searchView"].forEach(v=>{const el=$("#"+v); if(el) el.style.display="none";});
   $("#devicesView").style.display="block";
-  $("#devicesBody").innerHTML='<div class="empty">Scanning the LAN for agents…</div>';
+  if(!DEV_STATE.selected) $("#devRoster").innerHTML='<div class="empty" style="padding:16px 8px"><span class="spin"></span> Scanning for agents…</div>';
   try {
     const extra = ($("#devProbe").value||"").trim();
     const j = await api("/api/agents"+(extra?("?hosts="+encodeURIComponent(extra)):""));
-    if (!j.enabled){ $("#devCount").textContent=""; $("#devicesBody").innerHTML='<div class="empty">The agent feature is disabled. Set <code>AGENT_ENABLED=true</code> and restart SecTool.</div>'; return; }
-    $("#devCount").textContent = "("+j.agents.length+" online · "+j.scanned+" scanned)";
-    if (!j.agents.length){
-      $("#devicesBody").innerHTML = `<div class="section"><div class="empty" style="margin-bottom:10px">No agents responded on port ${j.port}.</div>
-        <div class="muted">Install the agent on a device, then rescan:</div>
-        <pre>irm http://${location.hostname}:7878/install.ps1 | iex      # Windows
+    if (!j.enabled){ $("#devCount").textContent=""; $("#devRoster").innerHTML=""; $("#devDetail").innerHTML='<div class="empty" style="padding:40px 8px">The agent feature is disabled. Set <code>AGENT_ENABLED=true</code> and restart SecTool.</div>'; return; }
+    DEV_STATE.agents = j.agents||[]; DEV_STATE.offline = j.offline||[]; DEV_STATE.killAllowed = !!j.killAllowed;
+    DEV_STATE.agents.forEach(a=>{ AGENT_KILL[a.ip] = DEV_STATE.killAllowed && a.kill; });
+    updateDevCount();
+    renderRoster();
+    const all = allDevices();
+    if (DEV_STATE.selected && all.some(d=>d.ip===DEV_STATE.selected)) selectDevice(DEV_STATE.selected);
+    else if (DEV_STATE.agents.length) selectDevice(DEV_STATE.agents[0].ip);
+    else if (all.length) selectDevice(all[0].ip);
+    else { DEV_STATE.selected=null; $("#devDetail").innerHTML=agentInstallHelp(j.port); }
+  } catch(e){ $("#devRoster").innerHTML='<pre style="padding:10px">'+esc(e.message)+'</pre>'; }
+}
+function updateDevCount(){ $("#devCount").textContent = `${DEV_STATE.agents.length} online · ${DEV_STATE.offline.length} offline${DEV_STATE.discovered.length?` · ${DEV_STATE.discovered.length} discovered`:''}`; }
+function agentInstallHelp(port){
+  return `<div class="section" style="max-width:560px"><h3 style="margin:0 0 8px">No agents online</h3>
+    <div class="muted" style="margin-bottom:8px">Install the agent on a device, then <b>↻ Rescan</b>. Or <b>🔍 Scan LAN</b> to find hosts and push it.</div>
+    <pre>irm http://${location.hostname}:7878/install.ps1 | iex      # Windows
 curl -fsSL http://${location.hostname}:7878/install.sh | bash   # Linux / macOS</pre></div>`;
-      return;
-    }
-    const killAllowed = !!j.killAllowed;
-    $("#devicesBody").innerHTML = j.agents.map(a=>{ const id=esc(a.ip).replace(/\./g,'-'); const canKill = killAllowed && a.kill; AGENT_KILL[a.ip]=canKill; return `
-      <div class="section devcard">
-        <h3><span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>
-          <span class="mono">${esc(a.hostname||a.ip)}</span>
-          <span class="muted" style="font-weight:400">· ${esc(a.ip)} · ${esc(a.platform||'?')} · v${esc(a.version||'?')} · ${a.tracked||0} tracked · auth ${a.auth?'✓':'✗'}${a.signedUpdates?' · <span style="color:var(--good,#3ad29f)" title="verifies signed updates">🔏 signed</span>':' · <span class="muted" title="accepts unsigned updates — re-run installer to pin a key">🔓 unsigned</span>'}${canKill?' · <span style="color:var(--critical,#ff5c7a)">🛑 kill enabled</span>':''}</span>
-          ${killAllowed?(a.auth?`<button class="killtoggle" data-ip="${esc(a.ip)}" data-on="${a.kill?1:''}" ${a.killPinned?'disabled title="pinned by AGENT_ALLOW_KILL env var on the host"':''} style="float:right;font-size:11px;padding:2px 9px;border-radius:6px;cursor:pointer;border:1px solid ${a.kill?'var(--critical,#ff5c7a)':'var(--border)'};background:transparent;color:${a.kill?'var(--critical,#ff5c7a)':'var(--muted)'}">🛑 Kill: ${a.kill?'ON':'off'}${a.killPinned?' 🔒':''}</button>`:`<span class="muted" style="float:right;font-size:11px">enable auth to control kill</span>`):''}</h3>
-        <div class="devtools" style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="devview" data-ip="${esc(a.ip)}" data-kill="${canKill?1:''}">▸ Connections</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="ports">📡 Live ports</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="traffic">🌐 Traffic</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="listeners">🛰️ Listeners</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="egress">🚨 Egress</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="autoruns">🧬 Autoruns</button>
-          <button class="devtool" data-ip="${esc(a.ip)}" data-tool="dns">🌐 DNS</button>
-          <button class="triagebtn" data-ip="${esc(a.ip)}" data-host="${esc(a.hostname||a.ip)}" style="border:1px solid var(--accent);color:var(--accent);background:transparent;border-radius:6px;padding:2px 9px;font-size:11px;cursor:pointer">🧾 Triage</button>
-          ${a.isolate?`<button class="isobtn" data-ip="${esc(a.ip)}" data-rel="${a.isolated?1:''}" style="margin-left:auto;border:1px solid ${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};color:${a.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};background:transparent;border-radius:6px;padding:2px 9px;font-size:11px;cursor:pointer">${a.isolated?'🔓 Release':'🔒 Isolate'}</button>`:''}
-        </div>
-        ${a.isolated?'<div class="muted" style="color:var(--critical,#ff5c7a);margin-top:6px;font-size:12px">🔒 This host is network-quarantined (only SecTool can reach it).</div>':''}
-        <div class="devconns" id="conns-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="ports-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="traffic-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="listeners-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="egress-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="autoruns-${id}" style="display:none; margin-top:10px"></div>
-        <div class="devpanel" id="dns-${id}" style="display:none; margin-top:10px"></div>
-      </div>`; }).join("");
-    document.querySelectorAll(".devview").forEach(b=>b.onclick=()=>toggleConns(b.dataset.ip,b));
-    document.querySelectorAll(".devtool").forEach(b=>b.onclick=()=>toggleTool(b.dataset.ip,b.dataset.tool,b));
-    document.querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip, !!b.dataset.on, b));
-    document.querySelectorAll(".isobtn").forEach(b=>b.onclick=()=>isolateHost(b.dataset.ip, !!b.dataset.rel, b));
-    document.querySelectorAll(".triagebtn").forEach(b=>b.onclick=()=>downloadTriage(b.dataset.ip, b.dataset.host, b));
-    if (j.offline && j.offline.length){
-      const off = `<div class="section" style="border-color:var(--critical,#ff5c7a)"><h3 style="margin:0 0 8px;font-size:14px;color:var(--critical,#ff5c7a)">🚨 Offline agents (${j.offline.length})</h3>`
-        + j.offline.map(o=>`<div style="font-size:12px;padding:3px 0"><span class="mono">${esc(o.hostname||o.ip)}</span> <span class="muted">· ${esc(o.ip)} · v${esc(o.version||'?')} · last seen ${o.lastSeen?fmt(o.lastSeen):'?'}</span>${o.isolated?' <span class="badge" style="background:var(--critical,#ff5c7a)">isolated</span>':''}</div>`).join("")
-        + `<div class="muted" style="font-size:11px;margin-top:4px">Seen before but not responding now — possible shutdown, tampering, or a killed agent.</div></div>`;
-      $("#devicesBody").insertAdjacentHTML("beforeend", off);
-    }
-    try {
-      const ev = await api("/api/agent/events?limit=15");
-      if (ev.events && ev.events.length){
-        const evh = `<div class="section" style="border-color:var(--accent)"><h3 style="margin:0 0 8px;font-size:14px">🔔 Recent host events (pushed live by agents)</h3>`
-          + ev.events.map(e=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><span class="muted">${fmt(e.time)}</span> · <b>${esc(e.type)}</b> · <span class="mono">${esc(e.host)}</span> · <span class="mono" style="color:var(--cyan,#46d6ff)">${esc(e.process||'?')}</span>${e.remoteIp?` → <span class="mono">${esc(e.remoteIp)}:${e.remotePort||''}</span>`:''}${e.localPort&&!e.remoteIp?` :${e.localPort}`:''}</div>`).join("")
-          + `</div>`;
-        $("#devicesBody").insertAdjacentHTML("afterbegin", evh);
-      }
-    } catch(e){}
-  } catch(e){ $("#devicesBody").innerHTML='<pre>'+esc(e.message)+'</pre>'; }
+}
+function allDevices(){
+  const seen=new Set(), out=[];
+  DEV_STATE.agents.forEach(a=>{ if(!seen.has(a.ip)){ seen.add(a.ip); out.push({...a,kind:'agent'}); } });
+  DEV_STATE.offline.forEach(o=>{ if(!seen.has(o.ip)){ seen.add(o.ip); out.push({...o,kind:'offline'}); } });
+  DEV_STATE.discovered.forEach(d=>{ if(!seen.has(d.ip)){ seen.add(d.ip); out.push({...d,kind:'discovered'}); } });
+  return out;
+}
+function rosterItem(d){
+  const dot = d.kind==='agent'?'var(--good,#3ad29f)':d.kind==='offline'?'var(--critical,#ff5c7a)':'var(--muted)';
+  const sel = DEV_STATE.selected===d.ip?' sel':'';
+  const chips=[];
+  if(d.kind==='agent'){
+    if(d.isolated) chips.push('<span class="dv-chip" style="color:var(--critical,#ff5c7a)">🔒</span>');
+    if(DEV_STATE.killAllowed&&d.kill) chips.push('<span class="dv-chip" style="color:var(--critical,#ff5c7a)">🛑</span>');
+    if(!d.auth) chips.push('<span class="dv-chip" style="color:var(--high,#ff9e3d)">no auth</span>');
+    else if(!d.signedUpdates) chips.push('<span class="dv-chip">🔓</span>');
+  } else if(d.kind==='discovered'){ chips.push('<span class="dv-chip">⬇ agentless</span>'); }
+  const sub = d.kind==='agent' ? `${esc(d.ip)} · ${esc(d.platform||'?')} · v${esc(d.version||'?')}`
+    : d.kind==='offline' ? `${esc(d.ip)} · offline ${d.lastSeen?ago(d.lastSeen):''}`
+    : `${esc(d.ip)}${d.vendor?' · '+esc(d.vendor):''}`;
+  return `<button class="dv-item${sel}" data-ip="${esc(d.ip)}"><div><span class="dv-dot" style="background:${dot}"></span><span class="dv-name">${esc(d.hostname||d.ip)}</span></div><div class="dv-sub">${sub}</div>${chips.length?`<div class="dv-chips">${chips.join('')}</div>`:''}</button>`;
+}
+function renderRoster(){
+  const list=allDevices();
+  const q=devFilterVal.toLowerCase();
+  const match=d=>!q||(d.ip+' '+(d.hostname||'')+' '+(d.vendor||'')+' '+(d.platform||'')).toLowerCase().includes(q);
+  const groups=[['agent',`Agents · ${DEV_STATE.agents.length}`],['offline',`Offline · ${DEV_STATE.offline.length}`],['discovered',`Discovered · ${DEV_STATE.discovered.length}`]];
+  let h=`<input id="devFilter" class="dv-input" placeholder="filter devices…" value="${esc(devFilterVal)}" style="width:100%;box-sizing:border-box;margin-bottom:6px">`;
+  let any=false;
+  for(const [kind,label] of groups){
+    const items=list.filter(d=>d.kind===kind&&match(d));
+    if(!items.length) continue; any=true;
+    h+=`<div class="dv-grp">${label}</div>`+items.map(rosterItem).join("");
+  }
+  if(!any) h+='<div class="empty" style="padding:16px 8px">No matching devices.</div>';
+  $("#devRoster").innerHTML=h;
+  const f=$("#devFilter");
+  if(f) f.oninput=()=>{ const pos=f.selectionStart; devFilterVal=f.value; renderRoster(); const nf=$("#devFilter"); if(nf){ nf.focus(); try{nf.setSelectionRange(pos,pos);}catch(e){} } };
+  $("#devRoster").querySelectorAll(".dv-item").forEach(b=>b.onclick=()=>selectDevice(b.dataset.ip));
+}
+function selectDevice(ip){
+  DEV_STATE.selected=ip;
+  $("#devRoster").querySelectorAll(".dv-item").forEach(b=>b.classList.toggle("sel", b.dataset.ip===ip));
+  const d=allDevices().find(x=>x.ip===ip);
+  if(!d){ $("#devDetail").innerHTML='<div class="empty" style="padding:40px 8px">Device not found — rescan.</div>'; return; }
+  renderDetail(d);
+}
+function renderDetail(d){
+  const tabs=DEV_TABS.filter(t=>t.kinds.includes(d.kind));
+  if(!tabs.some(t=>t.key===DEV_STATE.tab)) DEV_STATE.tab='overview';
+  const badges=[];
+  if(d.kind==='agent'){
+    badges.push('<span class="badge" style="background:var(--good,#3ad29f)">● ONLINE</span>');
+    badges.push(`<span class="dv-chip">v${esc(d.version||'?')}</span>`);
+    badges.push(d.auth?'<span class="dv-chip" style="color:var(--good,#3ad29f)">auth ✓</span>':'<span class="dv-chip" style="color:var(--high,#ff9e3d)">auth ✗</span>');
+    badges.push(d.signedUpdates?'<span class="dv-chip" style="color:var(--good,#3ad29f)">🔏 signed</span>':'<span class="dv-chip">🔓 unsigned</span>');
+    if(d.isolated) badges.push('<span class="badge" style="background:var(--critical,#ff5c7a)">🔒 ISOLATED</span>');
+  } else if(d.kind==='offline'){ badges.push('<span class="badge" style="background:var(--critical,#ff5c7a)">● OFFLINE</span>'); if(d.version) badges.push(`<span class="dv-chip">was v${esc(d.version)}</span>`); }
+  else { badges.push('<span class="badge" style="background:var(--muted)">AGENTLESS</span>'); if(d.vendor) badges.push(`<span class="dv-chip">${esc(d.vendor)}</span>`); }
+  let actions='';
+  if(d.kind==='agent'){
+    if(DEV_STATE.killAllowed&&d.auth) actions+=`<button class="killtoggle dv-act" data-ip="${esc(d.ip)}" data-on="${d.kill?1:''}" ${d.killPinned?'disabled title="pinned by AGENT_ALLOW_KILL env var"':''} style="border-color:${d.kill?'var(--critical,#ff5c7a)':'var(--border)'};color:${d.kill?'var(--critical,#ff5c7a)':'var(--text)'}">🛑 Kill: ${d.kill?'ON':'off'}${d.killPinned?' 🔒':''}</button>`;
+    if(d.isolate) actions+=`<button class="isobtn dv-act" data-ip="${esc(d.ip)}" data-rel="${d.isolated?1:''}" style="border-color:${d.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};color:${d.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'}">${d.isolated?'🔓 Release':'🔒 Isolate'}</button>`;
+    actions+=`<button class="triagebtn dv-act" data-ip="${esc(d.ip)}" data-host="${esc(d.hostname||d.ip)}">🧾 Triage</button>`;
+  } else if(d.kind==='discovered'&&d.deploy&&d.deploy.eligible&&DEV_STATE.deployEnabled){
+    actions+=`<button class="depbtn dv-act" data-ip="${esc(d.ip)}" data-method="${esc(d.deploy.method||'ssh')}" style="border-color:var(--accent);color:var(--accent)">⬇ Push agent</button>`;
+  }
+  $("#devDetail").innerHTML=`
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <h2 class="mono" style="margin:0;font-size:20px">${esc(d.hostname||d.ip)}</h2>
+      <span class="muted" style="font-size:13px">${esc(d.ip)}${d.platform?' · '+esc(d.platform):''}${d.mac?' · '+esc(d.mac):''}${d.tracked!=null?' · '+d.tracked+' tracked':''}</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${badges.join('')}</div>
+    ${actions?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${actions}</div>`:''}
+    <div class="dv-tabs">${tabs.map(t=>`<button class="dv-tab${t.key===DEV_STATE.tab?' sel':''}" data-tab="${t.key}">${t.label}</button>`).join('')}</div>
+    <div id="devTabBody"><div class="empty" style="padding:18px 0"><span class="spin"></span> Loading…</div></div>`;
+  $("#devDetail").querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip,!!b.dataset.on,b));
+  $("#devDetail").querySelectorAll(".isobtn").forEach(b=>b.onclick=()=>isolateHost(b.dataset.ip,!!b.dataset.rel,b));
+  $("#devDetail").querySelectorAll(".triagebtn").forEach(b=>b.onclick=()=>downloadTriage(b.dataset.ip,b.dataset.host,b));
+  $("#devDetail").querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
+  $("#devDetail").querySelectorAll(".dv-tab").forEach(b=>b.onclick=()=>{ DEV_STATE.tab=b.dataset.tab; renderDetail(d); });
+  loadDevTab(d);
+}
+async function loadDevTab(d){
+  const body=$("#devTabBody"); if(!body) return;
+  const tab=DEV_TABS.find(t=>t.key===DEV_STATE.tab)||DEV_TABS[0];
+  if(tab.key==='overview'){ body.innerHTML=await renderOverview(d); wireTabBody(body,d); return; }
+  if(d.kind!=='agent'&&tab.kinds.includes('agent')&&!tab.kinds.includes(d.kind)){ body.innerHTML='<div class="empty" style="padding:18px 0">Needs the agent — not available for this device.</div>'; return; }
+  body.innerHTML='<div class="empty" style="padding:18px 0"><span class="spin"></span> Loading '+esc(tab.label)+'…</div>';
+  try{
+    const j=await api(tab.path(d.ip));
+    if(j.ok===false){ body.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||'failed')+'</pre>'; return; }
+    body.innerHTML=tab.render(j,{ip:d.ip,canKill:!!AGENT_KILL[d.ip]});
+    wireTabBody(body,d);
+  }catch(e){ body.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+}
+function wireTabBody(body,d){
+  wireProcBtns(body);
+  body.querySelectorAll('.hashchk').forEach(s=>s.onclick=()=>checkHash(s.dataset.h,s));
+  body.querySelectorAll('.autorm').forEach(b=>b.onclick=()=>removeAutorun(b.dataset.ip,JSON.parse(b.dataset.a),b));
+  const flt=body.querySelector('.devfilter');
+  if(flt) flt.oninput=()=>{ const q=flt.value.toLowerCase(); body.querySelectorAll('tbody tr').forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none'; }); };
+}
+function renderConnections(j, ctx){
+  const conns=(j.connections||[]).slice();
+  if(!conns.length) return '<div class="empty" style="padding:16px 0">No active connections reported.</div>';
+  const killOn=!!(ctx&&ctx.canKill);
+  conns.sort((a,b)=>(a.process||"").localeCompare(b.process||"")||(a.remoteIp||"").localeCompare(b.remoteIp||""));
+  const base=name=>(name||"").split(/[\\/]/).pop()||"";
+  const rows=conns.map(c=>`<tr>
+    <td class="mono" style="color:var(--cyan,#46d6ff)" title="${esc((c.cmdline?'cmd: '+c.cmdline:'')+(c.parent?'\nparent: '+c.parent:'')+(c.sha256?'\nsha256: '+c.sha256:''))}">${esc(c.process||'?')}${c.pid?` <span class="muted">#${c.pid}</span>`:''}${c.parent?`<br><span class="muted" style="font-size:10px">◂ ${esc(c.parent)}</span>`:''}${c.sha256?`<br><span class="hashchk muted" data-h="${esc(c.sha256)}" style="font-size:10px;cursor:pointer;text-decoration:underline dotted" title="click to check VirusTotal · ${esc(c.sha256)}">🔑 ${esc(c.sha256.slice(0,12))}…</span>`:''}</td>
+    <td class="mono">${esc(c.proto||'')}</td>
+    <td class="mono">${c.localPort||''}</td>
+    <td class="mono">${esc(c.remoteIp||'')}${c.remotePort?':'+c.remotePort:''}</td>
+    <td class="muted">${esc(c.state||'')}</td>
+    <td class="muted" title="${esc(c.path||'')}">${esc(base(c.path))}</td>
+    ${killOn?`<td style="white-space:nowrap">${procBtns(ctx.ip, c.pid, c.process, true)}</td>`:''}</tr>`).join("");
+  return `<input class="devfilter dv-input" placeholder="filter by process / ip / port…" style="width:100%;box-sizing:border-box;margin-bottom:8px"/>
+    <div class="muted" style="margin-bottom:6px">${conns.length} connections${killOn?' · 🛑 kill enabled':''}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Process</th><th>Proto</th><th>Local</th><th>Remote</th><th>State</th><th>Binary</th>${killOn?'<th>Action</th>':''}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+async function renderOverview(d){
+  if(d.kind==='offline') return `<div class="section"><div style="color:var(--critical,#ff5c7a);font-weight:600">🚨 Agent offline</div><div class="muted" style="margin-top:6px">Last seen ${d.lastSeen?fmt(d.lastSeen):'unknown'} · was on v${esc(d.version||'?')}. Not responding now — possible shutdown, reboot, tampering, or a killed agent.</div></div>`;
+  if(d.kind==='discovered') return `<div class="section"><div style="font-weight:600">Agentless host</div><div class="muted" style="margin-top:6px">${esc(d.vendor||'unknown vendor')}${d.mac?' · '+esc(d.mac):''}<br>Open ports: <span class="mono">${(d.openPorts||[]).join(', ')||'—'}</span></div><div class="muted" style="font-size:12px;margin-top:8px">Install the agent (⬇ Push, if SSH/WinRM is open — else run the one-liner on the box) for process attribution, kill, isolate, autoruns and triage. The gateway-based <b>Ports</b> and <b>Traffic</b> tabs work without an agent.</div></div>`;
+  let evHtml='<div class="dv-grp">Recent host events</div><div class="muted" style="font-size:12px">None yet.</div>';
+  try{
+    const ev=await api("/api/agent/events?limit=100");
+    const mine=(ev.events||[]).filter(e=>e.host===d.hostname||e.host===d.ip).slice(0,12);
+    if(mine.length) evHtml=`<div class="dv-grp">Recent host events</div>`+mine.map(e=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><span class="muted">${fmt(e.time)}</span> · <b>${esc(e.type)}</b> · <span class="mono" style="color:var(--cyan,#46d6ff)">${esc(e.process||'?')}</span>${e.remoteIp?` → <span class="mono">${esc(e.remoteIp)}:${e.remotePort||''}</span>`:''}${e.sha256?` <span class="hashchk muted" data-h="${esc(e.sha256)}" style="cursor:pointer">🔑</span>`:''}</div>`).join("");
+  }catch(e){}
+  const fact=(k,v)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)"><span class="muted">${k}</span><span class="mono" style="text-align:right">${v}</span></div>`;
+  return `<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+    <div class="section" style="flex:1;min-width:260px;margin:0">
+      ${fact('Platform', esc(d.platform||'?'))}
+      ${fact('Agent version', 'v'+esc(d.version||'?')+(d.signedUpdates?' · 🔏':' · 🔓'))}
+      ${fact('Tracked connections', d.tracked||0)}
+      ${fact('Token auth', d.auth?'✓ enforced':'✗ none')}
+      ${fact('Process kill', DEV_STATE.killAllowed?(d.kill?'enabled':'available (off)'):'disabled in SecTool')}
+      ${fact('Isolation', d.isolate?(d.isolated?'🔒 ISOLATED':'available'):'disabled in SecTool')}
+    </div>
+    <div class="section" style="flex:1.4;min-width:300px;margin:0">${evHtml}</div>
+  </div>`;
 }
 async function scanLan(){
-  const btn=$("#discoScan"), body=$("#discoBody");
-  const subnet=($("#discoSubnet").value||"").trim();
+  const btn=$("#discoScan"); const subnet=($("#discoSubnet").value||"").trim();
+  $("#deployPanel").style.display="block";
   btn.disabled=true; const label=btn.textContent; btn.textContent="⏳ Scanning…";
-  body.innerHTML='<div class="empty"><span class="spin"></span> Sweeping the LAN — this can take ~10–30s…</div>';
-  $("#discoCount").textContent="";
+  $("#discoCount").textContent="sweeping the LAN (~10–30s)…";
   try {
     const j = await api("/api/discovery"+(subnet?("?subnet="+encodeURIComponent(subnet)):""));
-    if (j.ok===false){ body.innerHTML='<pre style="color:var(--critical)">'+esc(j.error||"discovery failed")+'</pre>'; return; }
-    $("#discoCount").textContent="("+j.alive+" alive · "+j.total+" known · "+(j.durationMs/1000).toFixed(1)+"s)";
+    if (j.ok===false){ $("#discoCount").textContent="discovery failed: "+esc(j.error||""); return; }
+    DEV_STATE.deployEnabled=!!j.deployEnabled;
+    // Everything discovered that isn't this SecTool host; roster dedup drops any
+    // that are already known agents/offline so they don't appear twice.
+    DEV_STATE.discovered=(j.devices||[]).filter(d=>!d.isSelf).map(d=>({ip:d.ip,hostname:d.hostname,mac:d.mac,vendor:d.vendor,openPorts:d.openPorts,hasAgentPort:d.hasAgentPort,deploy:d.deploy,lastFlow:d.lastFlow}));
+    $("#discoCount").textContent=`${j.alive} alive · ${j.subnets? (j.subnets||[]).join(', '):''} · ${(j.durationMs/1000).toFixed(1)}s`;
     updateDeployBar(j);
-    const SRC={scan:['#3ad29f','SCAN'],arp:['var(--accent)','ARP'],flow:['#46d6ff','FLOW'],self:['var(--muted)','THIS HOST']};
-    const badge=s=>{ const m=SRC[s]||['var(--muted)',s.toUpperCase()]; return `<span class="badge" style="background:${m[0]};font-size:9px">${m[1]}</span>`; };
-    const depCell=d=>{
-      const id=esc(d.ip).replace(/\./g,'-');
-      if (d.hasAgentPort) return `<td id="dep-${id}"><span class="badge" style="background:var(--good,#3ad29f);font-size:9px">✓ AGENT</span></td>`;
-      if (d.deploy&&d.deploy.eligible){
-        const m=d.deploy.method||'ssh';
-        const label=m==='winrm'?'⬇ Push (WinRM)':'⬇ Push';
-        if (j.deployEnabled) return `<td id="dep-${id}"><button class="depbtn" data-ip="${esc(d.ip)}" data-method="${esc(m)}" title="${esc(d.deploy.reason||'')}" style="font-size:11px;padding:3px 8px">${label}</button></td>`;
-        return `<td id="dep-${id}"><span class="muted" title="Set DEPLOY_ENABLED=true to enable">eligible (${esc(m)})</span></td>`;
-      }
-      const reason=d.deploy?d.deploy.reason:'';
-      return `<td id="dep-${id}"><span class="muted" title="${esc(reason)}">—</span></td>`;
-    };
-    const row=d=>`<tr style="${d.isSelf?'opacity:.7':''}">
-      <td><span class="badge" style="background:${d.alive?'var(--good,#3ad29f)':'var(--muted)'}">${d.alive?'●':'○'}</span></td>
-      <td class="mono">${esc(d.ip)}</td>
-      <td class="mono" style="color:var(--cyan,#46d6ff)">${esc(d.hostname||'')}</td>
-      <td class="mono">${esc(d.mac||'')}</td>
-      <td>${esc(d.vendor||'')}</td>
-      <td class="mono">${(d.openPorts||[]).slice(0,8).join(', ')}${d.hasAgentPort?' <span class="badge" style="background:var(--accent)">AGENT</span>':''}</td>
-      <td class="muted">${d.lastFlow?ago(d.lastFlow):''}</td>
-      <td>${(d.sources||[]).map(badge).join(' ')}</td>
-      ${depCell(d)}</tr>`;
-    let h='';
-    if (j.truncated) h+=`<div class="muted" style="margin-bottom:6px;color:var(--accent)">⚠ Candidate list capped — raise <code>DISCOVERY_MAX_HOSTS</code> to scan a wider range.</div>`;
-    h+=`<div class="muted" style="margin-bottom:6px">Subnets: <span class="mono">${(j.subnets||[]).map(esc).join(', ')||'—'}</span> · ${j.scanned} hosts probed${typeof j.deployable==='number'?' · '+j.deployable+' agent-deployable':''}</div>`;
-    if (!(j.devices||[]).length){ body.innerHTML=h+'<div class="empty">No devices found.</div>'; return; }
-    h+=`<input class="devfilter" placeholder="filter by ip / host / vendor / mac…" style="width:100%;box-sizing:border-box;background:var(--panel2,#140f30);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;margin-bottom:8px"/>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;color:var(--muted)"><th></th><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th><th>Open ports</th><th>Last flow</th><th>Via</th><th>Agent</th></tr></thead>
-        <tbody>${j.devices.map(row).join("")}</tbody></table>`;
-    body.innerHTML=h;
-    body.querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
-    const filter=body.querySelector(".devfilter");
-    if(filter) filter.oninput=()=>{ const q=filter.value.toLowerCase(); body.querySelectorAll("tbody tr").forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"; }); };
-  } catch(e){ body.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+    updateDevCount();
+    renderRoster();
+    if(DEV_STATE.selected) selectDevice(DEV_STATE.selected);
+  } catch(e){ $("#discoCount").textContent="error: "+esc(e.message); }
   finally { btn.disabled=false; btn.textContent=label; }
 }
 function updateDeployBar(j){
-  const bar=$("#deployBar"); if(!bar) return;
-  bar.style.display="flex";
   const n=typeof j.deployable==='number'?j.deployable:0;
   $("#discoEligible").textContent=n?("("+n+")"):"";
   const all=$("#discoDeployAll");
@@ -1200,8 +1297,8 @@ function updateDeployBar(j){
     all.disabled=true; all.title="Set DEPLOY_ENABLED=true and restart SecTool to enable agent push-deploy.";
     $("#deployHint").textContent="push-deploy disabled (DEPLOY_ENABLED=false)";
   } else {
-    all.disabled=(n===0); all.title="Install the SecTool agent on every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it";
-    $("#deployHint").textContent=n?(n+" reachable host"+(n===1?"":"s")+" without the agent (SSH / WinRM)"):"no eligible hosts (need SSH or WinRM open + agent not installed)";
+    all.disabled=(n===0); all.title="Install the agent on every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it";
+    $("#deployHint").textContent=n?(n+" reachable host"+(n===1?"":"s")+" without the agent"):"no eligible hosts (need SSH or WinRM + agent not installed)";
   }
 }
 function deployOpts(){
@@ -1221,41 +1318,34 @@ function deployStepsHtml(r){
   return steps+out;
 }
 async function deployOne(ip,btn){
-  const cell=$("#dep-"+ip.replace(/\./g,'-'));
   const method=btn.dataset.method||'ssh';
-  btn.disabled=true; const label=btn.textContent; btn.textContent="⏳…";
+  btn.disabled=true; const label=btn.textContent; btn.textContent="⏳ Installing…";
   try {
     const r=await apiBody("/api/discovery/deploy",Object.assign({host:ip,method},deployOpts()));
     if (r.ok){
-      cell.innerHTML=`<span class="badge" style="background:var(--good,#3ad29f);font-size:9px" title="${esc((r.method||method)+' · '+(r.steps||[]).map(s=>s.name+': '+(s.detail||'')).join(' · '))}">✓ v${esc(r.agentVersion||'?')}</span>`;
+      btn.textContent="✓ installed v"+(r.agentVersion||'?');
+      await showDevices(); selectDevice(ip);
     } else {
-      cell.innerHTML=`<span class="badge" style="background:var(--critical);font-size:9px" title="${esc(r.error||'failed')}">✗ failed</span> <button class="depbtn" data-ip="${esc(ip)}" data-method="${esc(method)}" style="font-size:11px;padding:3px 8px">↻</button>`;
-      cell.querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
-      const body=$("#discoBody"); const det=document.createElement("div");
-      det.style.cssText="margin:6px 0;padding:8px 10px;border:1px solid var(--critical);border-radius:8px";
-      det.innerHTML=`<div style="color:var(--critical);font-size:12px">⬇ ${esc(ip)}: ${esc(r.error||'deploy failed')}</div>`+deployStepsHtml(r);
-      body.insertBefore(det,body.firstChild);
+      btn.disabled=false; btn.textContent=label;
+      alert("Deploy to "+ip+" failed:\n"+(r.error||'')+"\n\n"+((r.steps||[]).map(s=>(s.ok?'✓':'✗')+' '+s.name+(s.detail?': '+s.detail:'')).join("\n")));
     }
   } catch(e){ btn.disabled=false; btn.textContent=label; alert("Deploy error: "+e.message); }
 }
 async function deployAll(){
   const btn=$("#discoDeployAll"); if(btn.disabled) return;
-  if(!confirm("Push the SecTool agent to every reachable device (SSH, or WinRM for SSH-less Windows hosts) that isn't already running it?")) return;
+  if(!confirm("Push the SecTool agent to every reachable device (SSH, or WinRM for SSH-less Windows) that isn't already running it?")) return;
   btn.disabled=true; const label=btn.innerHTML; btn.textContent="⏳ Deploying…";
   const subnet=($("#discoSubnet").value||"").trim();
   try {
     const r=await apiBody("/api/discovery/deploy-all",Object.assign({subnet},deployOpts()));
-    const body=$("#discoBody"); const box=document.createElement("div");
-    box.style.cssText="margin:0 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2,#140f30)";
-    if (r.ok===false){ box.innerHTML=`<div style="color:var(--critical)">${esc(r.error||'deploy-all failed')}</div>`; }
+    if (r.ok===false){ alert("Deploy-all failed: "+(r.error||'')); }
     else {
-      const lines=(r.results||[]).map(x=>`<div style="font-size:12px" class="${x.ok?'':'muted'}">${x.ok?'✓':'✗'} <span class="mono">${esc(x.host)}</span> <span class="badge" style="font-size:8px;background:var(--muted)">${esc((x.method||'ssh').toUpperCase())}</span> — ${x.ok?('agent v'+esc(x.agentVersion||'?')):esc(x.error||'failed')}</div>`).join("");
-      const skip=(r.skipped||[]).length?`<div class="muted" style="font-size:11px;margin-top:6px">Skipped (manual install): ${(r.skipped||[]).map(s=>esc(s.ip)).join(', ')}</div>`:"";
-      box.innerHTML=`<div style="font-weight:600;margin-bottom:6px">⬇ Pushed agent to ${r.succeeded}/${r.attempted} eligible host(s)</div>${lines}${skip}`;
+      const lines=(r.results||[]).map(x=>`${x.ok?'✓':'✗'} ${x.host} (${(x.method||'ssh').toUpperCase()}) — ${x.ok?('v'+(x.agentVersion||'?')):(x.error||'failed')}`).join("\n");
+      const skip=(r.skipped||[]).length?`\n\nSkipped (manual install): ${(r.skipped||[]).map(s=>s.ip).join(', ')}`:"";
+      alert(`Pushed agent to ${r.succeeded}/${r.attempted} host(s):\n\n${lines}${skip}`);
     }
-    body.insertBefore(box,body.firstChild);
   } catch(e){ alert("Deploy-all error: "+e.message); }
-  finally { btn.disabled=false; btn.innerHTML=label; await scanLan(); }
+  finally { btn.disabled=false; btn.innerHTML=label; await showDevices(); await scanLan(); }
 }
 async function toggleConns(ip,btn){
   const box = $("#conns-"+ip.replace(/\./g,'-'));
@@ -2544,8 +2634,18 @@ $("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(
 $("#discoScan").onclick = scanLan;
 $("#discoDeployAll").onclick = deployAll;
 $("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });
-$("#livePortBtn").onclick = showLivePorts;
-$("#livePortHost").addEventListener("keydown", e=>{ if(e.key==="Enter") showLivePorts(); });
+$("#deploySettingsBtn").onclick = ()=>{ const p=$("#deployPanel"); p.style.display = p.style.display==="none"?"block":"none"; };
+$("#evtToggle").onclick = async ()=>{
+  const p=$("#evtPanel");
+  if(p.style.display!=="none"){ p.style.display="none"; return; }
+  p.style.display="block"; p.innerHTML='<div class="empty"><span class="spin"></span> loading events…</div>';
+  try{
+    const ev=await api("/api/agent/events?limit=40");
+    p.innerHTML = (ev.events&&ev.events.length)
+      ? '<div class="dv-grp">🔔 Live host events — all devices</div>'+ev.events.map(e=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><span class="muted">${fmt(e.time)}</span> · <b>${esc(e.type)}</b> · <span class="mono">${esc(e.host)}</span> · <span class="mono" style="color:var(--cyan,#46d6ff)">${esc(e.process||'?')}</span>${e.remoteIp?` → <span class="mono">${esc(e.remoteIp)}:${e.remotePort||''}</span>`:''}</div>`).join("")
+      : '<div class="empty">No events yet.</div>';
+  }catch(e){ p.innerHTML='<pre style="color:var(--critical)">'+esc(e.message)+'</pre>'; }
+};
 $("#navWatch").onclick = showWatch;
 $("#watchHours").onchange = showWatch;
 $("#watchAdd").onclick = addWatchFromForm;
