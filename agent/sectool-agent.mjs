@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.6.1";
+const AGENT_VERSION = "1.7.0";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -379,6 +379,24 @@ function isProtectedPath(p) {
   if (process.execPath && lp === process.execPath.replace(/\\/g, "/").toLowerCase()) return true; // our own node
   const guarded = ["c:/windows/", "/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/boot/", "/etc/", "/system/", "/library/apple/"];
   return guarded.some((g) => lp.startsWith(g));
+}
+
+// --- Audit trail: a durable record of every destructive action the agent takes
+// (kill, delete, service disable/enable, autorun removal, isolate). Persisted next
+// to the agent so it survives restarts and gives a "what did we turn off" history. ---
+const AUDIT_PATH = join(SELFDIR, "audit.json");
+const AUDIT_MAX = 1000;
+let auditEntries = [];
+try {
+  let raw = readFileSync(AUDIT_PATH, "utf8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  const j = JSON.parse(raw);
+  if (Array.isArray(j)) auditEntries = j;
+} catch { /* fresh */ }
+function audit(entry) {
+  auditEntries.push({ ts: Date.now(), ...entry });
+  if (auditEntries.length > AUDIT_MAX) auditEntries = auditEntries.slice(-AUDIT_MAX);
+  try { writeFileSync(AUDIT_PATH, JSON.stringify(auditEntries)); } catch { /* best-effort */ }
 }
 
 // Whether the agent process holds admin/root — deletes in Program Files, HKLM
@@ -795,6 +813,12 @@ const server = http.createServer((req, res) => {
           }
           const svc = (t._services || []).map((s) => s.name + (s.disabled ? "(disabled)" : s.stopped ? "(stopped)" : "(?)")).join(",");
           console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.forced ? "(forced)" : ""}${svc ? " svc=" + svc : ""}${r.deleteError ? " delErr=" + r.deleteError : ""} elevated=${ELEVATED} from=${req.socket.remoteAddress}`);
+          audit({
+            action: deleteFile ? "delete" : "kill", pid: t.procid, process: t.pname, path: t.ppath, signal,
+            killed: r.killed, deleted: !!r.deleted, forced: !!r.forced, error: r.error || r.deleteError,
+            services: (t._services || []).map((s) => ({ name: s.name, display: s.display, disabled: !!s.disabled, stopped: !!s.stopped, error: s.stopError || s.disableError })),
+            from: req.socket.remoteAddress,
+          });
           results.push(r);
         }
         json(200, { ok: true, host: os.hostname(), signal, deleteFile, elevated: ELEVATED, results });
@@ -814,6 +838,7 @@ const server = http.createServer((req, res) => {
         const ok2 = release ? await applyRelease() : await applyIsolate(mgmtIp);
         if (ok2) isolated = !release;
         console.log(`[ISOLATE] ${new Date().toISOString()} ${release ? "release" : "isolate"} mgmt=${mgmtIp} -> ${ok2 ? "ok" : "failed"}`);
+        audit({ action: release ? "release" : "isolate", ok: ok2, mgmtIp, from: req.socket.remoteAddress });
         return json(ok2 ? 200 : 500, { ok: ok2, host: os.hostname(), isolated, mgmtIp });
       } catch (err) {
         return json(500, { ok: false, error: err.message });
@@ -851,7 +876,34 @@ const server = http.createServer((req, res) => {
       if (!body || !body.type || !body.name) return json(400, { error: "provide {type,name,location,command}" });
       const r = await removeAutorun(body);
       console.log(`[AUTORUN-RM] ${new Date().toISOString()} type=${body.type} name=${body.name} -> ${r.ok ? "removed" : "FAIL: " + r.error}`);
+      audit({ action: "autorun-remove", autorunType: body.type, name: body.name, location: body.location, ok: r.ok, error: r.error, from: req.socket.remoteAddress });
       return json(r.ok ? 200 : 500, { ...r, host: os.hostname() });
+    });
+    return;
+  }
+  // --- audit trail: durable record of destructive actions taken on this host ---
+  if (req.method === "GET" && url.pathname === "/audit") {
+    const limit = Math.min(Number(url.searchParams.get("limit")) || 200, AUDIT_MAX);
+    return json(200, { host: os.hostname(), count: auditEntries.length, entries: auditEntries.slice(-limit).reverse() });
+  }
+  // --- service control: re-enable/disable a service (recovery, same gate as kill) ---
+  if (req.method === "POST" && url.pathname === "/service") {
+    if (!ALLOW_KILL) return json(403, { error: "service control is disabled (needs AGENT_ALLOW_KILL=true)" });
+    if (!TOKEN) return json(403, { error: "service control requires a token" });
+    if (os.platform() !== "win32") return json(400, { error: "service control is Windows-only" });
+    readBody(req, async (body) => {
+      const name = String((body && body.name) || "").replace(/[^\w.\- ]/g, "").slice(0, 128);
+      const action = body && body.action === "disable" ? "disable" : "enable";
+      if (!name) return json(400, { error: "missing service name" });
+      const n = name.replace(/'/g, "''");
+      const ps = action === "enable"
+        ? `Set-Service -Name '${n}' -StartupType Automatic; Start-Service -Name '${n}' -EA SilentlyContinue; 'OK'`
+        : `Stop-Service -Name '${n}' -Force -EA SilentlyContinue; Set-Service -Name '${n}' -StartupType Disabled; 'OK'`;
+      const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; try{ ${ps} }catch{ "ERR:$($_.Exception.Message)" }`], 15000);
+      const ok = /\bOK\b/.test(out);
+      const err = ok ? undefined : ((out.match(/ERR:(.*)/) || [, "failed"])[1].trim() + (!ELEVATED ? " (agent not elevated)" : ""));
+      audit({ action: action === "enable" ? "service-enable" : "service-disable", service: name, ok, error: err, from: req.socket.remoteAddress });
+      return json(ok ? 200 : 500, { ok, host: os.hostname(), service: name, serviceAction: action, error: err });
     });
     return;
   }

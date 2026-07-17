@@ -131,6 +131,14 @@ export async function agentProcess(cfg: Config, host: string, pid: number): Prom
   return call(cfg, host, `/process?pid=${pid}`, 25000);
 }
 
+export async function agentAudit(cfg: Config, host: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return call(cfg, host, "/audit?limit=200", 8000);
+}
+
+export async function agentServiceControl(cfg: Config, host: string, name: string, action: "enable" | "disable"): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return post(cfg, host, "/service", { name, action });
+}
+
 export async function agentAutoruns(cfg: Config, host: string): Promise<{ ok: boolean; host?: string; autoruns?: unknown[]; error?: string }> {
   const r = await call(cfg, host, "/autoruns", 12000);
   if (!r.ok) return { ok: false, error: r.error };

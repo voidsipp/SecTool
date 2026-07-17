@@ -1101,7 +1101,40 @@ const DEV_TABS = [
   { key:'egress',      label:'Egress',      kinds:['agent'],               path:i=>"/api/agents/egress?host="+encodeURIComponent(i),     render:renderEgress },
   { key:'dns',         label:'DNS',         kinds:['agent'],               path:i=>"/api/agents/dns?host="+encodeURIComponent(i),        render:renderDns },
   { key:'autoruns',    label:'Autoruns',    kinds:['agent'],               path:i=>"/api/agents/autoruns?host="+encodeURIComponent(i),   render:renderAutoruns },
+  { key:'audit',       label:'Audit',       kinds:['agent'],               path:i=>"/api/agents/audit?host="+encodeURIComponent(i),      render:renderAudit },
 ];
+function renderAudit(j, ctx){
+  const entries=j.entries||[];
+  if(!entries.length) return '<div class="empty" style="padding:16px 0">No destructive actions recorded on this host yet.</div>';
+  const ICON={kill:'🛑',delete:'🗑',isolate:'🔒',release:'🔓','autorun-remove':'🧬','service-disable':'⏹','service-enable':'▶'};
+  const canKill=!!(ctx&&ctx.canKill);
+  const row=e=>{
+    let what='';
+    if(e.action==='kill'||e.action==='delete') what=`${esc(e.process||'?')} <span class="muted">#${e.pid||'?'}</span>${e.path?`<br><span class="muted" style="font-size:10px">${esc(e.path)}</span>`:''}`;
+    else if(e.action==='autorun-remove') what=`${esc(e.name||'')} <span class="muted">(${esc(e.autorunType||'')})</span>`;
+    else if(e.action==='isolate'||e.action==='release') what='host '+esc(e.action);
+    else if(e.action&&e.action.indexOf('service')===0) what='service '+esc(e.service||'');
+    const svc=(e.services||[]).filter(s=>s.disabled).map(s=>`<span style="display:inline-flex;gap:4px;align-items:center;margin:1px 3px 1px 0"><span class="dv-chip">⏹ ${esc(s.name)}</span>${canKill?`<button class="svcenable dv-act" data-ip="${esc(ctx.ip)}" data-name="${esc(s.name)}" style="padding:0 6px;font-size:10px" title="re-enable + start this service">▶ re-enable</button>`:''}</span>`).join('');
+    const ok=e.ok!==false && !e.error;
+    return `<tr>
+      <td class="muted" style="white-space:nowrap">${fmt(e.ts)}</td>
+      <td>${ICON[e.action]||''} ${esc(e.action||'')}</td>
+      <td class="mono" style="color:var(--cyan,#46d6ff)">${what}${e.deleted?' <span class="dv-chip" style="color:var(--critical,#ff5c7a)">deleted</span>':''}${e.forced?' <span class="dv-chip">forced</span>':''}</td>
+      <td>${svc}</td>
+      <td>${ok?'<span style="color:var(--good,#3ad29f)">✓</span>':`<span style="color:var(--critical,#ff5c7a)" title="${esc(e.error||'')}">✗</span>`}</td></tr>`;
+  };
+  return `<div class="muted" style="margin-bottom:6px">${entries.length} recorded action(s) · newest first · persisted on the host</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--muted)"><th>Time</th><th>Action</th><th>Target</th><th>Services disabled</th><th></th></tr></thead><tbody>${entries.map(row).join('')}</tbody></table>`;
+}
+async function enableService(ip, name, btn){
+  if(!confirm(`Re-enable and start service "${name}" on ${ip}?\n\nSets startup to Automatic and starts it.`)) return;
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='…';
+  try{
+    const j=await api('/api/agents/service',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip,name,action:'enable'})});
+    if(j.ok){ btn.textContent='✓ re-enabled'; btn.style.color='var(--good,#3ad29f)'; btn.style.borderColor='var(--good,#3ad29f)'; }
+    else { alert('Re-enable failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; }
+  }catch(e){ alert('Failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
+}
 
 async function showDevices(){
   ["alertsView","blockedView","hostsView","askView","warView","watchView","suppView","trendsView","campaignsView","assetsView","reportView","intelView","searchView"].forEach(v=>{const el=$("#"+v); if(el) el.style.display="none";});
@@ -1231,6 +1264,7 @@ function wireTabBody(body,d){
   body.querySelectorAll('.hashchk').forEach(s=>s.onclick=()=>checkHash(s.dataset.h,s));
   body.querySelectorAll('.autorm').forEach(b=>b.onclick=()=>removeAutorun(b.dataset.ip,JSON.parse(b.dataset.a),b));
   body.querySelectorAll('.procdetail').forEach(s=>s.onclick=()=>{ if(s.dataset.pid) openProcess(s.dataset.ip, Number(s.dataset.pid), s.dataset.name); });
+  body.querySelectorAll('.svcenable').forEach(b=>b.onclick=()=>enableService(b.dataset.ip, b.dataset.name, b));
   const flt=body.querySelector('.devfilter');
   if(flt) flt.oninput=()=>{ const q=flt.value.toLowerCase(); body.querySelectorAll('tbody tr').forEach(tr=>{ tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none'; }); };
 }

@@ -272,7 +272,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns, agentProcess } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns, agentProcess, agentAudit, agentServiceControl } from "../agent/agentClient.ts";
 import { recentAgentEvents } from "../agent/events.ts";
 import { recordSeen, knownAgents } from "../agent/fleet.ts";
 import { lookupHash } from "../investigate/hashrep.ts";
@@ -791,6 +791,23 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       // --- process inspector: full detail for one PID on a host ---
       if (method === "GET" && path === "/api/agents/process") {
         const r = await agentProcess(cfg, url.searchParams.get("host") ?? "", Number(url.searchParams.get("pid")) || 0);
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- audit trail: destructive actions taken on a host ---
+      if (method === "GET" && path === "/api/agents/audit") {
+        const r = await agentAudit(cfg, url.searchParams.get("host") ?? "");
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- service control: re-enable / disable a service (recovery) ---
+      if (method === "POST" && path === "/api/agents/service") {
+        if (!cfg.agent.allowKill) return send(res, 403, { ok: false, error: "Service control is disabled in SecTool config (set AGENT_ALLOW_KILL=true)." });
+        const body = await readJson(req);
+        const host = String(body["host"] ?? "");
+        const name = String(body["name"] ?? "");
+        const action = body["action"] === "disable" ? "disable" : "enable";
+        if (isIP(host) === 0 || !name) return send(res, 400, { ok: false, error: "host and service name required." });
+        log.warn(`[agent-service] host=${host} service=${name} action=${action}`);
+        const r = await agentServiceControl(cfg, host, name, action);
         return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
       }
 

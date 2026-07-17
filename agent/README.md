@@ -166,6 +166,12 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+), and (v1.3.0+) `sha256` of the binary (background-hashed,
   for reputation lookups), `cmdline`, `ppid`, and `parent` process name.
+- **Audit trail (v1.7.0+):** every destructive action (kill, delete, service
+  disable/enable, autorun removal, isolate/release) is appended to `audit.json` next
+  to the agent — durable, survives restarts. `GET /audit` returns it; the Devices
+  page has an **Audit** tab showing what was done on each host, including which
+  services were disabled, with a **▶ re-enable** button (via `POST /service`,
+  `{name, action:"enable"|"disable"}`) to restore a service you disabled by mistake.
 - **Service neutralize (v1.6.1+):** when `deleteFile` is set, the agent first finds
   any Windows service backed by the target PID (or whose image is the target binary),
   **stops and disables** it, *then* kills + deletes — so a service watchdog can't
