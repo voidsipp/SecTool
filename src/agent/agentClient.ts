@@ -135,6 +135,10 @@ export async function agentAudit(cfg: Config, host: string): Promise<{ ok: boole
   return call(cfg, host, "/audit?limit=200", 8000);
 }
 
+export async function agentUpdateCheck(cfg: Config, host: string): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  return post(cfg, host, "/update-check", {}, 8000);
+}
+
 export async function agentServiceControl(cfg: Config, host: string, name: string, action: "enable" | "disable"): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   return post(cfg, host, "/service", { name, action });
 }

@@ -272,7 +272,7 @@ import { askAnalyst } from "../analyst/analyst.ts";
 import { runAgent } from "../analyst/agent.ts";
 import { conversationStore } from "../store/conversation.ts";
 import { buildGeoMap, buildCountryFlows } from "../investigate/geomap.ts";
-import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns, agentProcess, agentAudit, agentServiceControl } from "../agent/agentClient.ts";
+import { agentLookup, agentHealth, agentConnections, agentKillProcess, agentSetConfig, agentAutoruns, agentIsolate, agentRemoveAutorun, agentTriage, agentDns, agentProcess, agentAudit, agentServiceControl, agentUpdateCheck } from "../agent/agentClient.ts";
 import { recentAgentEvents } from "../agent/events.ts";
 import { recordSeen, knownAgents } from "../agent/fleet.ts";
 import { lookupHash } from "../investigate/hashrep.ts";
@@ -430,6 +430,14 @@ import { searchAlerts, hitsToCsv, MAX_EXPORT, type SearchQuery, type SortMode } 
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const INDEX_HTML = join(HERE, "public", "index.html");
+const AGENT_SRC_FILE = fileURLToPath(new URL("../../agent/sectool-agent.mjs", import.meta.url));
+function latestAgentVersion(): string {
+  try {
+    return (readFileSync(AGENT_SRC_FILE, "utf8").match(/AGENT_VERSION\s*=\s*["']([\d.]+)["']/) ?? [])[1] ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export interface WebServer {
   close: () => Promise<void>;
@@ -797,6 +805,27 @@ export async function startWebServer(cfg: Config): Promise<WebServer> {
       if (method === "GET" && path === "/api/agents/audit") {
         const r = await agentAudit(cfg, url.searchParams.get("host") ?? "");
         return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- on-demand update: trigger one agent to check for a new build now ---
+      if (method === "POST" && path === "/api/agents/update-check") {
+        const body = await readJson(req);
+        const r = await agentUpdateCheck(cfg, String(body["host"] ?? ""));
+        return send(res, r.ok ? 200 : 502, r.ok ? (r.data as object) : { ok: false, error: r.error });
+      }
+      // --- on-demand update: fan out to every online agent ---
+      if (method === "POST" && path === "/api/agents/update-all") {
+        const isPriv = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+        const targets = knownAgents().filter((k) => k.online && isPriv(k.ip));
+        const latest = latestAgentVersion();
+        log.warn(`[agent-update-all] triggering ${targets.length} agent(s); latest=v${latest}`);
+        const results = await Promise.all(
+          targets.map(async (k) => {
+            const r = await agentUpdateCheck(cfg, k.ip);
+            const d = (r.data as Record<string, unknown>) ?? {};
+            return { ip: k.ip, host: k.host, ok: r.ok, was: d["version"] ?? k.version, latest, error: r.error };
+          }),
+        );
+        return send(res, 200, { latest, triggered: results.filter((x) => x.ok).length, total: targets.length, results });
       }
       // --- service control: re-enable / disable a service (recovery) ---
       if (method === "POST" && path === "/api/agents/service") {

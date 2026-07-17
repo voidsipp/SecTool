@@ -333,6 +333,7 @@
     <span style="flex:1"></span>
     <input id="devProbe" class="dv-input" placeholder="add host to probe…" style="width:170px" />
     <button id="devRefresh" class="dv-act">↻ Rescan</button>
+    <button id="devUpdateAll" class="dv-act" title="Force every online agent to check for a new build now">⬆ Update all</button>
     <button id="discoScan" class="dv-act">🔍 Scan LAN</button>
     <button id="evtToggle" class="dv-act">🔔 Events</button>
     <button id="deploySettingsBtn" class="dv-act" title="Agent push-deploy credentials">⚙ Deploy</button>
@@ -1227,6 +1228,7 @@ function renderDetail(d){
     if(DEV_STATE.killAllowed&&d.auth) actions+=`<button class="killtoggle dv-act" data-ip="${esc(d.ip)}" data-on="${d.kill?1:''}" ${d.killPinned?'disabled title="pinned by AGENT_ALLOW_KILL env var"':''} style="border-color:${d.kill?'var(--critical,#ff5c7a)':'var(--border)'};color:${d.kill?'var(--critical,#ff5c7a)':'var(--text)'}">🛑 Kill: ${d.kill?'ON':'off'}${d.killPinned?' 🔒':''}</button>`;
     if(d.isolate) actions+=`<button class="isobtn dv-act" data-ip="${esc(d.ip)}" data-rel="${d.isolated?1:''}" style="border-color:${d.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'};color:${d.isolated?'var(--good,#3ad29f)':'var(--critical,#ff5c7a)'}">${d.isolated?'🔓 Release':'🔒 Isolate'}</button>`;
     actions+=`<button class="triagebtn dv-act" data-ip="${esc(d.ip)}" data-host="${esc(d.hostname||d.ip)}">🧾 Triage</button>`;
+    actions+=`<button class="updbtn dv-act" data-ip="${esc(d.ip)}" title="check for a new agent build now">⬆ Update</button>`;
   } else if(d.kind==='discovered'&&d.deploy&&d.deploy.eligible&&DEV_STATE.deployEnabled){
     actions+=`<button class="depbtn dv-act" data-ip="${esc(d.ip)}" data-method="${esc(d.deploy.method||'ssh')}" style="border-color:var(--accent);color:var(--accent)">⬇ Push agent</button>`;
   }
@@ -1242,6 +1244,7 @@ function renderDetail(d){
   $("#devDetail").querySelectorAll(".killtoggle").forEach(b=>b.onclick=()=>toggleKill(b.dataset.ip,!!b.dataset.on,b));
   $("#devDetail").querySelectorAll(".isobtn").forEach(b=>b.onclick=()=>isolateHost(b.dataset.ip,!!b.dataset.rel,b));
   $("#devDetail").querySelectorAll(".triagebtn").forEach(b=>b.onclick=()=>downloadTriage(b.dataset.ip,b.dataset.host,b));
+  $("#devDetail").querySelectorAll(".updbtn").forEach(b=>b.onclick=()=>updateOneAgent(b.dataset.ip,b));
   $("#devDetail").querySelectorAll(".depbtn").forEach(b=>b.onclick=()=>deployOne(b.dataset.ip,b));
   $("#devDetail").querySelectorAll(".dv-tab").forEach(b=>b.onclick=()=>{ DEV_STATE.tab=b.dataset.tab; renderDetail(d); });
   loadDevTab(d);
@@ -1537,6 +1540,31 @@ async function downloadTriage(ip, host, btn){
     a.href=u; a.download=`triage-${(host||ip).replace(/[^\w.-]/g,'_')}-${Date.now()}.json`; a.click(); URL.revokeObjectURL(u);
     btn.textContent='✓ downloaded'; setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},2000);
   }catch(e){ alert('Triage failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
+}
+async function updateOneAgent(ip, btn){
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='⬆ checking…';
+  try{
+    const j=await api('/api/agents/update-check',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip})});
+    if(j.ok===false){ alert('Update check failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; return; }
+    if(j.enabled===false){ btn.textContent='updates off'; setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},2000); return; }
+    btn.textContent='⬆ checking…';
+    // the agent relaunches if a newer build exists; re-poll after a few seconds
+    setTimeout(async ()=>{ await showDevices(); selectDevice(ip); }, 6000);
+  }catch(e){ alert('Failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
+}
+async function updateAllAgents(){
+  const btn=$("#devUpdateAll"); const orig=btn.textContent; btn.disabled=true; btn.textContent='⬆ updating…';
+  try{
+    const j=await api('/api/agents/update-all',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+    const behind=(j.results||[]).filter(r=>r.was&&j.latest&&r.was!==j.latest);
+    const failed=(j.results||[]).filter(r=>!r.ok);
+    let msg=`Triggered an update check on ${j.triggered}/${j.total} online agent(s). Latest build: v${j.latest||'?'}.`;
+    if(behind.length) msg+='\n\nBehind (will update + relaunch):\n'+behind.map(r=>`• ${r.host||r.ip} v${r.was} → v${j.latest}`).join('\n');
+    if(failed.length) msg+='\n\nUnreachable:\n'+failed.map(r=>`• ${r.host||r.ip}: ${r.error||'failed'}`).join('\n');
+    alert(msg);
+    setTimeout(()=>showDevices(), 7000); // agents that updated relaunch; refresh versions
+  }catch(e){ alert('Update-all failed: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent=orig; }
 }
 async function isolateHost(ip, release, btn){
   const msg = release
@@ -2692,6 +2720,7 @@ $("#navDevices").onclick = showDevices;
 $("#devRefresh").onclick = showDevices;
 $("#backAlerts8").onclick = showAlerts;
 $("#devProbe").addEventListener("keydown", e=>{ if(e.key==="Enter") showDevices(); });
+$("#devUpdateAll").onclick = updateAllAgents;
 $("#discoScan").onclick = scanLan;
 $("#discoDeployAll").onclick = deployAll;
 $("#discoSubnet").addEventListener("keydown", e=>{ if(e.key==="Enter") scanLan(); });

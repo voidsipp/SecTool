@@ -32,7 +32,9 @@ all your devices is just updating `agent/sectool-agent.mjs` on the SecTool host.
 It also runs a recurring **update-check heartbeat** (every 1h by default, see
 `AGENT_UPDATE_CHECK_MIN`) so long-lived agents pick up new builds without waiting
 for a restart. A *failed* check retries within ~5 minutes rather than waiting the
-full interval. The last heartbeat's outcome is reported under `update` in
+full interval. You can also force a check **on demand** — `POST /update-check`, or
+from the dashboard the per-device **⬆ Update** button and the toolbar **⬆ Update
+all** (fans out to every online agent) — instead of waiting for the heartbeat. The last heartbeat's outcome is reported under `update` in
 `GET /health` — `result` (`current`/`available`/`error`/…), `latestSeen`,
 `upToDate`, `ageMs` since the last check, and `checks` performed — so the SecTool
 dashboard can flag agents that are stale or failing their checks.

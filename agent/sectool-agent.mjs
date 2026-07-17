@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.7.0";
+const AGENT_VERSION = "1.7.1";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -879,6 +879,15 @@ const server = http.createServer((req, res) => {
       audit({ action: "autorun-remove", autorunType: body.type, name: body.name, location: body.location, ok: r.ok, error: r.error, from: req.socket.remoteAddress });
       return json(r.ok ? 200 : 500, { ...r, host: os.hostname() });
     });
+    return;
+  }
+  // --- on-demand update check: trigger a self-update now (relaunches if newer) ---
+  if (req.method === "POST" && url.pathname === "/update-check") {
+    if (!updateState.enabled) return json(200, { ok: true, version: AGENT_VERSION, enabled: false, note: "self-update is disabled on this agent" });
+    // Respond first (with what we currently know), then check async — a newer build
+    // will download + relaunch this process, so we can't reply after that.
+    json(200, { ok: true, version: AGENT_VERSION, latestSeen: updateState.latestSeen, checking: true });
+    setTimeout(() => selfUpdate("manual"), 150);
     return;
   }
   // --- audit trail: durable record of destructive actions taken on this host ---
