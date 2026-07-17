@@ -22,7 +22,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const AGENT_VERSION = "1.6.0";
+const AGENT_VERSION = "1.6.1";
 
 // Config resolves from env first, then agent.config.json next to this script
 // (written by the installer), so a scheduled task/service needs no env wiring.
@@ -431,6 +431,28 @@ async function forceDelete(path) {
 }
 function existsPath(p) { try { statSync(p); return true; } catch { return false; } }
 
+// Find Windows services backed by a PID or whose image is the target binary, then
+// stop + disable them so the process can't be respawned by the service manager
+// while we delete it. Returns [{name, stopped?, disabled?, stopError?, disableError?}].
+async function stopAndDisableServices(pid, exePath) {
+  if (os.platform() !== "win32") return [];
+  const exe = (exePath || "").replace(/'/g, "''");
+  const ps = [
+    "$ErrorActionPreference='SilentlyContinue';",
+    `$tp=${Number(pid) || 0}; $exe='${exe}';`,
+    "$svcs=Get-CimInstance Win32_Service | Where-Object { ($tp -gt 0 -and $_.ProcessId -eq $tp) -or ($exe -and $_.PathName -and $_.PathName.ToLower().Contains($exe.ToLower())) };",
+    "$out=@();",
+    "foreach($s in $svcs){ $r=[ordered]@{name=$s.Name;display=$s.DisplayName}; try{ Stop-Service -Name $s.Name -Force -EA Stop; $r.stopped=$true }catch{ $r.stopError=$_.Exception.Message }; try{ Set-Service -Name $s.Name -StartupType Disabled -EA Stop; $r.disabled=$true }catch{ $r.disableError=$_.Exception.Message }; $out+=[pscustomobject]$r }",
+    "$out | ConvertTo-Json -Compress",
+  ].join("");
+  try {
+    const out = (await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 25000)).trim();
+    if (!out) return [];
+    const j = JSON.parse(out);
+    return Array.isArray(j) ? j : [j];
+  } catch { return []; }
+}
+
 // --- Feature #4: network isolation / quarantine ---
 // Block all traffic except loopback, the agent's own port, and the SecTool
 // management host, so a compromised device is cut off but still controllable.
@@ -742,22 +764,23 @@ const server = http.createServer((req, res) => {
         return json(400, { error: "provide a pid or a process name" });
       }
 
-      // Kill first, then (optionally) delete each target's binary after a short
-      // delay so the OS releases the executable lock.
-      for (const t of targets) {
-        try {
-          process.kill(t.procid, signal);
-          t._killed = true;
-        } catch (err) {
-          t._killErr = err.message;
+      // Delete = "neutralize permanently": stop + disable any backing service FIRST
+      // (so the service manager can't respawn it and re-lock the binary), then kill,
+      // settle, then delete. Plain kill just terminates the process.
+      (async () => {
+        if (deleteFile) {
+          for (const t of targets) t._services = await stopAndDisableServices(t.procid, t.ppath);
         }
-      }
-      const finish = async () => {
+        for (const t of targets) {
+          try { process.kill(t.procid, signal); t._killed = true; }
+          catch (err) { t._killErr = err.message; }
+        }
+        if (deleteFile) await new Promise((r) => setTimeout(r, 700)); // let handles release
         const seenPaths = new Set();
         const results = [];
         for (const t of targets) {
           const r = { pid: t.procid, process: t.pname, killed: !!t._killed };
-          // ESRCH means the process was already gone — not a real failure.
+          if (t._services && t._services.length) r.services = t._services;
           if (t._killErr && t._killErr.includes("ESRCH")) { r.killed = true; r.alreadyGone = true; }
           else if (t._killErr) r.error = t._killErr;
           if (deleteFile && t.ppath && !seenPaths.has(t.ppath)) {
@@ -770,13 +793,12 @@ const server = http.createServer((req, res) => {
               else r.deleteError = dr.deleteError;
             }
           }
-          console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.forced ? "(forced)" : ""}${r.deleteError ? " delErr=" + r.deleteError : ""} elevated=${ELEVATED} from=${req.socket.remoteAddress}`);
+          const svc = (t._services || []).map((s) => s.name + (s.disabled ? "(disabled)" : s.stopped ? "(stopped)" : "(?)")).join(",");
+          console.log(`[KILL] ${new Date().toISOString()} pid=${t.procid} name=${t.pname || "?"} signal=${signal} killed=${r.killed} deleted=${r.deleted || false}${r.forced ? "(forced)" : ""}${svc ? " svc=" + svc : ""}${r.deleteError ? " delErr=" + r.deleteError : ""} elevated=${ELEVATED} from=${req.socket.remoteAddress}`);
           results.push(r);
         }
         json(200, { ok: true, host: os.hostname(), signal, deleteFile, elevated: ELEVATED, results });
-      };
-      if (deleteFile) setTimeout(finish, 600);
-      else finish();
+      })();
     });
     return;
   }

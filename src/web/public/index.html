@@ -1436,11 +1436,15 @@ async function agentProcAction(ip, target, del, btn){
     const j = await api('/api/agents/kill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({host:ip,pid:target.pid,process:target.process,signal,deleteFile:del})});
     if(!j.ok){ alert('Failed: '+(j.error||'unknown')); btn.disabled=false; btn.textContent=orig; return; }
     const rs=j.results||[]; const killed=rs.filter(x=>x.killed).length, deleted=rs.filter(x=>x.deleted).length;
+    const svcs=rs.flatMap(x=>x.services||[]);
     if(!rs.length){ btn.textContent='no live target'; btn.disabled=false; return; }
     btn.textContent = del?`✓ ${killed}k / ${deleted}d`:`✓ ${killed} killed`;
     btn.style.color='var(--good,#3ad29f)'; btn.style.borderColor='var(--good,#3ad29f)';
+    if(svcs.length){ const dis=svcs.filter(s=>s.disabled).map(s=>s.name); if(dis.length) btn.title='Also disabled service(s): '+dis.join(', '); }
     const issues=rs.filter(x=>x.error||x.deleteError);
-    if(issues.length) alert('Completed with issues:\n'+issues.map(x=>`pid ${x.pid} (${x.process||'?'}): ${x.error||'killed'}${x.deleteError?' | delete: '+x.deleteError:''}`).join('\n'));
+    const svcNote=svcs.length?('\n\nBacking service(s) handled: '+svcs.map(s=>`${s.name} ${s.disabled?'disabled':s.stopped?'stopped':(s.stopError||s.disableError||'?')}`).join('; ')):'';
+    if(issues.length) alert('Completed with issues:\n'+issues.map(x=>`pid ${x.pid} (${x.process||'?'}): ${x.error||'killed'}${x.deleteError?' | delete: '+x.deleteError:''}`).join('\n')+svcNote);
+    else if(svcs.length) alert(`✓ ${del?'Killed + deleted':'Killed'}.`+svcNote);
   }catch(e){ alert('Failed: '+e.message); btn.disabled=false; btn.textContent=orig; }
 }
 const DEV_TOOLS = {

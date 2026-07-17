@@ -166,6 +166,11 @@ at `http://<device-LAN-IP>:7879`.
 - `GET /connections` — current connection→process snapshot. Each record includes
   `localAddr` (v1.0.2+), and (v1.3.0+) `sha256` of the binary (background-hashed,
   for reputation lookups), `cmdline`, `ppid`, and `parent` process name.
+- **Service neutralize (v1.6.1+):** when `deleteFile` is set, the agent first finds
+  any Windows service backed by the target PID (or whose image is the target binary),
+  **stops and disables** it, *then* kills + deletes — so a service watchdog can't
+  respawn the process and re-lock the binary mid-delete. The disabled service(s) are
+  reported back in each result's `services`. Plain kill (no delete) doesn't touch services.
 - **Elevation (v1.6.0+):** deleting binaries under `C:\Program Files`, removing
   **HKLM** autoruns, and killing service/protected processes require the agent to
   run as **Administrator/SYSTEM**. The installer registers the Scheduled Task with
