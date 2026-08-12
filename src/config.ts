@@ -368,7 +368,10 @@ export function loadConfig(): Config {
     honeypot: {
       enabled: bool("HONEYPOT_ENABLED", false),
       host: str("HONEYPOT_HOST", "0.0.0.0"),
-      ports: (optStr("HONEYPOT_PORTS") ?? "23,2323,21,2222,3389,5900,1433,8081")
+      // Decoy ports must be ones NOTHING legitimate ever uses. 8081 is a common
+      // HTTP-alt/API port (e.g. Voidsuite's VOID_API_PORT), so it was removed —
+      // a decoy there collides with real local services and floods false hits.
+      ports: (optStr("HONEYPOT_PORTS") ?? "23,2323,21,2222,3389,5900,1433")
         .split(",")
         .map((s) => Number.parseInt(s.trim(), 10))
         .filter((n) => Number.isFinite(n) && n > 0 && n < 65536),

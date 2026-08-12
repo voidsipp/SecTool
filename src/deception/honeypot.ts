@@ -31,6 +31,11 @@ function normalizeIp(ip: string | undefined): string {
 function isPrivate(ip: string): boolean {
   return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.)/.test(ip);
 }
+// Same-host loopback: a local health-check or port probe, never lateral
+// movement. These must never raise a "compromised host" alert.
+function isLoopback(ip: string): boolean {
+  return ip === "::1" || /^127\./.test(ip);
+}
 
 export interface Honeypot {
   close: () => Promise<void>;
@@ -69,6 +74,12 @@ async function onHit(cfg: Config, notifier: DiscordNotifier, port: number, socke
     /* ignore */
   }
   setTimeout(() => socket.destroy(), 1500);
+
+  // Loopback (127.0.0.1/::1) is this host talking to itself — a local
+  // liveness/port check, not an intruder. Serve the banner but never alert;
+  // otherwise every local tool that probes a decoy port trips a false
+  // "compromised and scanning your network".
+  if (isLoopback(src)) return;
 
   // Dedupe per source for 5 minutes.
   const now = Date.now();
